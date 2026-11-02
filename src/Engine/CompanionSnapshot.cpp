@@ -2,6 +2,7 @@
  * Open X-Com Companion — read-only battlescape snapshot export (opt-in).
  */
 #include "CompanionSnapshot.h"
+#include "CompanionEventLog.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/BattleItem.h"
@@ -23,7 +24,7 @@ namespace OpenXcom
 namespace
 {
 
-const int SCHEMA_VERSION = 3;
+const int SCHEMA_VERSION = 4;
 const size_t MAX_INVENTORY_ENTRIES = 24;
 
 bool shouldIncludeUnit(const BattleUnit *unit)
@@ -294,8 +295,12 @@ void appendFriendlyActionCosts(YAML::Node &entry, SavedBattleGame *battle, Battl
 	costs["posture"] = posture;
 
 	YAML::Node hands;
-	appendHandActionCosts(hands["right"], battle, unit, unit->getItem("STR_RIGHT_HAND"));
-	appendHandActionCosts(hands["left"], battle, unit, unit->getItem("STR_LEFT_HAND"));
+	YAML::Node rightHand;
+	YAML::Node leftHand;
+	appendHandActionCosts(rightHand, battle, unit, unit->getItem("STR_RIGHT_HAND"));
+	appendHandActionCosts(leftHand, battle, unit, unit->getItem("STR_LEFT_HAND"));
+	hands["right"] = rightHand;
+	hands["left"] = leftHand;
 	costs["hands"] = hands;
 
 	entry["actionCosts"] = costs;
@@ -319,6 +324,52 @@ void appendUnit(YAML::Node &units, SavedBattleGame *battle, BattleUnit *unit)
 	}
 
 	units.push_back(entry);
+}
+
+std::string weaponFireActionTypeId(BattleActionType type)
+{
+	switch (type)
+	{
+	case BA_SNAPSHOT:
+		return "snap";
+	case BA_AIMEDSHOT:
+		return "aimed";
+	case BA_AUTOSHOT:
+		return "auto";
+	case BA_LAUNCH:
+		return "launch";
+	default:
+		return "snap";
+	}
+}
+
+void appendEventLog(YAML::Node &root, const CompanionEventLog &log)
+{
+	YAML::Node eventLog;
+	eventLog["sessionId"] = log.getSessionId();
+	eventLog["oldestSeq"] = log.getOldestSeq();
+	eventLog["latestSeq"] = log.getLatestSeq();
+	eventLog["droppedCount"] = log.getDroppedCount();
+
+	YAML::Node events(YAML::NodeType::Sequence);
+	for (std::vector<CompanionWeaponFireEvent>::const_iterator i = log.getEvents().begin(); i != log.getEvents().end(); ++i)
+	{
+		YAML::Node ev;
+		ev["seq"] = i->seq;
+		ev["type"] = "weapon_fired";
+		ev["turn"] = i->turn;
+		ev["actorUnitId"] = i->actorUnitId;
+		ev["weaponItemType"] = i->weaponItemType;
+		ev["actionType"] = weaponFireActionTypeId(i->actionType);
+		ev["target"] = i->target;
+		if (i->actionType == BA_AUTOSHOT)
+		{
+			ev["autoShotIndex"] = i->autoShotIndex;
+		}
+		events.push_back(ev);
+	}
+	eventLog["events"] = events;
+	root["eventLog"] = eventLog;
 }
 
 YAML::Node buildSnapshot(SavedBattleGame *battle)
@@ -347,6 +398,7 @@ YAML::Node buildSnapshot(SavedBattleGame *battle)
 		appendUnit(units, battle, unit);
 	}
 	root["units"] = units;
+	appendEventLog(root, battle->getCompanionEventLog());
 	return root;
 }
 

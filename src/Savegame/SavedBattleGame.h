@@ -22,6 +22,7 @@
 #include <yaml-cpp/yaml.h>
 #include "BattleUnit.h"
 #include "../Mod/AlienDeployment.h"
+#include "../Engine/CompanionEventLog.h"
 
 namespace OpenXcom
 {
@@ -79,6 +80,7 @@ private:
 	int _turnLimit, _cheatTurn;
 	ChronoTrigger _chronoTrigger;
 	bool _beforeGame;
+	CompanionEventLog _companionEventLog;
 	/// Selects a soldier.
 	BattleUnit *selectPlayerUnit(int dir, bool checkReselect = false, bool setReselect = false, bool checkInventory = false);
 public:
@@ -169,6 +171,9 @@ public:
 	UnitFaction getSide() const;
 	/// Gets the turn number.
 	int getTurn() const;
+	/// Companion observation log for the current battle session (not serialized to saves).
+	CompanionEventLog &getCompanionEventLog() { return _companionEventLog; }
+	const CompanionEventLog &getCompanionEventLog() const { return _companionEventLog; }
 	/// Ends the turn.
 	void endTurn();
 	/// Sets debug mode.

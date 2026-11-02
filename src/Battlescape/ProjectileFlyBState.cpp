@@ -26,6 +26,7 @@
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/SavedBattleGame.h"
+#include "../Engine/CompanionEventLog.h"
 #include "../Savegame/Tile.h"
 #include "../Mod/Mod.h"
 #include "../Engine/Sound.h"
@@ -434,6 +435,8 @@ bool ProjectileFlyBState::createNewProjectile()
 
 	if (_action.type != BA_THROW && _action.type != BA_LAUNCH)
 		_unit->getStatistics()->shotsFiredCounter++;
+
+	_parent->getSave()->getCompanionEventLog().tryRecordWeaponFired(_parent->getSave(), _action, _unit);
 
 	return true;
 }

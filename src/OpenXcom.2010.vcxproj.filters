@@ -380,6 +380,12 @@
     <ClCompile Include="Engine\CrossPlatform.cpp">
       <Filter>Engine</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\CompanionEventLog.cpp">
+      <Filter>Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\CompanionSnapshot.cpp">
+      <Filter>Engine</Filter>
+    </ClCompile>
     <ClCompile Include="Engine\ModInfo.cpp">
       <Filter>Engine</Filter>
     </ClCompile>
@@ -1340,6 +1346,12 @@
       <Filter>Basescape</Filter>
     </ClInclude>
     <ClInclude Include="Engine\CrossPlatform.h">
+      <Filter>Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\CompanionEventLog.h">
+      <Filter>Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\CompanionSnapshot.h">
       <Filter>Engine</Filter>
     </ClInclude>
     <ClInclude Include="Engine\ModInfo.h">

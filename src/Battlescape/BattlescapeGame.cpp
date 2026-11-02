@@ -155,6 +155,10 @@ void BattlescapeGame::think()
  */
 void BattlescapeGame::init()
 {
+	if (_save->getCompanionEventLog().getSessionId().empty())
+	{
+		_save->getCompanionEventLog().beginSession();
+	}
 	if (_save->getSide() == FACTION_PLAYER && _save->getTurn() > 1)
 	{
 		_playerPanicHandled = false;
@@ -1519,6 +1523,7 @@ void BattlescapeGame::primaryAction(Position pos)
 
 			_parentState->getGame()->getCursor()->setVisible(false);
 			_currentAction.cameraPosition = getMap()->getCamera()->getMapOffset();
+			_currentAction.playerOrdered = true;
 			_states.push_back(new ProjectileFlyBState(this, _currentAction));
 			statePushFront(new UnitTurnBState(this, _currentAction)); // first of all turn towards the target
 		}
@@ -1597,6 +1602,7 @@ void BattlescapeGame::launchAction()
 	getMap()->setCursorType(CT_NONE);
 	_parentState->getGame()->getCursor()->setVisible(false);
 	_currentAction.cameraPosition = getMap()->getCamera()->getMapOffset();
+	_currentAction.playerOrdered = true;
 	_states.push_back(new ProjectileFlyBState(this, _currentAction));
 	statePushFront(new UnitTurnBState(this, _currentAction)); // first of all turn towards the target
 }

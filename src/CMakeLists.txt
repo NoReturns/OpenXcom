@@ -104,6 +104,8 @@ set ( engine_src
   Engine/Adlib/fmopl.cpp
   Engine/AdlibMusic.cpp
   Engine/CatFile.cpp
+  Engine/CompanionEventLogCore.cpp
+  Engine/CompanionEventLog.cpp
   Engine/CompanionSnapshot.cpp
   Engine/CrossPlatform.cpp
   Engine/FastLineClip.cpp
@@ -495,6 +497,21 @@ if (${CMAKE_SYSTEM_NAME} MATCHES FreeBSD OR ${CMAKE_SYSTEM_NAME} MATCHES NetBSD 
 endif ()
 
 target_link_libraries ( openxcom ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+
+option ( OPENXCOM_BUILD_COMPANION_EVENT_LOG_TESTS "Build companion event log regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_EVENT_LOG_TESTS )
+  add_executable ( companion_event_log_test
+    test/companion_event_log_test.cpp
+    Engine/CompanionEventLogCore.cpp
+    Engine/RNG.cpp
+  )
+  target_include_directories ( companion_event_log_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_event_log_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_event_log_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_event_log_test COMMAND companion_event_log_test )
+endif ()
 
 # Pack libraries into bundle and link executable appropriately
 if ( APPLE AND CREATE_BUNDLE )
