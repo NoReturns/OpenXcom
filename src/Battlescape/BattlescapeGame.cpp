@@ -55,6 +55,7 @@
 #include "InfoboxOKState.h"
 #include "UnitFallBState.h"
 #include "../Engine/Logger.h"
+#include "../Engine/CompanionSnapshot.h"
 #include "../Savegame/BattleUnitStatistics.h"
 #include "../fmath.h"
 
@@ -1125,6 +1126,11 @@ void BattlescapeGame::popState()
 			_save->selectNextPlayerUnit(true, true);
 	}
 	_parentState->updateSoldierInfo();
+
+	if (_states.empty() && _save->getSide() == FACTION_PLAYER && !_save->getUnitsFalling() && !_save->getDebugMode())
+	{
+		CompanionSnapshot::tryExport(_save);
+	}
 }
 
 /**
