@@ -54,6 +54,7 @@
 #include "../Mod/RuleRegion.h"
 #include "MissionStatistics.h"
 #include "SoldierDeath.h"
+#include "../Engine/CompanionCampaignIdentityCore.h"
 
 namespace OpenXcom
 {
@@ -371,6 +372,7 @@ void SavedGame::load(const std::string &filename, Mod *mod)
 	_globeLat = doc["globeLat"].as<double>(_globeLat);
 	_globeZoom = doc["globeZoom"].as<int>(_globeZoom);
 	_ids = doc["ids"].as< std::map<std::string, int> >(_ids);
+	CompanionCampaignIdentityCore::loadCompanionCampaignId(doc, &_companionCampaignId);
 
 	for (YAML::const_iterator i = doc["countries"].begin(); i != doc["countries"].end(); ++i)
 	{
@@ -621,6 +623,8 @@ void SavedGame::save(const std::string &filename) const
 	node["globeLat"] = serializeDouble(_globeLat);
 	node["globeZoom"] = _globeZoom;
 	node["ids"] = _ids;
+	ensureCompanionCampaignId();
+	CompanionCampaignIdentityCore::writeCompanionCampaignId(&node, _companionCampaignId);
 	for (std::vector<Country*>::const_iterator i = _countries.begin(); i != _countries.end(); ++i)
 	{
 		node["countries"].push_back((*i)->save());
@@ -717,6 +721,19 @@ void SavedGame::save(const std::string &filename) const
 std::string SavedGame::getName() const
 {
 	return _name;
+}
+
+void SavedGame::ensureCompanionCampaignId() const
+{
+	if (_companionCampaignId.empty())
+	{
+		_companionCampaignId = CompanionCampaignIdentityCore::makeCampaignId();
+	}
+}
+
+const std::string &SavedGame::getCompanionCampaignId() const
+{
+	return _companionCampaignId;
 }
 
 /**

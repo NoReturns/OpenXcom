@@ -130,6 +130,7 @@ private:
 	size_t _selectedBase;
 	std::string _lastselectedArmor; //contains the last selected armour
 	std::vector<MissionStatistics*> _missionStatistics;
+	mutable std::string _companionCampaignId;
 
 	static SaveInfo getSaveInfo(const std::string &file, Language *lang);
 public:
@@ -150,6 +151,10 @@ public:
 	std::string getName() const;
 	/// Sets the game name.
 	void setName(const std::string &name);
+	/// Companion campaign identity (persists in save YAML; generated for new/legacy campaigns).
+	const std::string &getCompanionCampaignId() const;
+	/// Ensures a campaign id exists in memory (new game bootstrap; save also calls this).
+	void ensureCompanionCampaignId() const;
 	/// Gets the game difficulty.
 	GameDifficulty getDifficulty() const;
 	/// Sets the game difficulty.

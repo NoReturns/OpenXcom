@@ -107,6 +107,7 @@ set ( engine_src
   Engine/CompanionEventLogCore.cpp
   Engine/CompanionEventLog.cpp
   Engine/CompanionSnapshot.cpp
+  Engine/CompanionCampaignIdentityCore.cpp
   Engine/CrossPlatform.cpp
   Engine/FastLineClip.cpp
   Engine/FileMap.cpp
@@ -511,6 +512,22 @@ if ( OPENXCOM_BUILD_COMPANION_EVENT_LOG_TESTS )
     target_link_libraries ( companion_event_log_test ${basic_windows_libs} )
   endif ()
   add_test ( NAME companion_event_log_test COMMAND companion_event_log_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS "Build companion campaign identity regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS )
+  add_executable ( companion_campaign_identity_test
+    test/companion_campaign_identity_test.cpp
+    Engine/CompanionCampaignIdentityCore.cpp
+  )
+  target_include_directories ( companion_campaign_identity_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_campaign_identity_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_campaign_identity_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_campaign_identity_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_campaign_identity_test COMMAND companion_campaign_identity_test )
 endif ()
 
 # Pack libraries into bundle and link executable appropriately

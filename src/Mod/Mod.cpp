@@ -1782,6 +1782,8 @@ SavedGame *Mod::newSave() const
 	save->getAlienStrategy().init(this);
 	save->setTime(_startingTime);
 
+	save->ensureCompanionCampaignId();
+
 	return save;
 }
 

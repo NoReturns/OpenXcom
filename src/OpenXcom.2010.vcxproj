@@ -419,6 +419,7 @@
     <ClCompile Include="Engine\CompanionEventLogCore.cpp" />
     <ClCompile Include="Engine\CompanionEventLog.cpp" />
     <ClCompile Include="Engine\CompanionSnapshot.cpp" />
+    <ClCompile Include="Engine\CompanionCampaignIdentityCore.cpp" />
     <ClCompile Include="Engine\FastLineClip.cpp" />
     <ClCompile Include="Engine\FileMap.cpp" />
     <ClCompile Include="Engine\FlcPlayer.cpp" />
