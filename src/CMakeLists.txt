@@ -105,9 +105,21 @@ set ( engine_src
   Engine/AdlibMusic.cpp
   Engine/CatFile.cpp
   Engine/CompanionEventLogCore.cpp
-  Engine/CompanionEventLog.cpp
-  Engine/CompanionSnapshot.cpp
-  Engine/CompanionCampaignIdentityCore.cpp
+	Engine/CompanionEventLog.cpp
+	Engine/CompanionSnapshot.cpp
+	Engine/CompanionSnapshotExportCore.cpp
+	Engine/CompanionSnapshotTerrain.cpp
+	Engine/CompanionSnapshotTerrainCapture.cpp
+	Engine/CompanionSnapshotTerrainPacked.cpp
+	Engine/CompanionSha256.cpp
+	Engine/CompanionBriefingRequest.cpp
+	Engine/CompanionBriefingRequestCore.cpp
+	Engine/CompanionCommandCore.cpp
+	Engine/CompanionCommandRuntime.cpp
+	Engine/CompanionCommandRuntimeSupport.cpp
+	Engine/CompanionJsonLite.cpp
+	Engine/CompanionSoldierOwnershipCore.cpp
+	Engine/CompanionCampaignIdentityCore.cpp
   Engine/CrossPlatform.cpp
   Engine/FastLineClip.cpp
   Engine/FileMap.cpp
@@ -479,11 +491,15 @@ if ( FORCE_INSTALL_DATA_TO_BIN )
   set ( data_install_dir bin )
 endif ()
 
+# Full engine sources for companion_snapshot_terrain_test (copy of openxcom_src without the game entrypoint).
+set ( companion_snapshot_terrain_test_src ${openxcom_src} )
+list ( REMOVE_ITEM companion_snapshot_terrain_test_src main.cpp )
+
 add_executable ( openxcom  ${application_type} ${openxcom_src} ${openxcom_icon} )
 install ( TARGETS openxcom ${install_dest} DESTINATION ${CMAKE_INSTALL_BINDIR} )
 # Extra link flags for Windows. They need to be set before the SDL/YAML link flags, otherwise you will get strange link errors ('Undefined reference to WinMain@16')
 if ( WIN32 )
-  set ( basic_windows_libs advapi32.lib shell32.lib shlwapi.lib )
+  set ( basic_windows_libs advapi32.lib shell32.lib shlwapi.lib bcrypt.lib )
   if ( MINGW )
     set ( basic_windows_libs ${basic_windows_libs} mingw32 -mwindows )
     set ( static_flags  -static )
@@ -514,6 +530,41 @@ if ( OPENXCOM_BUILD_COMPANION_EVENT_LOG_TESTS )
   add_test ( NAME companion_event_log_test COMMAND companion_event_log_test )
 endif ()
 
+option ( OPENXCOM_BUILD_COMPANION_BRIEFING_REQUEST_TESTS "Build companion briefing request regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_BRIEFING_REQUEST_TESTS )
+  add_executable ( companion_briefing_request_test
+    test/companion_briefing_request_test.cpp
+    Engine/CompanionBriefingRequestCore.cpp
+    Engine/CompanionSha256.cpp
+    Engine/RNG.cpp
+  )
+  target_include_directories ( companion_briefing_request_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_briefing_request_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_briefing_request_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_briefing_request_test COMMAND companion_briefing_request_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_COMMAND_TESTS "Build companion tactical command regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_COMMAND_TESTS )
+  add_executable ( companion_command_test
+    test/companion_command_test.cpp
+    Engine/CompanionCommandCore.cpp
+    Engine/CompanionSoldierOwnershipCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionCommandRuntimeSupport.cpp
+    Engine/CompanionSha256.cpp
+    Engine/RNG.cpp
+  )
+  target_include_directories ( companion_command_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_command_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_command_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_command_test COMMAND companion_command_test )
+endif ()
+
 option ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS "Build companion campaign identity regression tests" ON )
 if ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS )
   add_executable ( companion_campaign_identity_test
@@ -528,6 +579,39 @@ if ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS )
     target_link_libraries ( companion_campaign_identity_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_campaign_identity_test COMMAND companion_campaign_identity_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS "Build companion snapshot terrain regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS )
+  add_executable ( companion_snapshot_terrain_test
+    test/companion_snapshot_terrain_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_snapshot_terrain_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_snapshot_terrain_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_snapshot_terrain_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_snapshot_terrain_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_snapshot_terrain_test COMMAND companion_snapshot_terrain_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_EXPORT_TESTS "Build companion snapshot export fallback regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_EXPORT_TESTS )
+  add_executable ( companion_snapshot_export_test
+    test/companion_snapshot_export_test.cpp
+    Engine/CompanionSnapshotExportCore.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_snapshot_export_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_snapshot_export_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_snapshot_export_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_snapshot_export_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_snapshot_export_test COMMAND companion_snapshot_export_test )
 endif ()
 
 # Pack libraries into bundle and link executable appropriately

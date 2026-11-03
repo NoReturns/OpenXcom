@@ -79,7 +79,7 @@ namespace OpenXcom
  * Initializes all the elements in the Battlescape screen.
  * @param game Pointer to the core game.
  */
-BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseScrolling(false), _isMouseScrolled(false), _xBeforeMouseScrolling(0), _yBeforeMouseScrolling(0), _totalMouseMoveX(0), _totalMouseMoveY(0), _mouseMovedOverThreshold(0), _mouseOverIcons(false), _autosave(false)
+BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseScrolling(false), _isMouseScrolled(false), _xBeforeMouseScrolling(0), _yBeforeMouseScrolling(0), _totalMouseMoveX(0), _totalMouseMoveY(0), _mouseMovedOverThreshold(0), _mouseOverIcons(false), _autosave(false), _briefingF6KeyHeld(false)
 {
 	std::fill_n(_visibleUnit, 10, (BattleUnit*)(0));
 
@@ -1558,6 +1558,22 @@ inline void BattlescapeState::handle(Action *action)
 {
 	if (!_firstInit)
 	{
+		if (action->getDetails()->type == SDL_KEYDOWN && action->getDetails()->key.keysym.sym == SDLK_F6)
+		{
+			const bool mod = ((action->getDetails()->key.keysym.mod & (KMOD_CTRL | KMOD_ALT | KMOD_SHIFT)) != 0);
+			if (!mod && !_briefingF6KeyHeld)
+			{
+				_briefingF6KeyHeld = true;
+				_battleGame->requestCompanionBriefing(true);
+			}
+			return;
+		}
+		if (action->getDetails()->type == SDL_KEYUP && action->getDetails()->key.keysym.sym == SDLK_F6)
+		{
+			_briefingF6KeyHeld = false;
+			return;
+		}
+
 		if (_game->getCursor()->getVisible() || ((action->getDetails()->type == SDL_MOUSEBUTTONDOWN || action->getDetails()->type == SDL_MOUSEBUTTONUP) && action->getDetails()->button.button == SDL_BUTTON_RIGHT))
 		{
 			State::handle(action);

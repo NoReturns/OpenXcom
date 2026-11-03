@@ -2,7 +2,12 @@
  * Open X-Com Companion — read-only battlescape snapshot export (opt-in).
  */
 #include "CompanionSnapshot.h"
+#include "CompanionCommandRuntime.h"
+#include "CompanionSnapshotExportCore.h"
+#include "CompanionSnapshotTerrain.h"
+#include "CompanionSha256.h"
 #include "CompanionEventLog.h"
+#include "../Savegame/Tile.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/BattleItem.h"
@@ -15,7 +20,6 @@
 #include "Logger.h"
 #include <yaml-cpp/yaml.h>
 #include <cstdlib>
-#include <fstream>
 #include <string>
 
 namespace OpenXcom
@@ -24,7 +28,8 @@ namespace OpenXcom
 namespace
 {
 
-const int SCHEMA_VERSION = 4;
+const int SCHEMA_VERSION_V4 = 4;
+const int SCHEMA_VERSION_V5 = 5;
 const size_t MAX_INVENTORY_ENTRIES = 24;
 
 bool shouldIncludeUnit(const BattleUnit *unit)
@@ -372,10 +377,10 @@ void appendEventLog(YAML::Node &root, const CompanionEventLog &log)
 	root["eventLog"] = eventLog;
 }
 
-YAML::Node buildSnapshot(SavedBattleGame *battle)
+YAML::Node buildSnapshot(SavedBattleGame *battle, int schemaVersion, bool includeTerrain)
 {
 	YAML::Node root;
-	root["schemaVersion"] = SCHEMA_VERSION;
+	root["schemaVersion"] = schemaVersion;
 	root["turn"] = battle->getTurn();
 	root["side"] = static_cast<int>(battle->getSide());
 	BattleUnit *selected = battle->getSelectedUnit();
@@ -386,6 +391,17 @@ YAML::Node buildSnapshot(SavedBattleGame *battle)
 	map["height"] = battle->getMapSizeY();
 	map["depth"] = battle->getMapSizeZ();
 	root["map"] = map;
+
+	if (includeTerrain)
+	{
+		const int mapW = battle->getMapSizeX();
+		const int mapH = battle->getMapSizeY();
+		const int mapD = battle->getMapSizeZ();
+		CompanionSnapshotTerrain::appendTerrain(root, mapW, mapH, mapD,
+			[battle](int x, int y, int z) -> Tile * {
+				return battle->getTile(Position(x, y, z));
+			});
+	}
 
 	YAML::Node units = YAML::Node(YAML::NodeType::Sequence);
 	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin(); i != battle->getUnits()->end(); ++i)
@@ -402,70 +418,72 @@ YAML::Node buildSnapshot(SavedBattleGame *battle)
 	return root;
 }
 
-bool writeSnapshotAtomically(const std::string &destPath, const std::string &yamlContent)
-{
-	const std::string tmpPath = destPath + ".companion.tmp";
-
-	{
-		std::ofstream out(tmpPath.c_str(), std::ios::out | std::ios::trunc | std::ios::binary);
-		if (!out)
-		{
-			Log(LOG_WARNING) << "Companion snapshot: failed to open temporary output file";
-			return false;
-		}
-		out << yamlContent;
-		out.flush();
-		if (!out)
-		{
-			Log(LOG_WARNING) << "Companion snapshot: failed to write temporary output file";
-			CrossPlatform::deleteFile(tmpPath);
-			return false;
-		}
-	}
-
-	if (!CrossPlatform::moveFile(tmpPath, destPath))
-	{
-		Log(LOG_WARNING) << "Companion snapshot: failed to replace destination file";
-		CrossPlatform::deleteFile(tmpPath);
-		return false;
-	}
-
-	return true;
-}
-
 } // namespace
 
-void CompanionSnapshot::tryExport(SavedBattleGame *battle)
+bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256)
 {
 	if (battle == 0)
 	{
-		return;
+		return false;
 	}
 
 	const char *path = std::getenv("OPENXCOM_COMPANION_SNAPSHOT_PATH");
 	if (path == 0 || path[0] == '\0')
 	{
-		return;
+		return false;
 	}
 
 	if (battle->getDebugMode())
 	{
-		return;
+		return false;
 	}
 
 	if (battle->getSide() != FACTION_PLAYER || battle->getUnitsFalling())
 	{
-		return;
+		return false;
 	}
 
-	YAML::Node root = buildSnapshot(battle);
-	YAML::Emitter emitter;
-	emitter << root;
+	const YAML::Node schemaV5 = buildSnapshot(battle, SCHEMA_VERSION_V5, true);
+	const CompanionSnapshotExportCore::ResolvedSnapshot resolved =
+		CompanionSnapshotExportCore::resolveSnapshotForSizeCap(schemaV5, [&battle]() {
+			return buildSnapshot(battle, SCHEMA_VERSION_V4, false);
+		});
 
-	if (!writeSnapshotAtomically(path, emitter.c_str()))
+	if (!resolved.ok)
 	{
-		return;
+		Log(LOG_WARNING) << "Companion snapshot: YAML exceeds " << CompanionSnapshotTerrain::SNAPSHOT_MAX_BYTES
+			<< " byte cap even after schemaVersion 4 terrain fallback (attempted v5 "
+			<< resolved.v5AttemptedBytes << " bytes, v4 " << resolved.v4FallbackBytes << " bytes)";
+		return false;
 	}
+
+	if (resolved.terrainOmittedDueToSize)
+	{
+		Log(LOG_WARNING) << CompanionSnapshotExportCore::TERRAIN_OMITTED_DIAGNOSTIC()
+			<< " (attempted v5 " << resolved.v5AttemptedBytes << " bytes, fallback v4 "
+			<< resolved.v4FallbackBytes << " bytes)";
+	}
+
+	if (outSnapshotSha256 != 0)
+	{
+		if (!CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, outSnapshotSha256))
+		{
+			return false;
+		}
+		CompanionCommandRuntime::noteSnapshotExportSha256(*outSnapshotSha256);
+		CompanionCommandRuntime::noteSnapshotExportStateVersion(battle->getCompanionEventLog().getLatestSeq());
+	}
+	else
+	{
+		std::string digest;
+		if (CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, &digest))
+		{
+			CompanionCommandRuntime::noteSnapshotExportSha256(digest);
+			CompanionCommandRuntime::noteSnapshotExportStateVersion(battle->getCompanionEventLog().getLatestSeq());
+		}
+	}
+
+	return CompanionSnapshotExportCore::writeSnapshotAtomically(path, resolved.yamlUtf8);
 }
 
 }

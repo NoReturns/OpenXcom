@@ -78,6 +78,7 @@ private:
 	BattleAction _currentAction;
 	bool _AISecondMove, _playedAggroSound;
 	bool _endTurnRequested, _endTurnProcessed;
+	bool _companionBriefingPending;
 
 	/// Ends the turn.
 	void endTurn();
@@ -196,6 +197,14 @@ public:
 	std::list<BattleState*> getStates();
 	/// Auto end the battle if conditions are met.
 	void autoEndBattle();
+	/// Queue or fulfill an F6 companion briefing request.
+	void requestCompanionBriefing(bool battleInitialized);
+	/// Fulfill a deferred briefing when the battlefield is idle.
+	void tryFulfillCompanionBriefing(bool battleInitialized);
+	/// Start a companion-authorized walk (no teleport); returns false with rejectReason when not started.
+	bool tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason);
+	/// Poll local tactical-command.json when executor enabled.
+	void tickCompanionCommand(bool battleInitialized);
 };
 
 }

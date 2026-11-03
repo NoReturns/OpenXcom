@@ -56,6 +56,10 @@
 #include "UnitFallBState.h"
 #include "../Engine/Logger.h"
 #include "../Engine/CompanionSnapshot.h"
+#include "../Engine/CompanionCommandRuntime.h"
+#include "../Engine/CompanionCommandRuntimeSupport.h"
+#include "../Engine/CompanionBriefingRequest.h"
+#include "../Engine/CompanionBriefingTestSupport.h"
 #include "../Savegame/BattleUnitStatistics.h"
 #include "../fmath.h"
 
@@ -69,7 +73,7 @@ bool BattlescapeGame::_debugPlay = false;
  * @param save Pointer to the save game.
  * @param parentState Pointer to the parent battlescape state.
  */
-BattlescapeGame::BattlescapeGame(SavedBattleGame *save, BattlescapeState *parentState) : _save(save), _parentState(parentState), _playerPanicHandled(true), _AIActionCounter(0), _AISecondMove(false), _playedAggroSound(false), _endTurnRequested(false), _endTurnProcessed(false)
+BattlescapeGame::BattlescapeGame(SavedBattleGame *save, BattlescapeState *parentState) : _save(save), _parentState(parentState), _playerPanicHandled(true), _AIActionCounter(0), _AISecondMove(false), _playedAggroSound(false), _endTurnRequested(false), _endTurnProcessed(false), _companionBriefingPending(false)
 {
 
 	_currentAction.actor = 0;
@@ -147,6 +151,17 @@ void BattlescapeGame::think()
 				_save->getBattleState()->updateSoldierInfo();
 			}
 		}
+	}
+	tryFulfillCompanionBriefing(true);
+	if (CompanionCommandRuntimeSupport::shouldRunCompanionCommandTickDuringThink(
+		_save->getSide() == FACTION_PLAYER,
+		_save->getDebugMode(),
+		_save->getUnitsFalling(),
+		_states.empty(),
+		isBusy(),
+		CompanionCommandRuntime::isMoveInFlight()))
+	{
+		tickCompanionCommand(true);
 	}
 }
 
@@ -1135,6 +1150,8 @@ void BattlescapeGame::popState()
 	{
 		CompanionSnapshot::tryExport(_save);
 	}
+	tryFulfillCompanionBriefing(true);
+	tickCompanionCommand(true);
 }
 
 /**
@@ -2233,6 +2250,111 @@ void BattlescapeGame::autoEndBattle()
 			requestEndTurn();
 		}
 	}
+}
+
+void BattlescapeGame::requestCompanionBriefing(bool battleInitialized)
+{
+	CompanionBriefingTestSupport::BriefingGateInput input = {};
+	input.snapshotPathConfigured = CompanionBriefingRequest::snapshotPathConfigured();
+	input.debugMode = _save->getDebugMode();
+	input.playerTurn = _save->getSide() == FACTION_PLAYER;
+	input.unitsFalling = _save->getUnitsFalling();
+	input.battleBusy = isBusy();
+	input.battleInitialized = battleInitialized;
+
+	CompanionBriefingTestSupport::BriefingPressState state = { _companionBriefingPending };
+	const CompanionBriefingTestSupport::BriefingPressOutcome outcome =
+		CompanionBriefingTestSupport::evaluateBriefingKeyPress(input, &state);
+	_companionBriefingPending = state.pending;
+
+	switch (outcome)
+	{
+	case CompanionBriefingTestSupport::BRIEFING_PRESS_IGNORED:
+		return;
+	case CompanionBriefingTestSupport::BRIEFING_PRESS_REJECTED:
+		Log(LOG_INFO) << "Companion briefing: request rejected";
+		return;
+	case CompanionBriefingTestSupport::BRIEFING_PRESS_DEFERRED:
+		Log(LOG_INFO) << "Companion briefing: deferred until idle";
+		return;
+	case CompanionBriefingTestSupport::BRIEFING_PRESS_FULFILL_NOW:
+		if (CompanionBriefingRequest::fulfill(_save))
+		{
+			_companionBriefingPending = false;
+		}
+		return;
+	}
+}
+
+void BattlescapeGame::tryFulfillCompanionBriefing(bool battleInitialized)
+{
+	if (!_companionBriefingPending)
+	{
+		return;
+	}
+
+	if (_save->getDebugMode())
+	{
+		_companionBriefingPending = false;
+		Log(LOG_INFO) << "Companion briefing: pending cleared (debug mode)";
+		return;
+	}
+
+	if (!CompanionBriefingRequest::canFulfill(_save, isBusy(), battleInitialized))
+	{
+		return;
+	}
+
+	if (CompanionBriefingRequest::fulfill(_save))
+	{
+		_companionBriefingPending = false;
+	}
+}
+
+bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	_parentState->updateSoldierInfo();
+	_currentAction = BattleAction();
+	_currentAction.actor = unit;
+	_currentAction.target = dest;
+	_currentAction.type = BA_WALK;
+	_save->getPathfinding()->calculate(unit, dest);
+	if (_save->getPathfinding()->getStartDirection() == -1)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No valid path to destination.";
+		}
+		cancelCurrentAction();
+		return false;
+	}
+	getMap()->setCursorType(CT_NONE);
+	_parentState->getGame()->getCursor()->setVisible(false);
+	statePushBack(new UnitWalkBState(this, _currentAction));
+	return true;
+}
+
+void BattlescapeGame::tickCompanionCommand(bool battleInitialized)
+{
+	CompanionCommandRuntime::tick(this, _save, battleInitialized);
 }
 
 }
