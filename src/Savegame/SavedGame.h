@@ -20,11 +20,13 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <set>
 #include <time.h>
 #include <stdint.h>
 #include "GameTime.h"
 #include "../Mod/RuleAlienMission.h"
 #include "../Savegame/Craft.h"
+#include "../Engine/CompanionSoldierOwnershipCore.h"
 
 namespace OpenXcom
 {
@@ -48,7 +50,6 @@ class AlienBase;
 class AlienStrategy;
 class AlienMission;
 class Target;
-class Soldier;
 class Craft;
 struct MissionStatistics;
 struct BattleUnitKills;
@@ -131,6 +132,8 @@ private:
 	std::string _lastselectedArmor; //contains the last selected armour
 	std::vector<MissionStatistics*> _missionStatistics;
 	mutable std::string _companionCampaignId;
+	std::set<int> _companionAiSoldierIds;
+	bool isLiveRosterSoldier(int soldierId) const;
 
 	static SaveInfo getSaveInfo(const std::string &file, Language *lang);
 public:
@@ -155,6 +158,14 @@ public:
 	const std::string &getCompanionCampaignId() const;
 	/// Ensures a campaign id exists in memory (new game bootstrap; save also calls this).
 	void ensureCompanionCampaignId() const;
+	/// Campaign-save companion ownership (M1-23C). Default human; stale YAML ids never grant AI.
+	CompanionSoldierOwnershipCore::SoldierControlMode getCompanionSoldierOwnership(int soldierId) const;
+	/// Assign a live roster soldier to AI in memory (persists on next SavedGame::save only).
+	bool assignCompanionSoldierToAi(int soldierId);
+	/// Reclaim human control (removes stored AI assignment; persists on next save).
+	bool reclaimCompanionSoldierForHuman(int soldierId);
+	/// Stored AI soldier ids from campaign save (may include stale ids until reclaimed).
+	std::map<int, CompanionSoldierOwnershipCore::SoldierControlMode> getCompanionSoldierOwnershipAssignments() const;
 	/// Gets the game difficulty.
 	GameDifficulty getDifficulty() const;
 	/// Sets the game difficulty.

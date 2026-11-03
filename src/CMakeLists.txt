@@ -120,6 +120,7 @@ set ( engine_src
 	Engine/CompanionJsonLite.cpp
 	Engine/CompanionSoldierOwnershipCore.cpp
 	Engine/CompanionCampaignIdentityCore.cpp
+	Engine/CompanionCampaignOwnershipCore.cpp
   Engine/CrossPlatform.cpp
   Engine/FastLineClip.cpp
   Engine/FileMap.cpp
@@ -579,6 +580,23 @@ if ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS )
     target_link_libraries ( companion_campaign_identity_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_campaign_identity_test COMMAND companion_campaign_identity_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_OWNERSHIP_TESTS "Build companion campaign ownership regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_OWNERSHIP_TESTS )
+  add_executable ( companion_campaign_ownership_test
+    test/companion_campaign_ownership_test.cpp
+    Engine/CompanionCampaignIdentityCore.cpp
+    Engine/CompanionCampaignOwnershipCore.cpp
+  )
+  target_include_directories ( companion_campaign_ownership_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_campaign_ownership_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_campaign_ownership_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_campaign_ownership_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_campaign_ownership_test COMMAND companion_campaign_ownership_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS "Build companion snapshot terrain regression tests" ON )

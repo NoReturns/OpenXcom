@@ -90,7 +90,11 @@ void writeCompanionCampaignId(YAML::Node *saveDocumentNode, const std::string &c
 	{
 		return;
 	}
-	YAML::Node companion;
+	YAML::Node companion = (*saveDocumentNode)["companion"];
+	if (!companion || !companion.IsMap())
+	{
+		companion = YAML::Node(YAML::NodeType::Map);
+	}
 	companion["campaign_id"] = campaignId;
 	(*saveDocumentNode)["companion"] = companion;
 }

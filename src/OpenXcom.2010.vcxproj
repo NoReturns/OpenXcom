@@ -431,6 +431,7 @@
     <ClCompile Include="Engine\CompanionJsonLite.cpp" />
     <ClCompile Include="Engine\CompanionSoldierOwnershipCore.cpp" />
     <ClCompile Include="Engine\CompanionCampaignIdentityCore.cpp" />
+    <ClCompile Include="Engine\CompanionCampaignOwnershipCore.cpp" />
     <ClCompile Include="Engine\CompanionSha256.cpp" />
     <ClCompile Include="Engine\FastLineClip.cpp" />
     <ClCompile Include="Engine\FileMap.cpp" />

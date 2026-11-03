@@ -55,6 +55,7 @@
 #include "MissionStatistics.h"
 #include "SoldierDeath.h"
 #include "../Engine/CompanionCampaignIdentityCore.h"
+#include "../Engine/CompanionCampaignOwnershipCore.h"
 
 namespace OpenXcom
 {
@@ -372,6 +373,7 @@ void SavedGame::load(const std::string &filename, Mod *mod)
 	_globeLat = doc["globeLat"].as<double>(_globeLat);
 	_globeZoom = doc["globeZoom"].as<int>(_globeZoom);
 	_ids = doc["ids"].as< std::map<std::string, int> >(_ids);
+	_companionAiSoldierIds.clear();
 	CompanionCampaignIdentityCore::loadCompanionCampaignId(doc, &_companionCampaignId);
 
 	for (YAML::const_iterator i = doc["countries"].begin(); i != doc["countries"].end(); ++i)
@@ -556,6 +558,7 @@ void SavedGame::load(const std::string &filename, Mod *mod)
 		_battleGame = new SavedBattleGame();
 		_battleGame->load(battle, mod, this);
 	}
+	CompanionCampaignOwnershipCore::loadCompanionAssignments(doc, &_companionAiSoldierIds);
 }
 
 /**
@@ -625,6 +628,7 @@ void SavedGame::save(const std::string &filename) const
 	node["ids"] = _ids;
 	ensureCompanionCampaignId();
 	CompanionCampaignIdentityCore::writeCompanionCampaignId(&node, _companionCampaignId);
+	CompanionCampaignOwnershipCore::writeCompanionAssignments(&node, _companionAiSoldierIds);
 	for (std::vector<Country*>::const_iterator i = _countries.begin(); i != _countries.end(); ++i)
 	{
 		node["countries"].push_back((*i)->save());
@@ -734,6 +738,68 @@ void SavedGame::ensureCompanionCampaignId() const
 const std::string &SavedGame::getCompanionCampaignId() const
 {
 	return _companionCampaignId;
+}
+
+bool SavedGame::isLiveRosterSoldier(int soldierId) const
+{
+	if (soldierId <= 0)
+	{
+		return false;
+	}
+	for (std::vector<Base*>::const_iterator i = _bases.begin(); i != _bases.end(); ++i)
+	{
+		for (std::vector<Soldier*>::const_iterator j = (*i)->getSoldiers()->begin(); j != (*i)->getSoldiers()->end(); ++j)
+		{
+			if ((*j)->getId() == soldierId)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+CompanionSoldierOwnershipCore::SoldierControlMode SavedGame::getCompanionSoldierOwnership(int soldierId) const
+{
+	if (soldierId <= 0 || _companionAiSoldierIds.find(soldierId) == _companionAiSoldierIds.end())
+	{
+		return CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+	}
+	if (!isLiveRosterSoldier(soldierId))
+	{
+		return CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+	}
+	return CompanionSoldierOwnershipCore::CONTROL_AI;
+}
+
+bool SavedGame::assignCompanionSoldierToAi(int soldierId)
+{
+	if (!isLiveRosterSoldier(soldierId))
+	{
+		return false;
+	}
+	_companionAiSoldierIds.insert(soldierId);
+	return true;
+}
+
+bool SavedGame::reclaimCompanionSoldierForHuman(int soldierId)
+{
+	if (soldierId <= 0)
+	{
+		return false;
+	}
+	_companionAiSoldierIds.erase(soldierId);
+	return true;
+}
+
+std::map<int, CompanionSoldierOwnershipCore::SoldierControlMode> SavedGame::getCompanionSoldierOwnershipAssignments() const
+{
+	std::map<int, CompanionSoldierOwnershipCore::SoldierControlMode> out;
+	for (std::set<int>::const_iterator it = _companionAiSoldierIds.begin(); it != _companionAiSoldierIds.end(); ++it)
+	{
+		out[*it] = CompanionSoldierOwnershipCore::CONTROL_AI;
+	}
+	return out;
 }
 
 /**
