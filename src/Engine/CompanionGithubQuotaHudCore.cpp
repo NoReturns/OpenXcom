@@ -48,11 +48,14 @@ void clearSnapshot(HudSnapshot *out)
 	out->resetKnown = false;
 	out->gateCooldownKnown = false;
 	out->updatedAtMsKnown = false;
+	out->observationAtMsKnown = false;
+	out->observationStale = false;
 	out->remaining = 0;
 	out->limit = 0;
 	out->resetEpochSec = 0;
 	out->gateCooldownUntilMs = 0;
 	out->updatedAtMs = 0;
+	out->observationAtMs = 0;
 }
 
 bool parseOptionalIntField(const std::string &json, const std::string &key, int *out, bool *known)
@@ -93,6 +96,40 @@ bool parseOptionalLongLongField(const std::string &json, const std::string &key,
 	*out = value;
 	*known = true;
 	return true;
+}
+
+bool parseOptionalBoolField(const std::string &json, const std::string &key, bool *out, bool *known)
+{
+	if (out == 0 || known == 0)
+	{
+		return false;
+	}
+	std::string::size_type valueStart = 0;
+	if (!CompanionJsonLite::findJsonKeyValueStart(json, key, &valueStart))
+	{
+		*known = false;
+		return false;
+	}
+	std::string::size_type pos = valueStart;
+	if (!CompanionJsonLite::skipWhitespace(json, &pos))
+	{
+		*known = false;
+		return false;
+	}
+	if (json.compare(pos, 4, "true") == 0)
+	{
+		*out = true;
+		*known = true;
+		return true;
+	}
+	if (json.compare(pos, 5, "false") == 0)
+	{
+		*out = false;
+		*known = true;
+		return true;
+	}
+	*known = false;
+	return false;
 }
 
 } // namespace
@@ -163,32 +200,44 @@ bool readHudSnapshot(HudSnapshot *out)
 	parseOptionalLongLongField(json, "reset_epoch_sec", &out->resetEpochSec, &out->resetKnown);
 	parseOptionalLongLongField(json, "gate_cooldown_until_ms", &out->gateCooldownUntilMs, &out->gateCooldownKnown);
 	parseOptionalLongLongField(json, "updated_at_ms", &out->updatedAtMs, &out->updatedAtMsKnown);
+	parseOptionalLongLongField(json, "observation_at_ms", &out->observationAtMs, &out->observationAtMsKnown);
+	bool staleFromFile = false;
+	bool staleFromFileKnown = false;
+	parseOptionalBoolField(json, "stale_observation", &staleFromFile, &staleFromFileKnown);
+	if (staleFromFileKnown)
+	{
+		out->observationStale = staleFromFile;
+	}
 	return true;
 }
 
 bool isHudTelemetryFresh(const HudSnapshot &snap, long long wallNowMs)
 {
-	if (!snap.fileReadable || !snap.updatedAtMsKnown)
+	if (!snap.observationAtMsKnown)
 	{
 		return false;
 	}
-	if (wallNowMs < snap.updatedAtMs)
+	if (wallNowMs < snap.observationAtMs)
 	{
 		return false;
 	}
-	return (wallNowMs - snap.updatedAtMs) <= HUD_RELAY_STALE_MS;
+	return (wallNowMs - snap.observationAtMs) <= HUD_RELAY_STALE_MS;
 }
 
 void applyRelayStaleness(HudSnapshot *snap, long long wallNowMs)
 {
-	if (snap == 0 || isHudTelemetryFresh(*snap, wallNowMs))
+	if (snap == 0 || !snap->fileReadable)
 	{
 		return;
 	}
-	snap->remainingKnown = false;
-	snap->limitKnown = false;
-	snap->resetKnown = false;
-	snap->gateCooldownKnown = false;
+	if (snap->observationAtMsKnown)
+	{
+		snap->observationStale = !isHudTelemetryFresh(*snap, wallNowMs);
+	}
+	else if (!snap->remainingKnown && !snap->limitKnown)
+	{
+		snap->observationStale = true;
+	}
 }
 
 int computeHudAnchorY(int screenHeight, int bottomReservePx)
@@ -289,7 +338,18 @@ void formatHudMultilineText(const HudSnapshot &snap, long long nowMs, std::strin
 	formatLimitLabel(snap, &limitLabel);
 	formatCountdownMmSs(countdownMsUntilReset(snap, nowMs), &countdownLabel);
 	std::ostringstream ss;
-	ss << "Github API Requests:\n"
+	if (snap.observationStale && snap.remainingKnown)
+	{
+		remainingLabel = std::string("~") + remainingLabel;
+	}
+	if (snap.observationStale && snap.limitKnown)
+	{
+		limitLabel = std::string("~") + limitLabel;
+	}
+	const char *title = (snap.observationStale && snap.remainingKnown)
+		? "Github API Requests (cached):"
+		: "Github API Requests:";
+	ss << title << '\n'
 	   << remainingLabel << " / " << limitLabel << '\n'
 	   << countdownLabel;
 	*out = ss.str();

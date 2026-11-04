@@ -61,25 +61,70 @@ static void testCountdownFromResetEpoch()
 	expect(text.find("01:30") != std::string::npos, "countdown rendered as MM:SS");
 }
 
-static void testStaleRelayClearsTelemetry()
+static void testFreshObservationDisplaysNormally()
+{
+	HudSnapshot snap = {};
+	snap.fileReadable = true;
+	snap.observationAtMsKnown = true;
+	snap.observationAtMs = 1'000'000LL;
+	snap.remainingKnown = true;
+	snap.limitKnown = true;
+	snap.remaining = 99;
+	snap.limit = 5000;
+	const long long nowMs = 1'000'000LL + 1'000LL;
+	applyRelayStaleness(&snap, nowMs);
+	expect(!snap.observationStale, "fresh observation is not stale");
+	std::string text;
+	formatHudMultilineText(snap, nowMs, &text);
+	expect(text.find("Github API Requests:\n") != std::string::npos, "fresh HUD uses normal title");
+	expect(text.find("(cached)") == std::string::npos, "fresh HUD omits cached marker");
+	expect(text.find("99 / 5000") != std::string::npos, "fresh remaining/limit without prefix");
+	expect(text.find('~') == std::string::npos, "fresh HUD omits cached tilde prefix");
+}
+
+static void testStaleRelayKeepsCachedTelemetry()
 {
 	HudSnapshot snap = {};
 	snap.fileReadable = true;
 	snap.updatedAtMsKnown = true;
 	snap.updatedAtMs = 1'000'000LL;
+	snap.observationAtMsKnown = true;
+	snap.observationAtMs = 1'000'000LL;
 	snap.remainingKnown = true;
 	snap.limitKnown = true;
 	snap.remaining = 123;
 	snap.limit = 5000;
 	snap.resetKnown = true;
 	snap.resetEpochSec = 1'700'000'090LL;
-	applyRelayStaleness(&snap, 1'000'000LL + HUD_RELAY_STALE_MS + 1);
-	expect(!snap.remainingKnown, "stale sidecar clears remaining");
-	expect(!snap.limitKnown, "stale sidecar clears limit");
-	expect(!snap.resetKnown, "stale sidecar clears reset epoch");
+	const long long nowMs = 1'000'000LL + HUD_RELAY_STALE_MS + 1;
+	applyRelayStaleness(&snap, nowMs);
+	expect(snap.remainingKnown, "stale observation keeps remaining");
+	expect(snap.limitKnown, "stale observation keeps limit");
+	expect(snap.observationStale, "observation marked stale");
 	std::string text;
-	formatHudMultilineText(snap, 1'000'000LL + HUD_RELAY_STALE_MS + 1, &text);
-	expect(text.find("UNKNOWN / UNKNOWN") != std::string::npos, "stale HUD shows UNKNOWN");
+	formatHudMultilineText(snap, nowMs, &text);
+	expect(text.find("~123 / ~5000") != std::string::npos, "stale HUD shows cached prefix");
+	expect(text.find("(cached)") != std::string::npos, "stale HUD title marks cached");
+}
+
+static void testStaleObservationSurvivesWellBeyondRelayWindow()
+{
+	HudSnapshot snap = {};
+	snap.fileReadable = true;
+	snap.observationAtMsKnown = true;
+	snap.observationAtMs = 1'000'000LL;
+	snap.remainingKnown = true;
+	snap.limitKnown = true;
+	snap.remaining = 4978;
+	snap.limit = 5000;
+	const long long nowMs = 1'000'000LL + (HUD_RELAY_STALE_MS * 4);
+	applyRelayStaleness(&snap, nowMs);
+	expect(snap.remainingKnown, "long-stale observation keeps remaining");
+	expect(snap.limitKnown, "long-stale observation keeps limit");
+	expect(snap.observationStale, "long-stale observation marked cached");
+	std::string text;
+	formatHudMultilineText(snap, nowMs, &text);
+	expect(text.find("~4978 / ~5000") != std::string::npos, "long-stale HUD keeps cached counts");
 }
 
 static void testBattlescapeHudAnchorAboveIconBar()
@@ -108,7 +153,9 @@ int main()
 {
 	testUnknownLabels();
 	testCountdownFromResetEpoch();
-	testStaleRelayClearsTelemetry();
+	testFreshObservationDisplaysNormally();
+	testStaleRelayKeepsCachedTelemetry();
+	testStaleObservationSurvivesWellBeyondRelayWindow();
 	testBattlescapeHudAnchorAboveIconBar();
 	testHudFilePathResolution();
 	if (g_failures != 0)

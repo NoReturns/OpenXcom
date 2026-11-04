@@ -10,7 +10,7 @@ namespace OpenXcom
 namespace CompanionGithubQuotaHudCore
 {
 
-/** Sidecar must refresh companion-github-quota.json more often than this. */
+/** Observation older than this is shown as cached, not cleared. */
 const long long HUD_RELAY_STALE_MS = 45000LL;
 
 struct HudSnapshot
@@ -22,11 +22,14 @@ struct HudSnapshot
 	bool resetKnown;
 	bool gateCooldownKnown;
 	bool updatedAtMsKnown;
+	bool observationAtMsKnown;
+	bool observationStale;
 	int remaining;
 	int limit;
 	long long resetEpochSec;
 	long long gateCooldownUntilMs;
 	long long updatedAtMs;
+	long long observationAtMs;
 };
 
 long long companionWallClockMs();
