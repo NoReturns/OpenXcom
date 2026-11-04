@@ -7,6 +7,10 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 using namespace OpenXcom;
 using namespace OpenXcom::CompanionCommandJournalCore;
@@ -200,6 +204,47 @@ static void testPreserveExistingHistoryOnAppend()
 	removeTemp();
 }
 
+static void testUnreadableJournalClassification()
+{
+	const std::string malformed =
+		"{\n  \"schema_version\": 1,\n  \"command_ids\": [\n    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n    \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n  ]\n}\n";
+	expect(classifyExistingJournalJson(std::string()) == JOURNAL_READABLE_EMPTY, "empty journal readable");
+	expect(classifyExistingJournalJson(recoveredJournalFixture()) == JOURNAL_READABLE, "recovered journal readable");
+	expect(classifyExistingJournalJson(malformed) == JOURNAL_UNREADABLE, "corrupt journal unreadable");
+}
+
+static void testMalformedJournalDoesNotSubstringMatch()
+{
+	const std::string malformed =
+		"{\n  \"schema_version\": 1,\n  \"command_ids\": [\n    \"cccccccccccccccccccccccccccccccc\"\n    \"dddddddddddddddddddddddddddddddd\",\n  ]\n}\n";
+	expect(!journalJsonContainsCommandId(malformed, "cccccccccccccccccccccccccccccccc"),
+		"unreadable journal must not treat ids as present");
+	expect(!journalJsonContainsCommandId(malformed, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+		"unknown id absent when journal unreadable");
+}
+
+#ifdef _WIN32
+static void testFailedAppendPreservesExistingJournal()
+{
+	removeTemp();
+	writeTemp(recoveredJournalFixture());
+	std::ifstream beforeIn(tempJournalPath().c_str(), std::ios::in | std::ios::binary);
+	std::ostringstream beforeSs;
+	beforeSs << beforeIn.rdbuf();
+	const std::string before = beforeSs.str();
+	SetFileAttributesA(TEMP_JOURNAL, FILE_ATTRIBUTE_READONLY);
+	const AppendJournalResult result =
+		appendCommandJournalEntry(tempJournalPath(), "99999999999999999999999999999999");
+	SetFileAttributesA(TEMP_JOURNAL, FILE_ATTRIBUTE_NORMAL);
+	expect(result == JOURNAL_APPEND_WRITE_FAILED, "readonly journal blocks atomic replace");
+	std::ifstream afterIn(tempJournalPath().c_str(), std::ios::in | std::ios::binary);
+	std::ostringstream afterSs;
+	afterSs << afterIn.rdbuf();
+	expect(afterSs.str() == before, "failed append preserves journal bytes");
+	removeTemp();
+}
+#endif
+
 int main()
 {
 	testParseEmptyJournal();
@@ -210,6 +255,11 @@ int main()
 	testRecoveredJournalStructure();
 	testMalformedJournalFailClosed();
 	testPreserveExistingHistoryOnAppend();
+	testUnreadableJournalClassification();
+	testMalformedJournalDoesNotSubstringMatch();
+#ifdef _WIN32
+	testFailedAppendPreservesExistingJournal();
+#endif
 	if (g_failures != 0)
 	{
 		std::cerr << g_failures << " failure(s)" << std::endl;

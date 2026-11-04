@@ -367,12 +367,7 @@ BattleUnit *findUnitById(SavedBattleGame *battle, int unitId)
 
 bool journalContainsCommandId(const std::string &journalJson, const std::string &commandId)
 {
-	CompanionCommandJournalCore::CommandJournalDocument doc = {};
-	if (CompanionCommandJournalCore::parseCommandJournalJson(journalJson, &doc))
-	{
-		return CompanionCommandJournalCore::journalDocumentContainsCommandId(doc, commandId);
-	}
-	return journalJson.find("\"" + commandId + "\"") != std::string::npos;
+	return CompanionCommandJournalCore::journalJsonContainsCommandId(journalJson, commandId);
 }
 
 void appendJournalEntry(const std::string &journalPath, const std::string &commandId)
@@ -427,6 +422,31 @@ void rejectKneelCommand(const std::string &resultPath, const CompanionCommandCor
 	const std::string json = buildKneelResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false, std::string(), inboxSha256);
 	writeResultFile(resultPath, json);
+}
+
+static bool rejectUnreadableCommandJournal(
+	const std::string &resultPath,
+	const std::string &journalJson,
+	const std::string &inboxDigest,
+	const CompanionCommandCore::MoveCommandParsed *moveRejectTemplate,
+	const CompanionCommandCore::KneelCommandParsed *kneelRejectTemplate)
+{
+	if (CompanionCommandJournalCore::classifyExistingJournalJson(journalJson) !=
+		CompanionCommandJournalCore::JOURNAL_UNREADABLE)
+	{
+		return false;
+	}
+	if (kneelRejectTemplate != 0)
+	{
+		rejectKneelCommand(resultPath, *kneelRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
+	else if (moveRejectTemplate != 0)
+	{
+		rejectCommand(resultPath, *moveRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
+	return true;
 }
 
 bool applyDuplicateInboxDecision(
@@ -905,6 +925,11 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &kneelParsed))
+		{
+			logRejectOnce(kneelParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
 		const bool duplicate = journalContainsCommandId(journalJson, kneelParsed.commandId);
 
 		std::string existingResultJson;
@@ -1016,6 +1041,11 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 	std::string journalJson;
 	readTextFile(journalPath, &journalJson);
+	if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, &parsed, 0))
+	{
+		logRejectOnce(parsed.commandId, "JOURNAL_MALFORMED");
+		return;
+	}
 	const bool duplicate = journalContainsCommandId(journalJson, parsed.commandId);
 
 	std::string existingResultJson;

@@ -20,6 +20,13 @@ enum AppendJournalResult
 	JOURNAL_APPEND_WRITE_FAILED
 };
 
+enum JournalReadiness
+{
+	JOURNAL_READABLE_EMPTY,
+	JOURNAL_READABLE,
+	JOURNAL_UNREADABLE
+};
+
 struct CommandJournalDocument
 {
 	int schemaVersion;
@@ -35,6 +42,10 @@ bool journalDocumentContainsCommandId(const CommandJournalDocument &doc, const s
 AppendJournalResult appendCommandId(CommandJournalDocument *doc, const std::string &commandId);
 
 AppendJournalResult appendCommandJournalEntry(const std::string &journalPath, const std::string &commandId);
+
+JournalReadiness classifyExistingJournalJson(const std::string &journalJson);
+
+bool journalJsonContainsCommandId(const std::string &journalJson, const std::string &commandId);
 
 } // namespace CompanionCommandJournalCore
 

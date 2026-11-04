@@ -7,6 +7,10 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace OpenXcom
 {
@@ -45,12 +49,21 @@ bool writeTextFileAtomic(const std::string &path, const std::string &content)
 			return false;
 		}
 	}
-	std::remove(path.c_str());
-	if (std::rename(tmp.c_str(), path.c_str()) != 0)
+#ifdef _WIN32
+	if (MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0)
 	{
+		DeleteFileA(tmp.c_str());
 		return false;
 	}
 	return true;
+#else
+	if (std::rename(tmp.c_str(), path.c_str()) != 0)
+	{
+		std::remove(tmp.c_str());
+		return false;
+	}
+	return true;
+#endif
 }
 
 bool parseJsonStringArray(const std::string &json, std::string::size_type arrayStart, std::vector<std::string> *out)
@@ -245,6 +258,30 @@ AppendJournalResult appendCommandJournalEntry(const std::string &journalPath, co
 		return JOURNAL_APPEND_WRITE_FAILED;
 	}
 	return JOURNAL_APPEND_OK;
+}
+
+JournalReadiness classifyExistingJournalJson(const std::string &journalJson)
+{
+	if (journalJson.empty())
+	{
+		return JOURNAL_READABLE_EMPTY;
+	}
+	CommandJournalDocument doc = {};
+	if (parseCommandJournalJson(journalJson, &doc))
+	{
+		return JOURNAL_READABLE;
+	}
+	return JOURNAL_UNREADABLE;
+}
+
+bool journalJsonContainsCommandId(const std::string &journalJson, const std::string &commandId)
+{
+	CommandJournalDocument doc = {};
+	if (!parseCommandJournalJson(journalJson, &doc))
+	{
+		return false;
+	}
+	return journalDocumentContainsCommandId(doc, commandId);
 }
 
 } // namespace CompanionCommandJournalCore
