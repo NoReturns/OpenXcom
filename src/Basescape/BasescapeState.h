@@ -18,6 +18,7 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "../Engine/State.h"
+#include "../Engine/CompanionOnDemandRelayOverlay.h"
 
 namespace OpenXcom
 {
@@ -40,6 +41,8 @@ private:
 	BaseView *_view;
 	MiniBaseView *_mini;
 	Text *_txtFacility, *_txtLocation, *_txtFunds;
+	Text *_txtGithubQuota;
+	CompanionOnDemandRelayOverlay::Ui _companionRelayUi;
 	TextEdit *_edtBase;
 	TextButton *_btnNewBase, *_btnBaseInfo, *_btnSoldiers, *_btnCrafts, *_btnFacilities, *_btnResearch, *_btnManufacture, *_btnTransfer, *_btnPurchase, *_btnSell, *_btnGeoscape;
 	Base *_base;
@@ -51,6 +54,8 @@ public:
 	~BasescapeState();
 	/// Updates the base stats.
 	void init();
+	/// Runs HUD refresh.
+	void think();
 	/// Sets a new base to display.
 	void setBase(Base *base);
 	/// Handler for clicking the Build New Base button.
@@ -75,6 +80,11 @@ public:
 	void btnTransferClick(Action *action);
 	/// Handler for clicking the Geoscape button.
 	void btnGeoscapeClick(Action *action);
+	/// Companion send/retrieve relay controls (M1-25E).
+	void btnCompanionSendClick(Action *action);
+	void btnCompanionRetrieveClick(Action *action);
+	/// Consumes relay control clicks before other surfaces (M1-25E3).
+	void handle(Action *action);
 	/// Handler for clicking the base view.
 	void viewLeftClick(Action *action);
 	/// Handler for right clicking the base view.

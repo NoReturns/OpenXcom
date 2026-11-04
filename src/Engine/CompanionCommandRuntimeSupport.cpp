@@ -2,6 +2,8 @@
  * Open X-Com Companion — testable command polling policy (M1-21C).
  */
 #include "CompanionCommandRuntimeSupport.h"
+#include "CompanionCommandCore.h"
+#include "CompanionJsonLite.h"
 #include "CompanionSha256.h"
 #include <sstream>
 
@@ -271,6 +273,83 @@ bool shouldPollCommandInboxFile(
 		return true;
 	}
 	return msSinceLastPoll >= minIntervalMs;
+}
+
+bool parseInboxCommandBinding(const std::string &commandJson, InboxCommandBinding *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	*out = InboxCommandBinding();
+	if (commandJson.empty())
+	{
+		return false;
+	}
+	std::string commandType;
+	if (!CompanionJsonLite::extractJsonStringField(commandJson, "command_type", &commandType) ||
+	    (commandType != "MOVE" && commandType != "KNEEL"))
+	{
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &out->commandId) ||
+	    !CompanionJsonLite::extractJsonStringField(commandJson, "session_id", &out->sessionId) ||
+	    !CompanionJsonLite::extractJsonStringField(commandJson, "snapshot_sha256", &out->snapshotSha256) ||
+	    !CompanionJsonLite::extractJsonIntField(commandJson, "turn", &out->turn) ||
+	    !CompanionJsonLite::extractJsonIntField(commandJson, "state_version", &out->stateVersion))
+	{
+		return false;
+	}
+	out->parsed = true;
+	return true;
+}
+
+StaleInboxArchiveReason evaluateStaleInboxArchive(
+	const InboxCommandBinding &inbox,
+	const SnapshotExportBinding &currentExport,
+	bool journalContainsCommandId,
+	bool moveInFlight,
+	const std::string &inFlightCommandId)
+{
+	if (!inbox.parsed)
+	{
+		return STALE_INBOX_KEEP;
+	}
+	if (moveInFlight && !inFlightCommandId.empty() && inFlightCommandId == inbox.commandId)
+	{
+		return STALE_INBOX_KEEP;
+	}
+	if (journalContainsCommandId)
+	{
+		return STALE_INBOX_JOURNAL_DUPLICATE;
+	}
+	if (currentExport.sessionId.empty() || currentExport.snapshotSha256.empty())
+	{
+		return STALE_INBOX_KEEP;
+	}
+	if (inbox.sessionId != currentExport.sessionId ||
+	    inbox.snapshotSha256 != currentExport.snapshotSha256 ||
+	    inbox.turn != currentExport.turn ||
+	    inbox.stateVersion != currentExport.stateVersion)
+	{
+		return STALE_INBOX_BINDING_MISMATCH;
+	}
+	return STALE_INBOX_KEEP;
+}
+
+std::string buildArchivedInboxFileName(
+	const std::string &reasonToken,
+	const std::string &commandId,
+	long long epochMillisUtc)
+{
+	std::string idPrefix = commandId.size() >= 8 ? commandId.substr(0, 8) : commandId;
+	if (idPrefix.empty())
+	{
+		idPrefix = "unknown";
+	}
+	std::ostringstream name;
+	name << "tactical-command." << reasonToken << "-" << epochMillisUtc << "-" << idPrefix << ".json";
+	return name.str();
 }
 
 } // namespace CompanionCommandRuntimeSupport

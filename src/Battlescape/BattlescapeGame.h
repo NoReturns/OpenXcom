@@ -203,8 +203,14 @@ public:
 	void tryFulfillCompanionBriefing(bool battleInitialized);
 	/// Start a companion-authorized walk (no teleport); returns false with rejectReason when not started.
 	bool tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason);
+	/// Kneel an authorized soldier down (not a stand-up toggle); uses native kneel() rules.
+	bool tryExecuteCompanionKneelDown(BattleUnit *unit, std::string *rejectReason);
 	/// Poll local tactical-command.json when executor enabled.
 	void tickCompanionCommand(bool battleInitialized);
+	/// F4A/F4B1: human-initiated tactical order admission (companion policy scope only).
+	bool humanPlayerOrderPermitted(BattleUnit *unit) const;
+	/// Shows standard denial warning; returns true when the order was denied.
+	bool warnIfHumanPlayerOrderDenied(BattleUnit *unit) const;
 };
 
 }

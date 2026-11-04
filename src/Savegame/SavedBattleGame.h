@@ -19,6 +19,7 @@
  */
 #include <vector>
 #include <string>
+#include <set>
 #include <yaml-cpp/yaml.h>
 #include "BattleUnit.h"
 #include "../Mod/AlienDeployment.h"
@@ -81,6 +82,8 @@ private:
 	ChronoTrigger _chronoTrigger;
 	bool _beforeGame;
 	CompanionEventLog _companionEventLog;
+	std::string _companionTacticalBattleId;
+	std::set<int> _companionTacticalAiSoldierIds;
 	/// Selects a soldier.
 	BattleUnit *selectPlayerUnit(int dir, bool checkReselect = false, bool setReselect = false, bool checkInventory = false);
 public:
@@ -174,6 +177,12 @@ public:
 	/// Companion observation log for the current battle session (not serialized to saves).
 	CompanionEventLog &getCompanionEventLog() { return _companionEventLog; }
 	const CompanionEventLog &getCompanionEventLog() const { return _companionEventLog; }
+	/// Tactical companion ownership (M1-25B): authoritative during battlescape.
+	void ensureCompanionTacticalOwnershipInitialized(const SavedGame *campaign);
+	const std::string &getCompanionTacticalBattleId() const { return _companionTacticalBattleId; }
+	const std::set<int> &getCompanionTacticalAiSoldierIds() const { return _companionTacticalAiSoldierIds; }
+	bool assignCompanionTacticalSoldierToAi(int soldierId);
+	bool reclaimCompanionTacticalSoldierForHuman(int soldierId);
 	/// Ends the turn.
 	void endTurn();
 	/// Sets debug mode.

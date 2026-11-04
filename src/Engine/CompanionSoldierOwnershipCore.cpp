@@ -149,13 +149,43 @@ bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierCont
 	{
 		return false;
 	}
+	CompanionJsonLite::extractJsonStringField(controlFileJson, "campaign_id", &out->campaignId);
+	CompanionJsonLite::extractJsonStringField(controlFileJson, "tactical_battle_id", &out->tacticalBattleId);
 	out->valid = true;
 	return true;
 }
 
-SoldierControlMode controlModeForUnit(const std::string &controlFileJson, const std::string &battleSessionId, int unitId)
+namespace
 {
-	if (controlFileJson.empty() || battleSessionId.empty())
+
+bool relayBindingMatchesDocument(
+	const SoldierControlDocument &doc,
+	const RelayControlBindingContext &bindingContext)
+{
+	if (!doc.tacticalBattleId.empty() && !doc.campaignId.empty())
+	{
+		if (bindingContext.tacticalBattleId.empty() || bindingContext.campaignId.empty())
+		{
+			return false;
+		}
+		return doc.tacticalBattleId == bindingContext.tacticalBattleId
+		    && doc.campaignId == bindingContext.campaignId;
+	}
+	if (bindingContext.battleSessionId.empty())
+	{
+		return false;
+	}
+	return doc.sessionId == bindingContext.battleSessionId;
+}
+
+} // namespace
+
+SoldierControlMode controlModeForUnit(
+	const std::string &controlFileJson,
+	const RelayControlBindingContext &bindingContext,
+	int unitId)
+{
+	if (controlFileJson.empty())
 	{
 		return CONTROL_HUMAN;
 	}
@@ -164,7 +194,7 @@ SoldierControlMode controlModeForUnit(const std::string &controlFileJson, const 
 	{
 		return CONTROL_HUMAN;
 	}
-	if (doc.sessionId != battleSessionId)
+	if (!relayBindingMatchesDocument(doc, bindingContext))
 	{
 		return CONTROL_HUMAN;
 	}
@@ -180,9 +210,12 @@ SoldierControlMode controlModeForUnit(const std::string &controlFileJson, const 
 	return CONTROL_HUMAN;
 }
 
-bool isAiControlledUnit(const std::string &controlFileJson, const std::string &battleSessionId, int unitId)
+bool isAiControlledUnit(
+	const std::string &controlFileJson,
+	const RelayControlBindingContext &bindingContext,
+	int unitId)
 {
-	return controlModeForUnit(controlFileJson, battleSessionId, unitId) == CONTROL_AI;
+	return controlModeForUnit(controlFileJson, bindingContext, unitId) == CONTROL_AI;
 }
 
 } // namespace CompanionSoldierOwnershipCore

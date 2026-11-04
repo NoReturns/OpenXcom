@@ -4,6 +4,8 @@
 #include "CompanionSnapshot.h"
 #include "CompanionCommandRuntime.h"
 #include "CompanionSnapshotExportCore.h"
+#include "CompanionSoldierControlPublishCore.h"
+#include "CompanionBriefingTestSupport.h"
 #include "CompanionSnapshotTerrain.h"
 #include "CompanionSha256.h"
 #include "CompanionEventLog.h"
@@ -21,6 +23,8 @@
 #include <yaml-cpp/yaml.h>
 #include <cstdlib>
 #include <string>
+#include <algorithm>
+#include <vector>
 
 namespace OpenXcom
 {
@@ -31,6 +35,101 @@ namespace
 const int SCHEMA_VERSION_V4 = 4;
 const int SCHEMA_VERSION_V5 = 5;
 const size_t MAX_INVENTORY_ENTRIES = 24;
+
+#ifdef _WIN32
+const char kControlPathSep = '\\';
+#else
+const char kControlPathSep = '/';
+#endif
+
+std::string joinControlPath(const std::string &dir, const char *name)
+{
+	if (dir.empty())
+	{
+		return std::string(name);
+	}
+	return dir + kControlPathSep + name;
+}
+
+bool isPublishableLivePlayerSoldier(const BattleUnit *unit, const SavedGame *campaign)
+{
+	if (unit == 0 || campaign == 0 || unit->isOut())
+	{
+		return false;
+	}
+	if (unit->getOriginalFaction() != FACTION_PLAYER || unit->getFaction() != FACTION_PLAYER)
+	{
+		return false;
+	}
+	Soldier *soldier = unit->getGeoscapeSoldier();
+	if (soldier == 0 || soldier->getId() != unit->getId())
+	{
+		return false;
+	}
+	if (unit->getId() <= 0 || unit->getId() >= BattleUnit::MAX_SOLDIER_ID)
+	{
+		return false;
+	}
+	return campaign->isLiveRosterSoldier(unit->getId());
+}
+
+std::vector<int> collectPublishableLivePlayerUnitIds(SavedBattleGame *battle, SavedGame *campaign)
+{
+	std::vector<int> ids;
+	if (battle == 0 || campaign == 0)
+	{
+		return ids;
+	}
+	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end(); ++i)
+	{
+		if (!isPublishableLivePlayerSoldier(*i, campaign))
+		{
+			continue;
+		}
+		ids.push_back((*i)->getId());
+	}
+	std::sort(ids.begin(), ids.end());
+	ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+	return ids;
+}
+
+bool tryPublishSoldierControlBesideSnapshot(
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	const std::string &snapshotDirectoryPath)
+{
+	if (battle == 0 || campaign == 0 || snapshotDirectoryPath.empty())
+	{
+		Log(LOG_WARNING) << "Companion soldier control: publish skipped (missing battle or campaign context)";
+		return false;
+	}
+
+	const std::string sessionId = battle->getCompanionEventLog().getSessionId();
+	const std::vector<int> unitIds = collectPublishableLivePlayerUnitIds(battle, campaign);
+	battle->ensureCompanionTacticalOwnershipInitialized(campaign);
+	const CompanionSoldierControlPublishCore::ControlPublicationPlan plan =
+		CompanionSoldierControlPublishCore::buildControlPublicationJson(
+			sessionId,
+			campaign->getCompanionCampaignId(),
+			battle->getCompanionTacticalBattleId(),
+			battle->getCompanionTacticalAiSoldierIds(),
+			unitIds);
+	if (!plan.ok)
+	{
+		Log(LOG_WARNING) << "Companion soldier control: publish skipped (" << plan.publicReason << ")";
+		return false;
+	}
+
+	const std::string destPath = joinControlPath(snapshotDirectoryPath, "companion-soldier-control.json");
+	if (!CompanionSoldierControlPublishCore::writeControlFileAtomically(destPath, plan.jsonUtf8))
+	{
+		Log(LOG_WARNING) << "Companion soldier control: atomic write failed: " << destPath;
+		return false;
+	}
+
+	return true;
+}
 
 bool shouldIncludeUnit(const BattleUnit *unit)
 {
@@ -483,7 +582,48 @@ bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnaps
 		}
 	}
 
-	return CompanionSnapshotExportCore::writeSnapshotAtomically(path, resolved.yamlUtf8);
+	if (!CompanionSnapshotExportCore::writeSnapshotAtomically(path, resolved.yamlUtf8))
+	{
+		return false;
+	}
+
+	std::string archiveDigest;
+	if (outSnapshotSha256 != 0 && !outSnapshotSha256->empty())
+	{
+		archiveDigest = *outSnapshotSha256;
+	}
+	else
+	{
+		CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, &archiveDigest);
+	}
+
+	SavedGame *campaign = battle->getGeoscapeSave();
+	const std::string snapshotDir = CompanionBriefingTestSupport::parentDirectoryOfSnapshotPath(path);
+	if (!tryPublishSoldierControlBesideSnapshot(battle, campaign, snapshotDir))
+	{
+		Log(LOG_WARNING) << "Companion soldier control: publication failed (snapshot export succeeded)";
+	}
+	if (!archiveDigest.empty())
+	{
+		CompanionCommandRuntime::archiveStaleInboxAfterSnapshotExport(battle, archiveDigest);
+	}
+
+	return true;
+}
+
+bool CompanionSnapshot::tryPublishSoldierControl(SavedBattleGame *battle, SavedGame *campaign)
+{
+	if (battle == 0 || campaign == 0)
+	{
+		return false;
+	}
+	const char *path = std::getenv("OPENXCOM_COMPANION_SNAPSHOT_PATH");
+	if (path == 0 || path[0] == '\0')
+	{
+		return false;
+	}
+	const std::string snapshotDir = CompanionBriefingTestSupport::parentDirectoryOfSnapshotPath(path);
+	return tryPublishSoldierControlBesideSnapshot(battle, campaign, snapshotDir);
 }
 
 }

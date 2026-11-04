@@ -665,6 +665,167 @@ static void testRuntimeValidationPathAcceptsFreshMoveAfterDuplicateHandled()
 	expect(validateMoveCommand(input).accepted, "first valid MOVE remains accepted after duplicate pre-check split");
 }
 
+static KneelValidationInput validKneelInput()
+{
+	KneelValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.actorAlreadyKneeled = false;
+	input.actorCanKneelPosture = true;
+	input.insufficientTuForKneelDown = false;
+	return input;
+}
+
+static void testKneelAuthorizedAccepted()
+{
+	expect(validateKneelCommand(validKneelInput()).accepted, "authorized kneel accepted");
+}
+
+static void testKneelAlreadyKneelingRejected()
+{
+	KneelValidationInput input = validKneelInput();
+	input.actorAlreadyKneeled = true;
+	const MoveValidationResult result = validateKneelCommand(input);
+	expect(!result.accepted && result.rejectCode == "ALREADY_KNEELING", "already kneeling rejected");
+}
+
+static void testKneelInsufficientTuRejected()
+{
+	KneelValidationInput input = validKneelInput();
+	input.insufficientTuForKneelDown = true;
+	const MoveValidationResult result = validateKneelCommand(input);
+	expect(!result.accepted && result.rejectCode == "INSUFFICIENT_TU", "insufficient TU rejected");
+}
+
+static void testKneelHumanActorRejected()
+{
+	KneelValidationInput input = validKneelInput();
+	input.actorAiControlled = false;
+	const MoveValidationResult result = validateKneelCommand(input);
+	expect(!result.accepted && result.rejectCode == "NOT_AI_CONTROLLED", "human-controlled kneel rejected");
+}
+
+static void testKneelStaleSnapshotRejected()
+{
+	KneelValidationInput input = validKneelInput();
+	input.commandSnapshotSha256 = "0000000000000000000000000000000000000000000000000000000000000001";
+	const MoveValidationResult result = validateKneelCommand(input);
+	expect(!result.accepted && result.rejectCode == "STALE_SNAPSHOT", "kneel stale snapshot rejected");
+}
+
+static void testKneelPriorCommandActiveRejected()
+{
+	KneelValidationInput input = validKneelInput();
+	input.priorCommandNonTerminal = true;
+	const MoveValidationResult result = validateKneelCommand(input);
+	expect(!result.accepted && result.rejectCode == "PRIOR_COMMAND_ACTIVE", "kneel blocked while move in flight");
+}
+
+static void testKneelCannotKneelPostureRejected()
+{
+	KneelValidationInput input = validKneelInput();
+	input.actorCanKneelPosture = false;
+	const MoveValidationResult result = validateKneelCommand(input);
+	expect(!result.accepted && result.rejectCode == "INVALID_ACTOR", "non-kneeling posture rejected");
+}
+
+static void testKneelBindingUsesSharedTacticalValidation()
+{
+	expect(validateTacticalCommandBinding(validKneelInput()).accepted,
+		"kneel binding passes shared tactical validation before posture checks");
+}
+
+static void testParseKneelCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"kneel-test-1\",\n"
+		"  \"command_type\": \"KNEEL\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	KneelCommandParsed parsed = {};
+	expect(parseKneelCommandJson(json, &parsed), "kneel parse must succeed");
+	expect(parsed.valid && parsed.commandType == "KNEEL" && parsed.actorUnitId == 1, "kneel fields parsed");
+}
+
+static void testParseMoveRejectsKneelType()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"kneel-test-1\",\n"
+		"  \"command_type\": \"KNEEL\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	MoveCommandParsed parsed = {};
+	expect(!parseMoveCommandJson(json, &parsed), "MOVE parser must reject KNEEL command_type");
+	expect(parsed.rejectCode == "UNSUPPORTED_COMMAND_TYPE", "MOVE parser kneel reject code");
+}
+
+static void testTacticalBindingSharedByMoveAndKneel()
+{
+	MoveValidationInput moveInput = validInput();
+	moveInput.battleBusy = true;
+	KneelValidationInput kneelInput = validKneelInput();
+	kneelInput.battleBusy = true;
+	expect(validateMoveCommand(moveInput).rejectCode == "BATTLE_BUSY",
+		"MOVE battle busy rejection preserved after shared binding refactor");
+	expect(validateKneelCommand(kneelInput).rejectCode == "BATTLE_BUSY",
+		"KNEEL battle busy uses shared binding validation");
+}
+
+static void testStaleInboxArchiveEvaluation()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	InboxCommandBinding inbox = {};
+	inbox.parsed = true;
+	inbox.commandId = "move-test-1";
+	inbox.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	inbox.snapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	inbox.turn = 2;
+	inbox.stateVersion = 2;
+	SnapshotExportBinding current = {};
+	current.sessionId = inbox.sessionId;
+	current.snapshotSha256 = inbox.snapshotSha256;
+	current.turn = 2;
+	current.stateVersion = 3;
+	expect(evaluateStaleInboxArchive(inbox, current, false, false, std::string()) ==
+		STALE_INBOX_BINDING_MISMATCH, "state_version mismatch archives");
+	expect(evaluateStaleInboxArchive(inbox, current, true, false, std::string()) ==
+		STALE_INBOX_JOURNAL_DUPLICATE, "journal duplicate archives");
+	expect(evaluateStaleInboxArchive(inbox, current, false, true, inbox.commandId) ==
+		STALE_INBOX_KEEP, "in-flight same command kept");
+	expect(parseInboxCommandBinding(SAMPLE_MOVE_COMMAND, &inbox), "sample move parses binding");
+}
+
 int main()
 {
 	testOwnershipDefaultHuman();
@@ -710,6 +871,18 @@ int main()
 	testDuplicateRejectWritesOnlyWhenResultMissing();
 	testDuplicateIdentityConflictJsonShape();
 	testRuntimeValidationPathAcceptsFreshMoveAfterDuplicateHandled();
+	testKneelAuthorizedAccepted();
+	testKneelAlreadyKneelingRejected();
+	testKneelInsufficientTuRejected();
+	testKneelHumanActorRejected();
+	testKneelStaleSnapshotRejected();
+	testKneelPriorCommandActiveRejected();
+	testKneelCannotKneelPostureRejected();
+	testKneelBindingUsesSharedTacticalValidation();
+	testParseKneelCommandJson();
+	testParseMoveRejectsKneelType();
+	testTacticalBindingSharedByMoveAndKneel();
+	testStaleInboxArchiveEvaluation();
 
 	if (g_failures != 0)
 	{

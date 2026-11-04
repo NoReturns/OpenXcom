@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 /*
  * Copyright 2010-2016 OpenXcom Developers.
  *
@@ -45,8 +44,9 @@ private:
 	std::vector<Soldier*> *_list;
 
 	Surface *_bg, *_rank;
-	TextButton *_btnOk, *_btnPrev, *_btnNext, *_btnArmor, *_btnSack, *_btnDiary;
+	TextButton *_btnOk, *_btnPrev, *_btnNext, *_btnArmor, *_btnSack, *_btnDiary, *_btnCompanion;
 	Text *_txtRank, *_txtMissions, *_txtKills, *_txtCraft, *_txtRecovery, *_txtPsionic, *_txtDead;
+	Text *_txtCompanionStatus, *_txtCompanionUnsaved;
 	TextEdit *_edtSoldier;
 
 	Text *_txtTimeUnits, *_txtStamina, *_txtHealth, *_txtBravery, *_txtReactions, *_txtFiring, *_txtThrowing, *_txtMelee, *_txtStrength, *_txtPsiStrength, *_txtPsiSkill;
@@ -78,6 +78,10 @@ public:
 	void btnSackClick(Action *action);
 	/// Handler for clicking the Diary button.
 	void btnDiaryClick(Action *action);
+	/// Refresh companion assignment controls for the selected soldier.
+	void refreshCompanionAssignmentUi();
+	/// Assign or reclaim companion control for the selected soldier.
+	void btnCompanionClick(Action *action);
 };
 
 }

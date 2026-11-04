@@ -64,6 +64,9 @@
 #include "../Mod/Armor.h"
 #include "../Mod/RuleUfo.h"
 #include "../Savegame/SavedGame.h"
+#include "../Engine/CompanionGithubQuotaHudOverlay.h"
+#include "../Engine/CompanionGithubQuotaHudCore.h"
+#include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/Tile.h"
 #include "../Savegame/BattleUnit.h"
@@ -157,6 +160,8 @@ BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseSc
 	_barMorale = new Bar(102, 3, x + 170, y + 53);
 
 	_txtDebug = new Text(300, 10, 20, 0);
+	_txtGithubQuota = CompanionGithubQuotaHudOverlay::createHudText(
+		CompanionGithubQuotaHudCore::computeHudAnchorY(screenHeight, iconsHeight + 4));
 	_txtTooltip = new Text(300, 10, x + 2, y - 10);
 
 	// Set palette
@@ -472,6 +477,11 @@ BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseSc
 
 	_battleGame = new BattlescapeGame(_save, this);
 
+	add(_txtGithubQuota);
+	CompanionOnDemandRelayOverlay::createUi(this, &_companionRelayUi, "battlescape");
+	_companionRelayUi.btnSend->onMouseClick((ActionHandler)&BattlescapeState::btnCompanionSendClick);
+	_companionRelayUi.btnRetrieve->onMouseClick((ActionHandler)&BattlescapeState::btnCompanionRetrieveClick);
+
 	_barHealthColor = _barHealth->getColor();
 }
 
@@ -498,8 +508,13 @@ void BattlescapeState::init()
 	}
 
 	State::init();
+	CompanionOnDemandRelayOverlay::layoutForBattlescapeTop(&_companionRelayUi, Options::baseXResolution);
 	_animTimer->start();
 	_gameTimer->start();
+	CompanionGithubQuotaHudOverlay::layoutHudText(
+		_txtGithubQuota,
+		Options::baseYResolution,
+		_game->getMod()->getInterface("battlescape")->getElement("icons")->h + 4);
 	_map->setFocus(true);
 	_map->cacheUnits();
 	_map->draw();
@@ -561,6 +576,9 @@ void BattlescapeState::init()
 void BattlescapeState::think()
 {
 	static bool popped = false;
+
+	CompanionGithubQuotaHudOverlay::tick(_txtGithubQuota);
+	CompanionOnDemandRelayOverlay::tick(&_companionRelayUi);
 
 	if (_gameTimer->isRunning())
 	{
@@ -895,6 +913,10 @@ void BattlescapeState::btnKneelClick(Action *)
 		BattleUnit *bu = _save->getSelectedUnit();
 		if (bu)
 		{
+			if (_battleGame->warnIfHumanPlayerOrderDenied(bu))
+			{
+				return;
+			}
 			_battleGame->kneel(bu);
 			toggleKneelButton(bu);
 
@@ -1114,6 +1136,10 @@ void BattlescapeState::btnLeftHandItemClick(Action *)
 		_battleGame->cancelCurrentAction();
 
 		BattleUnit *unit = _save->getSelectedUnit();
+		if (_battleGame->warnIfHumanPlayerOrderDenied(unit))
+		{
+			return;
+		}
 		BattleItem *leftHandItem = getLeftHandItem(unit);
 
 		if (leftHandItem != getSpecialMeleeWeapon(unit))
@@ -1147,6 +1173,10 @@ void BattlescapeState::btnRightHandItemClick(Action *)
 		_battleGame->cancelCurrentAction();
 
 		BattleUnit *unit = _save->getSelectedUnit();
+		if (_battleGame->warnIfHumanPlayerOrderDenied(unit))
+		{
+			return;
+		}
 		BattleItem *rightHandItem = getRightHandItem(unit);
 
 		if (rightHandItem != getSpecialMeleeWeapon(unit))
@@ -1243,7 +1273,15 @@ void BattlescapeState::btnReserveClick(Action *action)
  */
 void BattlescapeState::btnReloadClick(Action *)
 {
-	if (playableUnitSelected() && _save->getSelectedUnit()->checkAmmo())
+	if (!playableUnitSelected())
+	{
+		return;
+	}
+	if (_battleGame->warnIfHumanPlayerOrderDenied(_save->getSelectedUnit()))
+	{
+		return;
+	}
+	if (_save->getSelectedUnit()->checkAmmo())
 	{
 		_game->getMod()->getSoundByDepth(_save->getDepth(), Mod::ITEM_RELOAD)->play(-1, getMap()->getSoundAngle(_save->getSelectedUnit()->getPosition()));
 		updateSoldierInfo();
@@ -1576,6 +1614,10 @@ inline void BattlescapeState::handle(Action *action)
 
 		if (_game->getCursor()->getVisible() || ((action->getDetails()->type == SDL_MOUSEBUTTONDOWN || action->getDetails()->type == SDL_MOUSEBUTTONUP) && action->getDetails()->button.button == SDL_BUTTON_RIGHT))
 		{
+			if (CompanionOnDemandRelayOverlay::tryConsumeRelayMouseAction(this, action, &_companionRelayUi))
+			{
+				return;
+			}
 			State::handle(action);
 
 			if (Options::touchEnabled == false && _isMouseScrolling && !Options::battleDragScrollInvert)
@@ -2224,16 +2266,22 @@ void BattlescapeState::btnZeroTUsClick(Action *action)
 {
 	if (allowButtons())
 	{
+		BattleUnit *unit = _battleGame->getSave()->getSelectedUnit();
+		if (unit == 0)
+		{
+			return;
+		}
+		if (_battleGame->warnIfHumanPlayerOrderDenied(unit))
+		{
+			return;
+		}
 		SDL_Event ev;
 		ev.type = SDL_MOUSEBUTTONDOWN;
 		ev.button.button = SDL_BUTTON_LEFT;
 		Action a = Action(&ev, 0.0, 0.0, 0, 0);
 		action->getSender()->mousePress(&a, this);
-		if (_battleGame->getSave()->getSelectedUnit())
-		{
-			_battleGame->getSave()->getSelectedUnit()->setTimeUnits(0);
-			updateSoldierInfo();
-		}
+		unit->setTimeUnits(0);
+		updateSoldierInfo();
 	}
 }
 
@@ -2354,6 +2402,16 @@ void BattlescapeState::stopScrolling(Action *action)
 void BattlescapeState::autosave()
 {
 	_autosave = true;
+}
+
+void BattlescapeState::btnCompanionSendClick(Action *)
+{
+	_battleGame->requestCompanionBriefing(true);
+}
+
+void BattlescapeState::btnCompanionRetrieveClick(Action *)
+{
+	CompanionOnDemandRelayOverlay::onRetrievePressed();
 }
 
 }

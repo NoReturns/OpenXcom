@@ -34,6 +34,8 @@ std::string serializeSnapshotYaml(const YAML::Node &root);
 ResolvedSnapshot resolveSnapshotForSizeCap(const YAML::Node &schemaV5WithTerrain,
 	const std::function<YAML::Node()> &buildSchemaV4WithoutTerrain);
 
+bool writeUtf8FileAtomically(const std::string &destPath, const std::string &utf8Content);
+
 bool writeSnapshotAtomically(const std::string &destPath, const std::string &yamlContent);
 
 } // namespace CompanionSnapshotExportCore

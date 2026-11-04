@@ -46,9 +46,35 @@
 #include "BattlescapeGenerator.h"
 #include "TileEngine.h"
 #include "../Mod/RuleInterface.h"
+#include "../Engine/CompanionTacticalAuthorityCore.h"
 
 namespace OpenXcom
 {
+
+bool InventoryState::_warnIfInventoryMutationDenied() const
+{
+	BattleUnit *unit = _battleGame->getSelectedUnit();
+	if (unit == 0)
+	{
+		return false;
+	}
+	std::string controlJson;
+	CompanionTacticalAuthorityCore::tryReadRelayControlJsonFromSnapshotEnvironment(&controlJson);
+	if (CompanionTacticalAuthorityCore::humanPlayerOrderPermitted(
+		_game->getSavedGame(), _battleGame, unit, controlJson))
+	{
+		return false;
+	}
+	if (_parent != 0)
+	{
+		_parent->warning("STR_COMPANION_MOVEMENT_DENIED");
+	}
+	else
+	{
+		_inv->showWarning(tr("STR_COMPANION_MOVEMENT_DENIED"));
+	}
+	return true;
+}
 
 static const int _templateBtnX = 288;
 static const int _createTemplateBtnY = 90;
@@ -535,6 +561,10 @@ void InventoryState::btnNextClick(Action *)
  */
 void InventoryState::btnUnloadClick(Action *)
 {
+	if (_warnIfInventoryMutationDenied())
+	{
+		return;
+	}
 	if (_inv->unload())
 	{
 		_txtItem->setText("");
@@ -634,6 +664,10 @@ void InventoryState::btnApplyTemplateClick(Action *)
 	// it's ok if the template is empty -- it will just result in clearing the
 	// unit's inventory
 	if (_inv->getSelectedItem() != 0)
+	{
+		return;
+	}
+	if (_warnIfInventoryMutationDenied())
 	{
 		return;
 	}
@@ -777,6 +811,10 @@ void InventoryState::onClearInventory(Action *)
 	{
 		return;
 	}
+	if (_warnIfInventoryMutationDenied())
+	{
+		return;
+	}
 
 	BattleUnit               *unit       = _battleGame->getSelectedUnit();
 	std::vector<BattleItem*> *unitInv    = unit->getInventory();
@@ -797,6 +835,10 @@ void InventoryState::onAutoequip(Action *)
 {
 	// don't act when moving items
 	if (_inv->getSelectedItem() != 0)
+	{
+		return;
+	}
+	if (_warnIfInventoryMutationDenied())
 	{
 		return;
 	}

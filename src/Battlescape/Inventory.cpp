@@ -41,9 +41,37 @@
 #include "../Savegame/Tile.h"
 #include "PrimeGrenadeState.h"
 #include "../Engine/Screen.h"
+#include "../Engine/CompanionTacticalAuthorityCore.h"
 
 namespace OpenXcom
 {
+
+namespace
+{
+
+bool warnCompanionInventoryMutationDenied(Game *game, BattleUnit *unit, WarningMessage *warning)
+{
+	if (game == 0 || unit == 0 || warning == 0)
+	{
+		return false;
+	}
+	SavedBattleGame *battle = game->getSavedGame()->getSavedBattle();
+	if (battle == 0)
+	{
+		return false;
+	}
+	std::string controlJson;
+	CompanionTacticalAuthorityCore::tryReadRelayControlJsonFromSnapshotEnvironment(&controlJson);
+	if (CompanionTacticalAuthorityCore::humanPlayerOrderPermitted(
+		game->getSavedGame(), battle, unit, controlJson))
+	{
+		return false;
+	}
+	warning->showMessage(game->getLanguage()->getString("STR_COMPANION_MOVEMENT_DENIED"));
+	return true;
+}
+
+} // namespace
 
 /**
  * Sets up an inventory with the specified size and position.
@@ -529,6 +557,11 @@ void Inventory::mouseClick(Action *action, State *state)
 				{
 					if ((SDL_GetModState() & KMOD_CTRL))
 					{
+						if (warnCompanionInventoryMutationDenied(_game, _selUnit, _warning))
+						{
+							InteractiveSurface::mouseClick(action, state);
+							return;
+						}
 						RuleInventory *newSlot = _game->getMod()->getInventory("STR_GROUND", true);
 						std::string warning = "STR_NOT_ENOUGH_SPACE";
 						bool placed = false;
@@ -604,6 +637,11 @@ void Inventory::mouseClick(Action *action, State *state)
 					}
 					else
 					{
+						if (warnCompanionInventoryMutationDenied(_game, _selUnit, _warning))
+						{
+							InteractiveSurface::mouseClick(action, state);
+							return;
+						}
 						setSelectedItem(item);
 						if (item->getFuseTimer() >= 0)
 						{
@@ -616,6 +654,11 @@ void Inventory::mouseClick(Action *action, State *state)
 		// Drop item
 		else
 		{
+			if (warnCompanionInventoryMutationDenied(_game, _selUnit, _warning))
+			{
+				InteractiveSurface::mouseClick(action, state);
+				return;
+			}
 			int x = _selection->getX() + (RuleInventory::HAND_W - _selItem->getRules()->getInventoryWidth()) * RuleInventory::SLOT_W/2 + RuleInventory::SLOT_W/2,
 				y = _selection->getY() + (RuleInventory::HAND_H - _selItem->getRules()->getInventoryHeight()) * RuleInventory::SLOT_H/2 + RuleInventory::SLOT_H/2;
 			RuleInventory *slot = getSlotInPosition(&x, &y);
@@ -757,6 +800,11 @@ void Inventory::mouseClick(Action *action, State *state)
 							BattleType itemType = item->getRules()->getBattleType();
 							if (BT_GRENADE == itemType || BT_PROXIMITYGRENADE == itemType)
 							{
+								if (warnCompanionInventoryMutationDenied(_game, _selUnit, _warning))
+								{
+									InteractiveSurface::mouseClick(action, state);
+									return;
+								}
 								if (item->getFuseTimer() == -1)
 								{
 									// Prime that grenade!
@@ -770,6 +818,11 @@ void Inventory::mouseClick(Action *action, State *state)
 								}
 								else
 								{
+									if (warnCompanionInventoryMutationDenied(_game, _selUnit, _warning))
+									{
+										InteractiveSurface::mouseClick(action, state);
+										return;
+									}
 									_warning->showMessage(_game->getLanguage()->getString("STR_GRENADE_IS_DEACTIVATED"));
 									item->setFuseTimer(-1);  // Unprime the grenade
 									arrangeGround(false);
@@ -806,6 +859,10 @@ bool Inventory::unload()
 {
 	// Must be holding an item
 	if (_selItem == 0)
+	{
+		return false;
+	}
+	if (warnCompanionInventoryMutationDenied(_game, _selUnit, _warning))
 	{
 		return false;
 	}

@@ -104,6 +104,43 @@ void writeCompanionAssignments(YAML::Node *saveDocumentNode, const std::set<int>
 	(*saveDocumentNode)["companion"] = companion;
 }
 
+bool companionAiAssignmentSetsEqual(const std::set<int> &currentAiIds, const std::set<int> &persistedAiIds)
+{
+	return currentAiIds == persistedAiIds;
+}
+
+bool hasUnsavedCompanionSoldierAssignments(const std::set<int> &currentAiIds, const std::set<int> &persistedAiIds)
+{
+	return !companionAiAssignmentSetsEqual(currentAiIds, persistedAiIds);
+}
+
+bool isCompanionSoldierAssignmentUnsaved(const std::set<int> &currentAiIds, const std::set<int> &persistedAiIds, int soldierId)
+{
+	if (soldierId <= 0)
+	{
+		return false;
+	}
+	const bool currentAi = currentAiIds.find(soldierId) != currentAiIds.end();
+	const bool persistedAi = persistedAiIds.find(soldierId) != persistedAiIds.end();
+	return currentAi != persistedAi;
+}
+
+CompanionSoldierOwnershipCore::SoldierControlMode resolveCampaignSoldierControlMode(
+	const std::set<int> &currentCampaignAiSoldierIds,
+	int soldierId,
+	bool isLivePlayerSoldier)
+{
+	if (soldierId <= 0 || !isLivePlayerSoldier)
+	{
+		return CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+	}
+	if (currentCampaignAiSoldierIds.find(soldierId) == currentCampaignAiSoldierIds.end())
+	{
+		return CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+	}
+	return CompanionSoldierOwnershipCore::CONTROL_AI;
+}
+
 } // namespace CompanionCampaignOwnershipCore
 
 } // namespace OpenXcom

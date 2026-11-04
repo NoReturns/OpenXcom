@@ -202,6 +202,32 @@ bool writeBriefingRequestFile(const std::string &requestDir, const std::string &
 	return writeTextAtomically(requestPath, jsonContent);
 }
 
+bool writeTacticalSendMarkerFile(const std::string &requestDir, const std::string &briefingRequestId,
+	const std::string &sessionId, int turn, const std::string &snapshotSha256, long long exportedAtMs)
+{
+	if (requestDir.empty() || briefingRequestId.empty() || sessionId.empty()
+	    || !CompanionSha256::isValidHexDigest(snapshotSha256))
+	{
+		return false;
+	}
+#ifdef _WIN32
+	const char pathSep = '\\';
+#else
+	const char pathSep = '/';
+#endif
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"briefing_request_id\": \"" << briefingRequestId << "\",\n"
+	     << "  \"session_id\": \"" << sessionId << "\",\n"
+	     << "  \"turn\": " << turn << ",\n"
+	     << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n"
+	     << "  \"exported_at_ms\": " << exportedAtMs << "\n"
+	     << "}\n";
+	const std::string markerPath = requestDir + pathSep + "companion-tactical-send-marker.json";
+	return writeTextAtomically(markerPath, json.str());
+}
+
 } // namespace CompanionBriefingTestSupport
 
 } // namespace OpenXcom

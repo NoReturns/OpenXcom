@@ -107,6 +107,11 @@ set ( engine_src
   Engine/CompanionEventLogCore.cpp
 	Engine/CompanionEventLog.cpp
 	Engine/CompanionSnapshot.cpp
+	Engine/CompanionGithubQuotaHudCore.cpp
+	Engine/CompanionGithubQuotaHudOverlay.cpp
+	Engine/CompanionOnDemandRelayCore.cpp
+	Engine/CompanionOnDemandRelayLayout.cpp
+	Engine/CompanionOnDemandRelayOverlay.cpp
 	Engine/CompanionSnapshotExportCore.cpp
 	Engine/CompanionSnapshotTerrain.cpp
 	Engine/CompanionSnapshotTerrainCapture.cpp
@@ -121,6 +126,10 @@ set ( engine_src
 	Engine/CompanionSoldierOwnershipCore.cpp
 	Engine/CompanionCampaignIdentityCore.cpp
 	Engine/CompanionCampaignOwnershipCore.cpp
+	Engine/CompanionTacticalOwnershipCore.cpp
+	Engine/CompanionTacticalAuthorityCore.cpp
+	Engine/CompanionTacticalHumanOrderAdmission.cpp
+	Engine/CompanionSoldierControlPublishCore.cpp
   Engine/CrossPlatform.cpp
   Engine/FastLineClip.cpp
   Engine/FileMap.cpp
@@ -566,6 +575,43 @@ if ( OPENXCOM_BUILD_COMPANION_COMMAND_TESTS )
   add_test ( NAME companion_command_test COMMAND companion_command_test )
 endif ()
 
+option ( OPENXCOM_BUILD_COMPANION_GITHUB_QUOTA_HUD_TESTS "Build companion GitHub quota HUD regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_GITHUB_QUOTA_HUD_TESTS )
+  add_executable ( companion_github_quota_hud_test
+    test/companion_github_quota_hud_test.cpp
+    Engine/CompanionGithubQuotaHudCore.cpp
+    Engine/CompanionBriefingRequestCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_github_quota_hud_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_github_quota_hud_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_github_quota_hud_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_github_quota_hud_test COMMAND companion_github_quota_hud_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_ON_DEMAND_RELAY_TESTS "Build companion on-demand relay regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_ON_DEMAND_RELAY_TESTS )
+  add_executable ( companion_on_demand_relay_test
+    test/companion_on_demand_relay_test.cpp
+    Engine/CompanionOnDemandRelayCore.cpp
+    Engine/CompanionOnDemandRelayLayout.cpp
+    Engine/CompanionBriefingRequestCore.cpp
+    Engine/CompanionSha256.cpp
+    Engine/CompanionJsonLite.cpp
+  )
+  target_include_directories ( companion_on_demand_relay_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_on_demand_relay_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_on_demand_relay_test ${basic_windows_libs} )
+  else ()
+    target_link_libraries ( companion_on_demand_relay_test ${system_libs} )
+  endif ()
+  add_test ( NAME companion_on_demand_relay_test COMMAND companion_on_demand_relay_test )
+endif ()
+
 option ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS "Build companion campaign identity regression tests" ON )
 if ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS )
   add_executable ( companion_campaign_identity_test
@@ -597,6 +643,89 @@ if ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_OWNERSHIP_TESTS )
     target_link_libraries ( companion_campaign_ownership_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_campaign_ownership_test COMMAND companion_campaign_ownership_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_TACTICAL_AUTHORITY_TESTS "Build companion tactical authority regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_TACTICAL_AUTHORITY_TESTS )
+  add_executable ( companion_tactical_authority_test
+    test/companion_tactical_authority_test.cpp
+    Engine/CompanionTacticalAuthorityCore.cpp
+    Engine/CompanionCampaignOwnershipCore.cpp
+    Engine/CompanionSoldierOwnershipCore.cpp
+    Engine/CompanionCommandCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_tactical_authority_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_tactical_authority_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_tactical_authority_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_tactical_authority_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_tactical_authority_test COMMAND companion_tactical_authority_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_SOLDIER_CONTROL_PUBLISH_TESTS "Build companion soldier control publish regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_SOLDIER_CONTROL_PUBLISH_TESTS )
+  add_executable ( companion_soldier_control_publish_test
+    test/companion_soldier_control_publish_test.cpp
+    Engine/CompanionSoldierControlPublishCore.cpp
+    Engine/CompanionCampaignOwnershipCore.cpp
+    Engine/CompanionCampaignIdentityCore.cpp
+    Engine/CompanionSoldierOwnershipCore.cpp
+    Engine/CompanionCommandCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionSha256.cpp
+    Engine/CompanionSnapshotExportCore.cpp
+  )
+  target_include_directories ( companion_soldier_control_publish_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_soldier_control_publish_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_soldier_control_publish_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_soldier_control_publish_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_soldier_control_publish_test COMMAND companion_soldier_control_publish_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_TACTICAL_OWNERSHIP_TESTS "Build companion tactical ownership regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_TACTICAL_OWNERSHIP_TESTS )
+  add_executable ( companion_tactical_ownership_test
+    test/companion_tactical_ownership_test.cpp
+    Engine/CompanionTacticalOwnershipCore.cpp
+    Engine/CompanionTacticalAuthorityCore.cpp
+    Engine/CompanionCampaignOwnershipCore.cpp
+    Engine/CompanionCampaignIdentityCore.cpp
+    Engine/CompanionSoldierOwnershipCore.cpp
+    Engine/CompanionCommandCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_tactical_ownership_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_tactical_ownership_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_tactical_ownership_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_tactical_ownership_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_tactical_ownership_test COMMAND companion_tactical_ownership_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_SOLDIER_ASSIGNMENT_UI_TESTS "Build companion soldier assignment UI regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_SOLDIER_ASSIGNMENT_UI_TESTS )
+  add_executable ( companion_soldier_assignment_ui_test
+    test/companion_soldier_assignment_ui_test.cpp
+    Engine/CompanionCampaignOwnershipCore.cpp
+  )
+  target_include_directories ( companion_soldier_assignment_ui_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_soldier_assignment_ui_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_soldier_assignment_ui_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_soldier_assignment_ui_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_soldier_assignment_ui_test COMMAND companion_soldier_assignment_ui_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS "Build companion snapshot terrain regression tests" ON )

@@ -96,6 +96,8 @@ public:
 	void txtTooltipOut(Action *action);
 
 private:
+	/// Re-evaluates companion human-order policy for the selected unit (F4C).
+	bool _warnIfInventoryMutationDenied() const;
 	/// Update the visibility and icons for the template buttons
 	void _updateTemplateButtons(bool isVisible);
 	/// Refresh the hover status of the mouse

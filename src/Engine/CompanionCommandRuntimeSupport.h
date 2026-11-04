@@ -69,6 +69,45 @@ bool shouldPollCommandInboxFile(
 	long msSinceLastPoll,
 	int minIntervalMs = COMMAND_INBOX_MIN_POLL_INTERVAL_MS);
 
+struct InboxCommandBinding
+{
+	bool parsed;
+	std::string commandId;
+	std::string sessionId;
+	std::string snapshotSha256;
+	int turn;
+	int stateVersion;
+};
+
+struct SnapshotExportBinding
+{
+	std::string sessionId;
+	std::string snapshotSha256;
+	int turn;
+	int stateVersion;
+};
+
+enum StaleInboxArchiveReason
+{
+	STALE_INBOX_KEEP = 0,
+	STALE_INBOX_BINDING_MISMATCH,
+	STALE_INBOX_JOURNAL_DUPLICATE
+};
+
+bool parseInboxCommandBinding(const std::string &commandJson, InboxCommandBinding *out);
+
+StaleInboxArchiveReason evaluateStaleInboxArchive(
+	const InboxCommandBinding &inbox,
+	const SnapshotExportBinding &currentExport,
+	bool journalContainsCommandId,
+	bool moveInFlight,
+	const std::string &inFlightCommandId);
+
+std::string buildArchivedInboxFileName(
+	const std::string &reasonToken,
+	const std::string &commandId,
+	long long epochMillisUtc);
+
 } // namespace CompanionCommandRuntimeSupport
 
 } // namespace OpenXcom

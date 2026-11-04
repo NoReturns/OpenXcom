@@ -44,6 +44,8 @@ std::string buildBriefingRequestJson(const std::string &requestId, const std::st
 	const std::string &snapshotSha256);
 bool writeBriefingRequestFile(const std::string &requestDir, const std::string &jsonContent);
 bool shouldWriteBriefingRequestAfterExport(bool exportSucceeded, const std::string &snapshotSha256);
+bool writeTacticalSendMarkerFile(const std::string &requestDir, const std::string &briefingRequestId,
+	const std::string &sessionId, int turn, const std::string &snapshotSha256, long long exportedAtMs);
 
 } // namespace CompanionBriefingTestSupport
 

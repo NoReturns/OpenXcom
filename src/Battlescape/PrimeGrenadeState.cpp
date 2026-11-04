@@ -29,6 +29,8 @@
 #include "../Savegame/SavedBattleGame.h"
 #include "../Mod/Mod.h"
 #include "../Mod/RuleInterface.h"
+#include "../Savegame/BattleUnit.h"
+#include "BattlescapeGame.h"
 
 namespace OpenXcom
 {
@@ -162,6 +164,22 @@ void PrimeGrenadeState::btnClick(Action *action)
 
 	if (btnID != -1)
 	{
+		BattleUnit *actor = 0;
+		if (_inInventoryView)
+		{
+			actor = _grenadeInInventory != 0 ? _grenadeInInventory->getOwner() : 0;
+		}
+		else if (_action != 0)
+		{
+			actor = _action->actor;
+		}
+		SavedBattleGame *battle = _game->getSavedGame()->getSavedBattle();
+		BattlescapeGame *battleGame = battle != 0 ? battle->getBattleGame() : 0;
+		if (battleGame != 0 && actor != 0 && battleGame->warnIfHumanPlayerOrderDenied(actor))
+		{
+			_game->popState();
+			return;
+		}
 		if (_inInventoryView) _grenadeInInventory->setFuseTimer(0 + btnID);
 		else _action->value = btnID;
 		_game->popState();

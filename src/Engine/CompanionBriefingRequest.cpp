@@ -6,6 +6,7 @@
 #include "CompanionSnapshot.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "Logger.h"
+#include <chrono>
 #include <cstdlib>
 
 namespace OpenXcom
@@ -41,7 +42,7 @@ bool CompanionBriefingRequest::canFulfill(SavedBattleGame *battle, bool battleBu
 	return CompanionBriefingTestSupport::canFulfillBriefing(input);
 }
 
-bool CompanionBriefingRequest::fulfill(SavedBattleGame *battle)
+bool CompanionBriefingRequest::fulfill(SavedBattleGame *battle, std::string *outBriefingRequestId)
 {
 	if (battle == 0 || !snapshotPathConfigured())
 	{
@@ -66,6 +67,20 @@ bool CompanionBriefingRequest::fulfill(SavedBattleGame *battle)
 	{
 		Log(LOG_INFO) << "Companion briefing: failed to write request file";
 		return false;
+	}
+
+	const long long exportedAtMs = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::system_clock::now().time_since_epoch()).count());
+	if (!CompanionBriefingTestSupport::writeTacticalSendMarkerFile(
+		requestDir, requestId, sessionId, battle->getTurn(), snapshotSha256, exportedAtMs))
+	{
+		Log(LOG_INFO) << "Companion briefing: failed to write tactical send marker";
+		return false;
+	}
+
+	if (outBriefingRequestId != 0)
+	{
+		*outBriefingRequestId = requestId;
 	}
 
 	Log(LOG_INFO) << "Companion briefing request " << requestId.substr(0, 8) << " turn " << battle->getTurn();

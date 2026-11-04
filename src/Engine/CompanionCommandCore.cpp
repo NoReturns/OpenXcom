@@ -195,7 +195,77 @@ bool parseMoveCommandJson(const std::string &json, MoveCommandParsed *out)
 	return true;
 }
 
-MoveValidationResult validateMoveCommand(const MoveValidationInput &input)
+bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	KneelCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "KNEEL")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+MoveValidationResult validateTacticalCommandBinding(const TacticalCommandBindingValidationInput &input)
 {
 	MoveValidationResult result = {};
 	result.accepted = false;
@@ -302,13 +372,6 @@ MoveValidationResult validateMoveCommand(const MoveValidationInput &input)
 		result.publicReason = "Soldier is human-controlled.";
 		return result;
 	}
-	if (input.destX < 0 || input.destY < 0 || input.destZ < 0 ||
-	    input.destX >= input.mapSizeX || input.destY >= input.mapSizeY || input.destZ >= input.mapSizeZ)
-	{
-		result.rejectCode = "INVALID_DESTINATION";
-		result.publicReason = "Destination out of map bounds.";
-		return result;
-	}
 	if (input.battleBusy)
 	{
 		result.rejectCode = "BATTLE_BUSY";
@@ -316,6 +379,55 @@ MoveValidationResult validateMoveCommand(const MoveValidationInput &input)
 		return result;
 	}
 
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validateMoveCommand(const MoveValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+	if (input.destX < 0 || input.destY < 0 || input.destZ < 0 ||
+	    input.destX >= input.mapSizeX || input.destY >= input.mapSizeY || input.destZ >= input.mapSizeZ)
+	{
+		result.rejectCode = "INVALID_DESTINATION";
+		result.publicReason = "Destination out of map bounds.";
+		return result;
+	}
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validateKneelCommand(const KneelValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+	if (input.actorAlreadyKneeled)
+	{
+		result.rejectCode = "ALREADY_KNEELING";
+		result.publicReason = "Unit is already kneeling.";
+		return result;
+	}
+	if (!input.actorCanKneelPosture)
+	{
+		result.rejectCode = "INVALID_ACTOR";
+		result.publicReason = "Actor cannot kneel.";
+		return result;
+	}
+	if (input.insufficientTuForKneelDown)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units to kneel.";
+		return result;
+	}
 	result.accepted = true;
 	return result;
 }

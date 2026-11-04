@@ -103,7 +103,7 @@ ResolvedSnapshot resolveSnapshotForSizeCap(const YAML::Node &schemaV5WithTerrain
 	return result;
 }
 
-bool writeSnapshotAtomically(const std::string &destPath, const std::string &yamlContent)
+bool writeUtf8FileAtomically(const std::string &destPath, const std::string &utf8Content)
 {
 	const std::string tmpPath = destPath + ".companion.tmp";
 
@@ -111,14 +111,14 @@ bool writeSnapshotAtomically(const std::string &destPath, const std::string &yam
 		std::ofstream out(tmpPath.c_str(), std::ios::out | std::ios::trunc | std::ios::binary);
 		if (!out)
 		{
-			std::cerr << "Companion snapshot: failed to open temp file for write: " << tmpPath << std::endl;
+			std::cerr << "Companion export: failed to open temp file for write: " << tmpPath << std::endl;
 			return false;
 		}
-		out << yamlContent;
+		out << utf8Content;
 		out.flush();
 		if (!out)
 		{
-			std::cerr << "Companion snapshot: failed while writing temp file: " << tmpPath << std::endl;
+			std::cerr << "Companion export: failed while writing temp file: " << tmpPath << std::endl;
 			deletePath(tmpPath);
 			return false;
 		}
@@ -126,12 +126,17 @@ bool writeSnapshotAtomically(const std::string &destPath, const std::string &yam
 
 	if (!movePath(tmpPath, destPath))
 	{
-		std::cerr << "Companion snapshot: failed to replace snapshot file: " << destPath << std::endl;
+		std::cerr << "Companion export: failed to replace destination file: " << destPath << std::endl;
 		deletePath(tmpPath);
 		return false;
 	}
 
 	return true;
+}
+
+bool writeSnapshotAtomically(const std::string &destPath, const std::string &yamlContent)
+{
+	return writeUtf8FileAtomically(destPath, yamlContent);
 }
 
 } // namespace CompanionSnapshotExportCore

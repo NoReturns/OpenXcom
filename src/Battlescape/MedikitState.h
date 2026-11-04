@@ -43,6 +43,8 @@ class MedikitState : public State
 	BattleAction *_action;
 	int _tu;
 	bool _revivedTarget;
+	/// Returns true when companion policy blocks medikit use (F4C).
+	bool _warnIfMedikitMutationDenied();
 	/// Handler for the end button.
 	void onEndClick(Action *action);
 	/// Handler for the heal button.

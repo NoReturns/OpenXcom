@@ -133,7 +133,8 @@ private:
 	std::vector<MissionStatistics*> _missionStatistics;
 	mutable std::string _companionCampaignId;
 	std::set<int> _companionAiSoldierIds;
-	bool isLiveRosterSoldier(int soldierId) const;
+	mutable std::set<int> _companionAiSoldierIdsAtLastSave;
+	void syncCompanionSoldierOwnershipPersistedSnapshot() const;
 
 	static SaveInfo getSaveInfo(const std::string &file, Language *lang);
 public:
@@ -166,6 +167,14 @@ public:
 	bool reclaimCompanionSoldierForHuman(int soldierId);
 	/// Stored AI soldier ids from campaign save (may include stale ids until reclaimed).
 	std::map<int, CompanionSoldierOwnershipCore::SoldierControlMode> getCompanionSoldierOwnershipAssignments() const;
+	/// True when in-memory AI assignments differ from the last successful on-disk save (updated only after SavedGame::save completes writing the .sav).
+	bool hasUnsavedCompanionSoldierOwnershipChanges() const;
+	/// Per-soldier unsaved assignment (reverts to saved value => false).
+	bool isCompanionSoldierOwnershipUnsaved(int soldierId) const;
+	/// Current in-memory AI soldier id set (includes UNSAVED assignments).
+	const std::set<int> &getCompanionCampaignAiSoldierIds() const { return _companionAiSoldierIds; }
+	/// True when soldier id refers to a live roster soldier in any base.
+	bool isLiveRosterSoldier(int soldierId) const;
 	/// Gets the game difficulty.
 	GameDifficulty getDifficulty() const;
 	/// Sets the game difficulty.

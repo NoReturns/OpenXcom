@@ -18,6 +18,7 @@
  * along with OpenXcom.  If not, see <http:///www.gnu.org/licenses/>.
  */
 #include "../Engine/State.h"
+#include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "Position.h"
 
 #include <vector>
@@ -67,6 +68,8 @@ private:
 	Timer *_animTimer, *_gameTimer;
 	SavedBattleGame *_save;
 	Text *_txtDebug, *_txtTooltip;
+	Text *_txtGithubQuota;
+	CompanionOnDemandRelayOverlay::Ui _companionRelayUi;
 	std::vector<State*> _popups;
 	BattlescapeGame *_battleGame;
 	bool _firstInit;
@@ -148,6 +151,9 @@ public:
 	void btnEndTurnClick(Action *action);
 	/// Handler for clicking the Abort button.
 	void btnAbortClick(Action *action);
+	/// Companion send/retrieve relay controls (M1-25E).
+	void btnCompanionSendClick(Action *action);
+	void btnCompanionRetrieveClick(Action *action);
 	/// Handler for clicking the stats.
 	void btnStatsClick(Action *action);
 	/// Handler for clicking the left hand item button.

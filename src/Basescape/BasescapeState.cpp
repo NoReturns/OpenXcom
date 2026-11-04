@@ -37,6 +37,9 @@
 #include "DismantleFacilityState.h"
 #include "../Geoscape/BuildNewBaseState.h"
 #include "../Engine/Action.h"
+#include "../Engine/CompanionGithubQuotaHudOverlay.h"
+#include "../Engine/CompanionGithubQuotaHudCore.h"
+#include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "BaseInfoState.h"
 #include "SoldiersState.h"
 #include "CraftsState.h"
@@ -81,6 +84,9 @@ BasescapeState::BasescapeState(Base *base, Globe *globe) : _base(base), _globe(g
 	_btnSell = new TextButton(128, 12, 192, 175);
 	_btnGeoscape = new TextButton(128, 12, 192, 188);
 
+	_txtGithubQuota = CompanionGithubQuotaHudOverlay::createHudText(
+		CompanionGithubQuotaHudCore::computeHudAnchorY(Options::baseYResolution, 4));
+
 	// Set palette
 	setInterface("basescape");
 
@@ -101,6 +107,10 @@ BasescapeState::BasescapeState(Base *base, Globe *globe) : _base(base), _globe(g
 	add(_btnPurchase, "button", "basescape");
 	add(_btnSell, "button", "basescape");
 	add(_btnGeoscape, "button", "basescape");
+	add(_txtGithubQuota);
+	CompanionOnDemandRelayOverlay::createUi(this, &_companionRelayUi, "basescape");
+	_companionRelayUi.btnSend->onMouseClick((ActionHandler)&BasescapeState::btnCompanionSendClick);
+	_companionRelayUi.btnRetrieve->onMouseClick((ActionHandler)&BasescapeState::btnCompanionRetrieveClick);
 
 	centerAllSurfaces();
 
@@ -182,6 +192,12 @@ BasescapeState::~BasescapeState()
 void BasescapeState::init()
 {
 	State::init();
+	CompanionOnDemandRelayOverlay::layoutForBaseViewport(
+		&_companionRelayUi,
+		_view->getX(),
+		_view->getY(),
+		_view->getWidth());
+	CompanionGithubQuotaHudOverlay::layoutHudText(_txtGithubQuota, Options::baseYResolution, 4);
 
 	setBase(_base);
 	_view->setBase(_base);
@@ -201,6 +217,13 @@ void BasescapeState::init()
 	_txtFunds->setText(tr("STR_FUNDS").arg(Unicode::formatFunding(_game->getSavedGame()->getFunds())));
 
 	_btnNewBase->setVisible(_game->getSavedGame()->getBases()->size() < MiniBaseView::MAX_BASES);
+}
+
+void BasescapeState::think()
+{
+	State::think();
+	CompanionGithubQuotaHudOverlay::tick(_txtGithubQuota);
+	CompanionOnDemandRelayOverlay::tick(&_companionRelayUi);
 }
 
 /**
@@ -510,6 +533,25 @@ void BasescapeState::handleKeyPress(Action *action)
 void BasescapeState::edtBaseChange(Action *)
 {
 	_base->setName(_edtBase->getText());
+}
+
+void BasescapeState::btnCompanionSendClick(Action *)
+{
+	CompanionOnDemandRelayOverlay::onStrategicSendPressed();
+}
+
+void BasescapeState::btnCompanionRetrieveClick(Action *)
+{
+	CompanionOnDemandRelayOverlay::onRetrievePressed();
+}
+
+void BasescapeState::handle(Action *action)
+{
+	if (CompanionOnDemandRelayOverlay::tryConsumeRelayMouseAction(this, action, &_companionRelayUi))
+	{
+		return;
+	}
+	State::handle(action);
 }
 
 }

@@ -20,6 +20,7 @@
 #include "SoldierDiaryOverviewState.h"
 #include <algorithm>
 #include <sstream>
+#include <string>
 #include "../Engine/Game.h"
 #include "../Engine/Action.h"
 #include "../Mod/Mod.h"
@@ -43,6 +44,7 @@
 #include "../Mod/RuleInterface.h"
 #include "../Mod/RuleSoldier.h"
 #include "../Savegame/SoldierDeath.h"
+#include "../Engine/CompanionSoldierOwnershipCore.h"
 
 namespace OpenXcom
 {
@@ -79,9 +81,17 @@ SoldierInfoState::SoldierInfoState(Base *base, size_t soldierId) : _base(base), 
 	_btnOk = new TextButton(48, 14, 30, 33);
 	_btnNext = new TextButton(28, 14, 80, 33);
 	_btnArmor = new TextButton(110, 14, 130, 33);
-	_edtSoldier = new TextEdit(this, 210, 16, 40, 9);
+	// Name banner: reserve x=225..318 for companion controls (display clip only; full name kept in save).
+	static const int nameEditX = 40;
+	static const int nameEditY = 9;
+	static const int nameEditRight = 223;
+	_edtSoldier = new TextEdit(this, nameEditRight - nameEditX, 16, nameEditX, nameEditY);
 	_btnSack = new TextButton(60, 14, 260, 33);
 	_btnDiary = new TextButton(60, 14, 260, 48);
+	// Companion controls inside top name banner (x=225..318, y=2..27).
+	_txtCompanionStatus = new Text(86, 9, 230, 2);
+	_txtCompanionUnsaved = new Text(44, 9, 272, 2);
+	_btnCompanion = new TextButton(72, 14, 244, 12);
 	_txtRank = new Text(130, 9, 0, 48);
 	_txtMissions = new Text(100, 9, 130, 48);
 	_txtKills = new Text(100, 9, 200, 48);
@@ -159,6 +169,9 @@ SoldierInfoState::SoldierInfoState(Base *base, size_t soldierId) : _base(base), 
 	add(_edtSoldier, "text1", "soldierInfo");
 	add(_btnSack, "button", "soldierInfo");
 	add(_btnDiary, "button", "soldierInfo");
+	add(_txtCompanionStatus, "text2", "soldierInfo");
+	add(_txtCompanionUnsaved, "text2", "soldierInfo");
+	add(_btnCompanion, "button", "soldierInfo");
 	add(_txtRank, "text1", "soldierInfo");
 	add(_txtMissions, "text1", "soldierInfo");
 	add(_txtKills, "text1", "soldierInfo");
@@ -256,6 +269,8 @@ SoldierInfoState::SoldierInfoState(Base *base, size_t soldierId) : _base(base), 
 
 	_btnDiary->setText(tr("STR_DIARY"));
 	_btnDiary->onMouseClick((ActionHandler)&SoldierInfoState::btnDiaryClick);
+
+	_btnCompanion->onMouseClick((ActionHandler)&SoldierInfoState::btnCompanionClick);
 
 	_txtPsionic->setText(tr("STR_IN_PSIONIC_TRAINING"));
 
@@ -506,6 +521,95 @@ void SoldierInfoState::init()
 	{
 		_txtDead->setVisible(false);
 	}
+
+	refreshCompanionAssignmentUi();
+}
+
+void SoldierInfoState::refreshCompanionAssignmentUi()
+{
+	static const int statusX = 230;
+	static const int statusY = 2;
+	static const int statusFullW = 86;
+	static const int statusShortW = 40;
+	static const int unsavedX = 272;
+	static const int unsavedY = 2;
+	static const int unsavedW = 44;
+	static const int buttonX = 244;
+	static const int buttonY = 12;
+	static const int buttonW = 72;
+
+	if (_base == 0 || _soldier == 0)
+	{
+		_btnCompanion->setVisible(false);
+		_txtCompanionStatus->setVisible(false);
+		_txtCompanionUnsaved->setVisible(false);
+		return;
+	}
+
+	SavedGame *save = _game->getSavedGame();
+	const int soldierId = _soldier->getId();
+	const CompanionSoldierOwnershipCore::SoldierControlMode mode = save->getCompanionSoldierOwnership(soldierId);
+	const bool unsaved = save->isCompanionSoldierOwnershipUnsaved(soldierId);
+
+	_btnCompanion->setVisible(true);
+	_txtCompanionStatus->setVisible(true);
+	_btnCompanion->setX(buttonX);
+	_btnCompanion->setY(buttonY);
+	_btnCompanion->setWidth(buttonW);
+
+	if (mode == CompanionSoldierOwnershipCore::CONTROL_AI)
+	{
+		_btnCompanion->setText(tr("STR_COMPANION_RECLAIM_CONTROL"));
+	}
+	else
+	{
+		_btnCompanion->setText(tr("STR_COMPANION_ASSIGN_TO_ASTER"));
+	}
+
+	const std::string modeLabel = (mode == CompanionSoldierOwnershipCore::CONTROL_AI)
+		? tr("STR_COMPANION_CONTROL_ASTER")
+		: tr("STR_COMPANION_CONTROL_HUMAN");
+
+	if (unsaved)
+	{
+		_txtCompanionStatus->setX(statusX);
+		_txtCompanionStatus->setY(statusY);
+		_txtCompanionStatus->setWidth(statusShortW);
+		_txtCompanionStatus->setText(modeLabel);
+		_txtCompanionUnsaved->setVisible(true);
+		_txtCompanionUnsaved->setX(unsavedX);
+		_txtCompanionUnsaved->setY(unsavedY);
+		_txtCompanionUnsaved->setWidth(unsavedW);
+		_txtCompanionUnsaved->setText(tr("STR_COMPANION_ASSIGNMENT_NOT_SAVED"));
+	}
+	else
+	{
+		_txtCompanionUnsaved->setVisible(false);
+		_txtCompanionStatus->setX(statusX);
+		_txtCompanionStatus->setY(statusY);
+		_txtCompanionStatus->setWidth(statusFullW);
+		_txtCompanionStatus->setText(std::string("CMP: ") + modeLabel);
+	}
+}
+
+void SoldierInfoState::btnCompanionClick(Action *)
+{
+	if (_base == 0 || _soldier == 0)
+	{
+		return;
+	}
+
+	SavedGame *save = _game->getSavedGame();
+	const int soldierId = _soldier->getId();
+	if (save->getCompanionSoldierOwnership(soldierId) == CompanionSoldierOwnershipCore::CONTROL_AI)
+	{
+		save->reclaimCompanionSoldierForHuman(soldierId);
+	}
+	else
+	{
+		save->assignCompanionSoldierToAi(soldierId);
+	}
+	refreshCompanionAssignmentUi();
 }
 
 /**

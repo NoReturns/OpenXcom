@@ -39,6 +39,25 @@
 namespace OpenXcom
 {
 
+namespace
+{
+
+bool isHumanPlayerOrderMenuAction(BattleActionType type)
+{
+	return type == BA_THROW
+		|| type == BA_SNAPSHOT
+		|| type == BA_AIMEDSHOT
+		|| type == BA_AUTOSHOT
+		|| type == BA_LAUNCH
+		|| type == BA_HIT
+		|| type == BA_PANIC
+		|| type == BA_MINDCONTROL
+		|| type == BA_PRIME
+		|| type == BA_USE;
+}
+
+} // namespace
+
 /**
  * Initializes all the elements in the Action Menu window.
  * @param game Pointer to the core game.
@@ -210,6 +229,14 @@ void ActionMenuState::btnActionMenuItemClick(Action *action)
 	{
 		_action->type = _actionMenu[btnID]->getAction();
 		_action->TU = _actionMenu[btnID]->getTUs();
+		BattlescapeGame *battleGame = _game->getSavedGame()->getSavedBattle()->getBattleGame();
+		if (battleGame != 0 && isHumanPlayerOrderMenuAction(_action->type)
+			&& battleGame->warnIfHumanPlayerOrderDenied(_action->actor))
+		{
+			_action->type = BA_NONE;
+			_game->popState();
+			return;
+		}
 		if (_action->type != BA_THROW &&
 			_action->actor->getOriginalFaction() == FACTION_PLAYER &&
 			!_game->getSavedGame()->isResearched(weapon->getRequirements()))
@@ -317,6 +344,12 @@ void ActionMenuState::btnActionMenuItemClick(Action *action)
 				0, &_action->target))
 			{
 				_action->result = "STR_THERE_IS_NO_ONE_THERE";
+			}
+			else if (battleGame != 0 && battleGame->warnIfHumanPlayerOrderDenied(_action->actor))
+			{
+				_action->type = BA_NONE;
+				_game->popState();
+				return;
 			}
 			_game->popState();
 		}

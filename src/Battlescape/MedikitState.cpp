@@ -34,6 +34,7 @@
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/BattleUnitStatistics.h"
+#include "BattlescapeGame.h"
 
 namespace OpenXcom
 {
@@ -182,6 +183,17 @@ MedikitState::MedikitState (BattleUnit *targetUnit, BattleAction *action) : _tar
 	update();
 }
 
+bool MedikitState::_warnIfMedikitMutationDenied()
+{
+	SavedBattleGame *battle = _game->getSavedGame()->getSavedBattle();
+	BattlescapeGame *battleGame = battle != 0 ? battle->getBattleGame() : 0;
+	if (battleGame == 0 || _unit == 0)
+	{
+		return false;
+	}
+	return battleGame->warnIfHumanPlayerOrderDenied(_unit);
+}
+
 /**
  * Closes the window on right-click.
  * @param action Pointer to an action.
@@ -215,6 +227,10 @@ void MedikitState::onEndClick(Action *)
  */
 void MedikitState::onHealClick(Action *)
 {
+	if (_warnIfMedikitMutationDenied())
+	{
+		return;
+	}
 	int heal = _item->getHealQuantity();
 	RuleItem *rule = _item->getRules();
 	if (heal == 0)
@@ -269,6 +285,10 @@ void MedikitState::onHealClick(Action *)
  */
 void MedikitState::onStimulantClick(Action *)
 {
+	if (_warnIfMedikitMutationDenied())
+	{
+		return;
+	}
 	int stimulant = _item->getStimulantQuantity();
 	RuleItem *rule = _item->getRules();
 	if (stimulant == 0)
@@ -314,6 +334,10 @@ void MedikitState::onStimulantClick(Action *)
  */
 void MedikitState::onPainKillerClick(Action *)
 {
+	if (_warnIfMedikitMutationDenied())
+	{
+		return;
+	}
 	int pk = _item->getPainKillerQuantity();
 	if (pk == 0)
 	{

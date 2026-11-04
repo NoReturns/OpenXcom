@@ -559,6 +559,7 @@ void SavedGame::load(const std::string &filename, Mod *mod)
 		_battleGame->load(battle, mod, this);
 	}
 	CompanionCampaignOwnershipCore::loadCompanionAssignments(doc, &_companionAiSoldierIds);
+	syncCompanionSoldierOwnershipPersistedSnapshot();
 }
 
 /**
@@ -716,6 +717,9 @@ void SavedGame::save(const std::string &filename) const
 	// Everything went fine, delete the temp
 	// We don't care if this fails
 	CrossPlatform::deleteFile(tmpPath);
+	// Companion ownership unsaved UI tracks last on-disk campaign save only (M1-23E).
+	// Earlier failures throw Exception; SaveGameState catches and leaves snapshot unchanged.
+	syncCompanionSoldierOwnershipPersistedSnapshot();
 }
 
 /**
@@ -761,15 +765,8 @@ bool SavedGame::isLiveRosterSoldier(int soldierId) const
 
 CompanionSoldierOwnershipCore::SoldierControlMode SavedGame::getCompanionSoldierOwnership(int soldierId) const
 {
-	if (soldierId <= 0 || _companionAiSoldierIds.find(soldierId) == _companionAiSoldierIds.end())
-	{
-		return CompanionSoldierOwnershipCore::CONTROL_HUMAN;
-	}
-	if (!isLiveRosterSoldier(soldierId))
-	{
-		return CompanionSoldierOwnershipCore::CONTROL_HUMAN;
-	}
-	return CompanionSoldierOwnershipCore::CONTROL_AI;
+	return CompanionCampaignOwnershipCore::resolveCampaignSoldierControlMode(
+		_companionAiSoldierIds, soldierId, isLiveRosterSoldier(soldierId));
 }
 
 bool SavedGame::assignCompanionSoldierToAi(int soldierId)
@@ -779,6 +776,10 @@ bool SavedGame::assignCompanionSoldierToAi(int soldierId)
 		return false;
 	}
 	_companionAiSoldierIds.insert(soldierId);
+	if (_battleGame != 0)
+	{
+		_battleGame->assignCompanionTacticalSoldierToAi(soldierId);
+	}
 	return true;
 }
 
@@ -789,6 +790,10 @@ bool SavedGame::reclaimCompanionSoldierForHuman(int soldierId)
 		return false;
 	}
 	_companionAiSoldierIds.erase(soldierId);
+	if (_battleGame != 0)
+	{
+		_battleGame->reclaimCompanionTacticalSoldierForHuman(soldierId);
+	}
 	return true;
 }
 
@@ -800,6 +805,21 @@ std::map<int, CompanionSoldierOwnershipCore::SoldierControlMode> SavedGame::getC
 		out[*it] = CompanionSoldierOwnershipCore::CONTROL_AI;
 	}
 	return out;
+}
+
+void SavedGame::syncCompanionSoldierOwnershipPersistedSnapshot() const
+{
+	_companionAiSoldierIdsAtLastSave = _companionAiSoldierIds;
+}
+
+bool SavedGame::hasUnsavedCompanionSoldierOwnershipChanges() const
+{
+	return CompanionCampaignOwnershipCore::hasUnsavedCompanionSoldierAssignments(_companionAiSoldierIds, _companionAiSoldierIdsAtLastSave);
+}
+
+bool SavedGame::isCompanionSoldierOwnershipUnsaved(int soldierId) const
+{
+	return CompanionCampaignOwnershipCore::isCompanionSoldierAssignmentUnsaved(_companionAiSoldierIds, _companionAiSoldierIdsAtLastSave, soldierId);
 }
 
 /**

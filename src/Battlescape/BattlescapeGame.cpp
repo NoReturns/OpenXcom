@@ -37,11 +37,11 @@
 #include "Pathfinding.h"
 #include "../Mod/AlienDeployment.h"
 #include "../Engine/Game.h"
+#include "../Savegame/SavedGame.h"
 #include "../Engine/Language.h"
 #include "../Engine/Sound.h"
 #include "../Mod/Mod.h"
 #include "../Interface/Cursor.h"
-#include "../Savegame/SavedGame.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/Tile.h"
 #include "../Savegame/BattleUnit.h"
@@ -60,6 +60,8 @@
 #include "../Engine/CompanionCommandRuntimeSupport.h"
 #include "../Engine/CompanionBriefingRequest.h"
 #include "../Engine/CompanionBriefingTestSupport.h"
+#include "../Engine/CompanionOnDemandRelayCore.h"
+#include "../Engine/CompanionTacticalAuthorityCore.h"
 #include "../Savegame/BattleUnitStatistics.h"
 #include "../fmath.h"
 
@@ -170,10 +172,14 @@ void BattlescapeGame::think()
  */
 void BattlescapeGame::init()
 {
+	SavedGame *campaign = _save->getGeoscapeSave();
+	_save->ensureCompanionTacticalOwnershipInitialized(campaign);
+	CompanionCommandRuntime::onBattleCompanionBindingContext(_save);
 	if (_save->getCompanionEventLog().getSessionId().empty())
 	{
 		_save->getCompanionEventLog().beginSession();
 	}
+	CompanionSnapshot::tryPublishSoldierControl(_save, campaign);
 	if (_save->getSide() == FACTION_PLAYER && _save->getTurn() > 1)
 	{
 		_playerPanicHandled = false;
@@ -849,7 +855,11 @@ void BattlescapeGame::handleNonTargetAction()
 		}
 		else if (_currentAction.type == BA_PRIME && _currentAction.value > -1)
 		{
-			if (_currentAction.actor->spendTimeUnits(_currentAction.TU))
+			if (warnIfHumanPlayerOrderDenied(_currentAction.actor))
+			{
+				_currentAction.type = BA_NONE;
+			}
+			else if (_currentAction.actor->spendTimeUnits(_currentAction.TU))
 			{
 				_parentState->warning("STR_GRENADE_IS_ACTIVATED");
 				_currentAction.weapon->setFuseTimer(_currentAction.value);
@@ -865,7 +875,11 @@ void BattlescapeGame::handleNonTargetAction()
 		}
 		else if (_currentAction.type == BA_HIT)
 		{
-			if (_currentAction.actor->spendTimeUnits(_currentAction.TU))
+			if (warnIfHumanPlayerOrderDenied(_currentAction.actor))
+			{
+				_currentAction.type = BA_NONE;
+			}
+			else if (_currentAction.actor->spendTimeUnits(_currentAction.TU))
 			{
 				statePushBack(new MeleeAttackBState(this, _currentAction));
 			}
@@ -1479,6 +1493,10 @@ void BattlescapeGame::primaryAction(Position pos)
 		{
 			if (_save->selectUnit(pos) && _save->selectUnit(pos)->getFaction() != _save->getSelectedUnit()->getFaction() && _save->selectUnit(pos)->getVisible())
 			{
+				if (warnIfHumanPlayerOrderDenied(_currentAction.actor))
+				{
+					return;
+				}
 				if (!_currentAction.weapon->getRules()->isLOSRequired() ||
 					std::find(_currentAction.actor->getVisibleUnits()->begin(), _currentAction.actor->getVisibleUnits()->end(), _save->selectUnit(pos)) != _currentAction.actor->getVisibleUnits()->end())
 				{
@@ -1503,6 +1521,11 @@ void BattlescapeGame::primaryAction(Position pos)
 		{
 			if (_save->selectUnit(pos) && _save->selectUnit(pos)->getFaction() != _save->getSelectedUnit()->getFaction() && _save->selectUnit(pos)->getVisible())
 			{
+				BattleUnit *actor = _currentAction.actor != 0 ? _currentAction.actor : _save->getSelectedUnit();
+				if (warnIfHumanPlayerOrderDenied(actor))
+				{
+					return;
+				}
 				_currentAction.TU = _currentAction.actor->getActionTUs(_currentAction.type, _currentAction.weapon);
 				_currentAction.target = pos;
 				if (!_currentAction.weapon->getRules()->isLOSRequired() ||
@@ -1529,6 +1552,11 @@ void BattlescapeGame::primaryAction(Position pos)
 		}
 		else
 		{
+			BattleUnit *actor = _currentAction.actor != 0 ? _currentAction.actor : _save->getSelectedUnit();
+			if (warnIfHumanPlayerOrderDenied(actor))
+			{
+				return;
+			}
 			_currentAction.target = pos;
 			getMap()->setCursorType(CT_NONE);
 
@@ -1563,6 +1591,11 @@ void BattlescapeGame::primaryAction(Position pos)
 		}
 		else if (playableUnitSelected())
 		{
+			BattleUnit *selected = _save->getSelectedUnit();
+			if (warnIfHumanPlayerOrderDenied(selected))
+			{
+				return;
+			}
 			bool modifierPressed = (SDL_GetModState() & KMOD_CTRL) != 0;
 			if (bPreviewed &&
 				(_currentAction.target != pos || (_save->getPathfinding()->isModifierUsed() != modifierPressed)))
@@ -1601,6 +1634,11 @@ void BattlescapeGame::primaryAction(Position pos)
  */
 void BattlescapeGame::secondaryAction(Position pos)
 {
+	BattleUnit *unit = _save->getSelectedUnit();
+	if (warnIfHumanPlayerOrderDenied(unit))
+	{
+		return;
+	}
 	//  -= turn to or open door =-
 	_currentAction.target = pos;
 	_currentAction.actor = _save->getSelectedUnit();
@@ -1613,6 +1651,10 @@ void BattlescapeGame::secondaryAction(Position pos)
  */
 void BattlescapeGame::launchAction()
 {
+	if (warnIfHumanPlayerOrderDenied(_currentAction.actor != 0 ? _currentAction.actor : _save->getSelectedUnit()))
+	{
+		return;
+	}
 	_parentState->showLaunchButton(false);
 	getMap()->getWaypoints()->clear();
 	_currentAction.target = _currentAction.waypoints.front();
@@ -1631,6 +1673,11 @@ void BattlescapeGame::psiButtonAction()
 {
 	if (!_currentAction.waypoints.empty()) // in case waypoints were set with a blaster launcher, avoid accidental misclick
 		return;
+	BattleUnit *unit = _save->getSelectedUnit();
+	if (warnIfHumanPlayerOrderDenied(unit))
+	{
+		return;
+	}
 	_currentAction.weapon = _save->getSelectedUnit()->getSpecialWeapon(BT_PSIAMP);
 	_currentAction.targeting = true;
 	_currentAction.type = BA_PANIC;
@@ -1650,6 +1697,10 @@ void BattlescapeGame::psiButtonAction()
  */
 void BattlescapeGame::moveUpDown(BattleUnit *unit, int dir)
 {
+	if (warnIfHumanPlayerOrderDenied(unit))
+	{
+		return;
+	}
 	_currentAction.target = unit->getPosition();
 	if (dir == Pathfinding::DIR_UP)
 	{
@@ -2252,6 +2303,22 @@ void BattlescapeGame::autoEndBattle()
 	}
 }
 
+namespace
+{
+
+void enqueueCompanionOnDemandTacticalSend(const std::string &briefingRequestId)
+{
+	std::string relayRequestId;
+	std::string error;
+	if (!CompanionOnDemandRelayCore::tryEnqueueSend(
+		"tactical", briefingRequestId.c_str(), &relayRequestId, &error))
+	{
+		Log(LOG_INFO) << "Companion on-demand send not queued: " << error;
+	}
+}
+
+} // namespace
+
 void BattlescapeGame::requestCompanionBriefing(bool battleInitialized)
 {
 	CompanionBriefingTestSupport::BriefingGateInput input = {};
@@ -2278,9 +2345,13 @@ void BattlescapeGame::requestCompanionBriefing(bool battleInitialized)
 		Log(LOG_INFO) << "Companion briefing: deferred until idle";
 		return;
 	case CompanionBriefingTestSupport::BRIEFING_PRESS_FULFILL_NOW:
-		if (CompanionBriefingRequest::fulfill(_save))
 		{
-			_companionBriefingPending = false;
+			std::string briefingRequestId;
+			if (CompanionBriefingRequest::fulfill(_save, &briefingRequestId))
+			{
+				_companionBriefingPending = false;
+				enqueueCompanionOnDemandTacticalSend(briefingRequestId);
+			}
 		}
 		return;
 	}
@@ -2305,9 +2376,11 @@ void BattlescapeGame::tryFulfillCompanionBriefing(bool battleInitialized)
 		return;
 	}
 
-	if (CompanionBriefingRequest::fulfill(_save))
+	std::string briefingRequestId;
+	if (CompanionBriefingRequest::fulfill(_save, &briefingRequestId))
 	{
 		_companionBriefingPending = false;
+		enqueueCompanionOnDemandTacticalSend(briefingRequestId);
 	}
 }
 
@@ -2352,9 +2425,84 @@ bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, s
 	return true;
 }
 
+bool BattlescapeGame::tryExecuteCompanionKneelDown(BattleUnit *unit, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (unit->isKneeled())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit is already kneeling.";
+		}
+		return false;
+	}
+	if (unit->getType() != "SOLDIER" || unit->isFloating())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit cannot kneel.";
+		}
+		return false;
+	}
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	_parentState->updateSoldierInfo();
+	if (!kneel(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to kneel.";
+		}
+		return false;
+	}
+	return true;
+}
+
+bool BattlescapeGame::humanPlayerOrderPermitted(BattleUnit *unit) const
+{
+	if (unit == 0)
+	{
+		return true;
+	}
+	SavedGame *campaign = _parentState != 0 && _parentState->getGame() != 0
+		? _parentState->getGame()->getSavedGame()
+		: 0;
+	std::string controlJson;
+	CompanionTacticalAuthorityCore::tryReadRelayControlJsonFromSnapshotEnvironment(&controlJson);
+	return CompanionTacticalAuthorityCore::humanPlayerOrderPermitted(campaign, _save, unit, controlJson);
+}
+
+bool BattlescapeGame::warnIfHumanPlayerOrderDenied(BattleUnit *unit) const
+{
+	if (humanPlayerOrderPermitted(unit))
+	{
+		return false;
+	}
+	_parentState->warning("STR_COMPANION_MOVEMENT_DENIED");
+	return true;
+}
+
 void BattlescapeGame::tickCompanionCommand(bool battleInitialized)
 {
-	CompanionCommandRuntime::tick(this, _save, battleInitialized);
+	SavedGame *campaign = _parentState != 0 && _parentState->getGame() != 0
+		? _parentState->getGame()->getSavedGame()
+		: 0;
+	CompanionCommandRuntime::tick(this, _save, campaign, battleInitialized);
 }
 
 }

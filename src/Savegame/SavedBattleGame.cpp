@@ -21,6 +21,8 @@
 #include "BattleItem.h"
 #include "SavedBattleGame.h"
 #include "SavedGame.h"
+#include "../Engine/CompanionTacticalOwnershipCore.h"
+#include "../Engine/CompanionCampaignIdentityCore.h"
 #include "Tile.h"
 #include "Node.h"
 #include "../Mod/MapDataSet.h"
@@ -344,6 +346,8 @@ void SavedBattleGame::load(const YAML::Node &node, Mod *mod, SavedGame* savedGam
 	_turnLimit = node["turnLimit"].as<int>(_turnLimit);
 	_chronoTrigger = ChronoTrigger(node["chronoTrigger"].as<int>(_chronoTrigger));
 	_cheatTurn = node["cheatTurn"].as<int>(_cheatTurn);
+	CompanionTacticalOwnershipCore::loadFromBattleSaveNode(
+		node, &_companionTacticalBattleId, &_companionTacticalAiSoldierIds);
 	_companionEventLog.beginSession();
 }
 
@@ -475,6 +479,8 @@ YAML::Node SavedBattleGame::save() const
 	node["turnLimit"] = _turnLimit;
 	node["chronoTrigger"] = int(_chronoTrigger);
 	node["cheatTurn"] = _cheatTurn;
+	CompanionTacticalOwnershipCore::writeToBattleSaveNode(
+		&node, _companionTacticalBattleId, _companionTacticalAiSoldierIds);
 
 	return node;
 }
@@ -2163,6 +2169,40 @@ void SavedBattleGame::resetUnitHitStates()
 	{
 		(*i)->resetHitState();
 	}
+}
+
+void SavedBattleGame::ensureCompanionTacticalOwnershipInitialized(const SavedGame *campaign)
+{
+	if (!_companionTacticalBattleId.empty())
+	{
+		return;
+	}
+	_companionTacticalBattleId = CompanionCampaignIdentityCore::makeCampaignId();
+	if (campaign != 0)
+	{
+		CompanionTacticalOwnershipCore::seedTacticalAiFromCampaign(
+			campaign->getCompanionCampaignAiSoldierIds(), &_companionTacticalAiSoldierIds);
+	}
+}
+
+bool SavedBattleGame::assignCompanionTacticalSoldierToAi(int soldierId)
+{
+	if (soldierId <= 0)
+	{
+		return false;
+	}
+	_companionTacticalAiSoldierIds.insert(soldierId);
+	return true;
+}
+
+bool SavedBattleGame::reclaimCompanionTacticalSoldierForHuman(int soldierId)
+{
+	if (soldierId <= 0)
+	{
+		return false;
+	}
+	_companionTacticalAiSoldierIds.erase(soldierId);
+	return true;
 }
 
 }

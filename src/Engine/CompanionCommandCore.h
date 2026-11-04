@@ -37,7 +37,7 @@ struct MoveCommandParsed
 	std::string rejectCode;
 };
 
-struct MoveValidationInput
+struct TacticalCommandBindingValidationInput
 {
 	bool executorEnabled;
 	bool playerTurn;
@@ -57,15 +57,39 @@ struct MoveValidationInput
 	bool actorIsPlayerSoldier;
 	bool actorAlive;
 	bool actorAiControlled;
+	bool duplicateCommandId;
+	bool priorCommandNonTerminal;
+	bool humanOverrideRevoked;
+};
+
+struct MoveValidationInput : TacticalCommandBindingValidationInput
+{
 	int destX;
 	int destY;
 	int destZ;
 	int mapSizeX;
 	int mapSizeY;
 	int mapSizeZ;
-	bool duplicateCommandId;
-	bool priorCommandNonTerminal;
-	bool humanOverrideRevoked;
+};
+
+struct KneelCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct KneelValidationInput : TacticalCommandBindingValidationInput
+{
+	bool actorAlreadyKneeled;
+	bool actorCanKneelPosture;
+	bool insufficientTuForKneelDown;
 };
 
 struct MoveValidationResult
@@ -86,10 +110,13 @@ struct WalkCompletionInput
 	std::string actionResult;
 };
 
+MoveValidationResult validateTacticalCommandBinding(const TacticalCommandBindingValidationInput &input);
 MoveValidationResult validateMoveCommand(const MoveValidationInput &input);
+MoveValidationResult validateKneelCommand(const KneelValidationInput &input);
 CommandLifecycleStatus evaluateWalkTerminalStatus(const WalkCompletionInput &input);
 
 bool parseMoveCommandJson(const std::string &json, MoveCommandParsed *out);
+bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out);
 bool isValidCommandIdFormat(const std::string &commandId);
 bool isValidSessionIdFormat(const std::string &sessionId);
 bool isValidSnapshotSha256Format(const std::string &sha);

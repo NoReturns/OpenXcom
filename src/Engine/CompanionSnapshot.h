@@ -8,6 +8,7 @@ namespace OpenXcom
 {
 
 class SavedBattleGame;
+class SavedGame;
 
 class CompanionSnapshot
 {
@@ -16,6 +17,8 @@ public:
 	/// When OPENXCOM_COMPANION_SNAPSHOT_PATH is set and battle state qualifies.
 	/// When @p outSnapshotSha256 is non-null, receives 64-char lowercase hex SHA-256 of the final written UTF-8 YAML.
 	static bool tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256 = 0);
+	/// Publishes companion-soldier-control.json beside OPENXCOM_COMPANION_SNAPSHOT_PATH (engine authoritative).
+	static bool tryPublishSoldierControl(SavedBattleGame *battle, SavedGame *campaign);
 };
 
 }
