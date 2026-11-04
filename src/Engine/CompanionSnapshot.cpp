@@ -3,6 +3,7 @@
  */
 #include "CompanionSnapshot.h"
 #include "CompanionCommandRuntime.h"
+#include "CompanionCommandRuntimeSupport.h"
 #include "CompanionSnapshotExportCore.h"
 #include "CompanionSoldierControlPublishCore.h"
 #include "CompanionBriefingTestSupport.h"
@@ -270,7 +271,7 @@ void appendInventoryEntries(YAML::Node &inventory, BattleUnit *unit)
 
 void appendFriendlyEquipment(YAML::Node &entry, BattleUnit *unit)
 {
-	entry["kneeled"] = unit->isKneeled();
+	entry["kneeled"] = CompanionCommandRuntimeSupport::exportKneeledSnapshotField(unit->isKneeled());
 	entry["activeHand"] = unit->getActiveHand();
 
 	YAML::Node hands;

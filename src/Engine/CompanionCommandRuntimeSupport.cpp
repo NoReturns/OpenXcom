@@ -257,6 +257,25 @@ bool shouldRunCompanionCommandTickDuringThink(
 	return true;
 }
 
+const HandleStateCompanionStage *handleStateCompanionStageOrder(size_t *outCount)
+{
+	static const HandleStateCompanionStage order[] = {
+		HANDLE_STATE_COMPANION_BRIEFING,
+		HANDLE_STATE_COMPANION_COMMAND_TICK,
+		HANDLE_STATE_COMPANION_IDLE_SNAPSHOT
+	};
+	if (outCount != 0)
+	{
+		*outCount = sizeof(order) / sizeof(order[0]);
+	}
+	return order;
+}
+
+bool exportKneeledSnapshotField(bool unitIsKneeled)
+{
+	return unitIsKneeled;
+}
+
 bool shouldPollCommandInboxFile(
 	bool moveInFlight,
 	time_t fileMtime,

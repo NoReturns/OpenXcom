@@ -39,7 +39,11 @@ using CompanionOnDemandRelayCore::resolveStatusPath;
 using CompanionOnDemandRelayCore::tryEnqueueAction;
 using CompanionOnDemandRelayCore::tryEnqueueSend;
 using CompanionOnDemandRelayCore::reconcilePendingOnDemandRelay;
-using CompanionOnDemandRelayCore::relayControlRectHitTest;
+using CompanionOnDemandRelayCore::relayControlHitTarget;
+using CompanionOnDemandRelayCore::RelayControlHit;
+using CompanionOnDemandRelayCore::RELAY_CONTROL_HIT_NONE;
+using CompanionOnDemandRelayCore::RELAY_CONTROL_HIT_RETRIEVE;
+using CompanionOnDemandRelayCore::RELAY_CONTROL_HIT_SEND;
 using CompanionOnDemandRelayLayout::CompactBarLayout;
 using CompanionOnDemandRelayLayout::COMPACT_BUTTON_HEIGHT;
 using CompanionOnDemandRelayLayout::COMPACT_BUTTON_WIDTH;
@@ -262,20 +266,52 @@ bool tryConsumeRelayMouseAction(State *state, Action *action, Ui *ui)
 	{
 		return false;
 	}
-	if (!relayControlRectHitTest(absX, absY, ui->btnSend->getX(), ui->btnSend->getY(), ui->btnSend->getVisible())
-	    && !relayControlRectHitTest(absX, absY, ui->btnRetrieve->getX(), ui->btnRetrieve->getY(), ui->btnRetrieve->getVisible()))
+	const RelayControlHit hit = relayControlHitTarget(
+		absX,
+		absY,
+		ui->btnSend->getX(),
+		ui->btnSend->getY(),
+		ui->btnSend->getWidth(),
+		ui->btnSend->getHeight(),
+		ui->btnSend->getVisible(),
+		ui->btnRetrieve->getX(),
+		ui->btnRetrieve->getY(),
+		ui->btnRetrieve->getWidth(),
+		ui->btnRetrieve->getHeight(),
+		ui->btnRetrieve->getVisible());
+	if (hit == RELAY_CONTROL_HIT_NONE)
 	{
 		return false;
 	}
-	if (ui->btnSend != 0)
+	TextButton *target = hit == RELAY_CONTROL_HIT_SEND ? ui->btnSend : ui->btnRetrieve;
+	if (target != 0)
 	{
-		ui->btnSend->handle(action, state);
+		target->handle(action, state);
 	}
-	if (ui->btnRetrieve != 0)
-	{
-		ui->btnRetrieve->handle(action, state);
-	}
+	ev->type = SDL_NOEVENT;
 	return true;
+}
+
+bool absPointHitsVisibleRelayControl(const Ui *ui, int absX, int absY)
+{
+	if (ui == 0 || ui->btnSend == 0 || ui->btnRetrieve == 0)
+	{
+		return false;
+	}
+	return relayControlHitTarget(
+	           absX,
+	           absY,
+	           ui->btnSend->getX(),
+	           ui->btnSend->getY(),
+	           ui->btnSend->getWidth(),
+	           ui->btnSend->getHeight(),
+	           ui->btnSend->getVisible(),
+	           ui->btnRetrieve->getX(),
+	           ui->btnRetrieve->getY(),
+	           ui->btnRetrieve->getWidth(),
+	           ui->btnRetrieve->getHeight(),
+	           ui->btnRetrieve->getVisible())
+	    != RELAY_CONTROL_HIT_NONE;
 }
 
 } // namespace CompanionOnDemandRelayOverlay

@@ -62,6 +62,17 @@ bool shouldRunCompanionCommandTickDuringThink(
 	bool battleBusy,
 	bool moveInFlight);
 
+enum HandleStateCompanionStage
+{
+	HANDLE_STATE_COMPANION_BRIEFING = 1,
+	HANDLE_STATE_COMPANION_COMMAND_TICK = 2,
+	HANDLE_STATE_COMPANION_IDLE_SNAPSHOT = 3
+};
+
+const HandleStateCompanionStage *handleStateCompanionStageOrder(size_t *outCount);
+
+bool exportKneeledSnapshotField(bool unitIsKneeled);
+
 bool shouldPollCommandInboxFile(
 	bool moveInFlight,
 	time_t fileMtime,

@@ -88,10 +88,41 @@ static void testRelayHitTestRequiresVisibleButtons(const std::string &root)
 #endif
 	CompactBarLayout layout;
 	expect(computeBaseViewportBarLayout(0, BASESCAPE_VIEWPORT_TOP_Y, BASESCAPE_VIEWPORT_WIDTH, &layout), "base bar layout");
-	expect(!relayControlRectHitTest(layout.sendX + 1, layout.sendY + 1, layout.sendX, layout.sendY, false),
+	expect(!relayControlRectHitTest(layout.sendX + 1, layout.sendY + 1, layout.sendX, layout.sendY,
+		COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, false),
 		"hidden relay rect does not hit-test");
-	expect(relayControlRectHitTest(layout.sendX + 1, layout.sendY + 1, layout.sendX, layout.sendY, true),
+	expect(relayControlRectHitTest(layout.sendX + 1, layout.sendY + 1, layout.sendX, layout.sendY,
+		COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, true),
 		"visible relay rect hit-test");
+}
+
+static void testRelayHitTargetUsesCompactBounds(const std::string &root)
+{
+	const std::string snapshotPath = root + "/tactical-hit-target.yaml";
+	writeFile(snapshotPath, "tactical: {}\n");
+#ifdef _WIN32
+	_putenv_s("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str());
+#else
+	setenv("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str(), 1);
+#endif
+	CompactBarLayout layout;
+	expect(computeBattlescapeTopBarLayout(320, &layout), "battlescape layout for hit target");
+	const int pastRetrieveRight = layout.retrieveX + COMPACT_BUTTON_WIDTH + 8;
+	expect(relayControlHitTarget(pastRetrieveRight, layout.retrieveY + 1,
+		layout.sendX, layout.sendY, COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, true,
+		layout.retrieveX, layout.retrieveY, COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, true)
+	    == RELAY_CONTROL_HIT_NONE,
+		"click beyond compact retrieve width must not hit relay controls");
+	expect(relayControlHitTarget(layout.retrieveX + COMPACT_BUTTON_WIDTH - 1, layout.retrieveY + 1,
+		layout.sendX, layout.sendY, COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, true,
+		layout.retrieveX, layout.retrieveY, COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, true)
+	    == RELAY_CONTROL_HIT_RETRIEVE,
+		"retrieve edge uses compact width");
+	expect(relayControlHitTarget(layout.sendX + 1, layout.sendY + 1,
+		layout.sendX, layout.sendY, COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, true,
+		layout.retrieveX, layout.retrieveY, COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT, true)
+	    == RELAY_CONTROL_HIT_SEND,
+		"send hit takes precedence outside retrieve bounds");
 }
 
 static void testCompactBarLayoutDimensions()
@@ -177,6 +208,7 @@ int main()
 	testStatusPhaseMapping();
 	testCompactBarLayoutDimensions();
 	testRelayHitTestRequiresVisibleButtons(root);
+	testRelayHitTargetUsesCompactBounds(root);
 	testReconcileSupersededBriefing(root);
 	testReconcileOfflineRelay(root);
 	std::cout << (g_failures == 0 ? "OK" : "FAILED") << std::endl;

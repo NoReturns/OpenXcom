@@ -802,6 +802,26 @@ static void testTacticalBindingSharedByMoveAndKneel()
 		"KNEEL battle busy uses shared binding validation");
 }
 
+static void testHandleStateCompanionStageOrder()
+{
+	size_t count = 0;
+	const CompanionCommandRuntimeSupport::HandleStateCompanionStage *order =
+		CompanionCommandRuntimeSupport::handleStateCompanionStageOrder(&count);
+	expect(count == 3, "handleState companion stage count");
+	expect(order[0] == CompanionCommandRuntimeSupport::HANDLE_STATE_COMPANION_BRIEFING,
+		"briefing fulfillment precedes command tick");
+	expect(order[1] == CompanionCommandRuntimeSupport::HANDLE_STATE_COMPANION_COMMAND_TICK,
+		"command tick precedes idle snapshot export");
+	expect(order[2] == CompanionCommandRuntimeSupport::HANDLE_STATE_COMPANION_IDLE_SNAPSHOT,
+		"idle snapshot export follows command tick");
+}
+
+static void testExportKneeledSnapshotField()
+{
+	expect(!CompanionCommandRuntimeSupport::exportKneeledSnapshotField(false), "standing exports false");
+	expect(CompanionCommandRuntimeSupport::exportKneeledSnapshotField(true), "kneeling exports true");
+}
+
 static void testStaleInboxArchiveEvaluation()
 {
 	using namespace CompanionCommandRuntimeSupport;
@@ -882,6 +902,8 @@ int main()
 	testParseKneelCommandJson();
 	testParseMoveRejectsKneelType();
 	testTacticalBindingSharedByMoveAndKneel();
+	testHandleStateCompanionStageOrder();
+	testExportKneeledSnapshotField();
 	testStaleInboxArchiveEvaluation();
 
 	if (g_failures != 0)

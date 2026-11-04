@@ -132,14 +132,14 @@ std::string buildRequestJson(const std::string &requestId, const char *action, l
 	return ss.str();
 }
 
-bool pointInButton(int absX, int absY, int rectX, int rectY, bool visible)
+bool pointInButton(int absX, int absY, int rectX, int rectY, int rectW, int rectH, bool visible)
 {
-	if (!visible)
+	if (!visible || rectW <= 0 || rectH <= 0)
 	{
 		return false;
 	}
-	return absX >= rectX && absX < rectX + RELAY_BUTTON_WIDTH
-	    && absY >= rectY && absY < rectY + RELAY_BUTTON_HEIGHT;
+	return absX >= rectX && absX < rectX + rectW
+	    && absY >= rectY && absY < rectY + rectH;
 }
 
 bool writeTerminalFailureStatus(const std::string &statusPath, const std::string &requestId,
@@ -451,13 +451,32 @@ void formatStatusLabel(RelayUiPhase phase, std::string *out)
 	}
 }
 
-bool relayControlRectHitTest(int absX, int absY, int rectX, int rectY, bool visible)
+bool relayControlRectHitTest(int absX, int absY, int rectX, int rectY, int rectW, int rectH, bool visible)
 {
 	if (!companionSnapshotPathConfigured())
 	{
 		return false;
 	}
-	return pointInButton(absX, absY, rectX, rectY, visible);
+	return pointInButton(absX, absY, rectX, rectY, rectW, rectH, visible);
+}
+
+RelayControlHit relayControlHitTarget(int absX, int absY,
+	int sendX, int sendY, int sendW, int sendH, bool sendVisible,
+	int retrieveX, int retrieveY, int retrieveW, int retrieveH, bool retrieveVisible)
+{
+	if (!companionSnapshotPathConfigured())
+	{
+		return RELAY_CONTROL_HIT_NONE;
+	}
+	if (pointInButton(absX, absY, retrieveX, retrieveY, retrieveW, retrieveH, retrieveVisible))
+	{
+		return RELAY_CONTROL_HIT_RETRIEVE;
+	}
+	if (pointInButton(absX, absY, sendX, sendY, sendW, sendH, sendVisible))
+	{
+		return RELAY_CONTROL_HIT_SEND;
+	}
+	return RELAY_CONTROL_HIT_NONE;
 }
 
 bool reconcilePendingOnDemandRelay(long long wallNowMs)

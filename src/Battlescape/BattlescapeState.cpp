@@ -743,6 +743,14 @@ void BattlescapeState::mapPress(Action *action)
  */
 void BattlescapeState::mapClick(Action *action)
 {
+	if (CompanionOnDemandRelayOverlay::absPointHitsVisibleRelayControl(
+		&_companionRelayUi,
+		static_cast<int>(action->getAbsoluteXMouse()),
+		static_cast<int>(action->getAbsoluteYMouse())))
+	{
+		action->getDetails()->type = SDL_NOEVENT;
+		return;
+	}
 	// The following is the workaround for a rare problem where sometimes
 	// the mouse-release event is missed for any reason.
 	// However if the SDL is also missed the release event, then it is to no avail :(
@@ -1612,12 +1620,13 @@ inline void BattlescapeState::handle(Action *action)
 			return;
 		}
 
+		if (CompanionOnDemandRelayOverlay::tryConsumeRelayMouseAction(this, action, &_companionRelayUi))
+		{
+			return;
+		}
+
 		if (_game->getCursor()->getVisible() || ((action->getDetails()->type == SDL_MOUSEBUTTONDOWN || action->getDetails()->type == SDL_MOUSEBUTTONUP) && action->getDetails()->button.button == SDL_BUTTON_RIGHT))
 		{
-			if (CompanionOnDemandRelayOverlay::tryConsumeRelayMouseAction(this, action, &_companionRelayUi))
-			{
-				return;
-			}
 			State::handle(action);
 
 			if (Options::touchEnabled == false && _isMouseScrolling && !Options::battleDragScrollInvert)
@@ -2404,14 +2413,22 @@ void BattlescapeState::autosave()
 	_autosave = true;
 }
 
-void BattlescapeState::btnCompanionSendClick(Action *)
+void BattlescapeState::btnCompanionSendClick(Action *action)
 {
 	_battleGame->requestCompanionBriefing(true);
+	if (action != 0 && action->getDetails() != 0)
+	{
+		action->getDetails()->type = SDL_NOEVENT;
+	}
 }
 
-void BattlescapeState::btnCompanionRetrieveClick(Action *)
+void BattlescapeState::btnCompanionRetrieveClick(Action *action)
 {
 	CompanionOnDemandRelayOverlay::onRetrievePressed();
+	if (action != 0 && action->getDetails() != 0)
+	{
+		action->getDetails()->type = SDL_NOEVENT;
+	}
 }
 
 }

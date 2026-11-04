@@ -1160,12 +1160,13 @@ void BattlescapeGame::popState()
 	}
 	_parentState->updateSoldierInfo();
 
+	tryFulfillCompanionBriefing(true);
+	tickCompanionCommand(true);
+
 	if (_states.empty() && _save->getSide() == FACTION_PLAYER && !_save->getUnitsFalling() && !_save->getDebugMode())
 	{
 		CompanionSnapshot::tryExport(_save);
 	}
-	tryFulfillCompanionBriefing(true);
-	tickCompanionCommand(true);
 }
 
 /**

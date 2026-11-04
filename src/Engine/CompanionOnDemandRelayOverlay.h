@@ -27,6 +27,7 @@ void tick(Ui *ui);
 void setControlsVisible(Ui *ui, bool visible);
 bool onRetrievePressed();
 bool onStrategicSendPressed();
+bool absPointHitsVisibleRelayControl(const Ui *ui, int absX, int absY);
 bool tryConsumeRelayMouseAction(State *state, Action *action, Ui *ui);
 
 } // namespace CompanionOnDemandRelayOverlay

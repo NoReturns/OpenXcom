@@ -12,6 +12,13 @@ namespace CompanionOnDemandRelayCore
 
 const int RELAY_BUTTON_WIDTH = 88;
 const int RELAY_BUTTON_HEIGHT = 14;
+
+enum RelayControlHit
+{
+	RELAY_CONTROL_HIT_NONE = 0,
+	RELAY_CONTROL_HIT_SEND,
+	RELAY_CONTROL_HIT_RETRIEVE
+};
 const int RELAY_STATUS_WIDTH = 200;
 const int RELAY_STATUS_HEIGHT = 10;
 const int RELAY_CONTROLS_X = 228;
@@ -44,7 +51,10 @@ bool tryEnqueueAction(const char *action, std::string *outRequestId, std::string
 bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 	std::string *outRequestId, std::string *outError);
 void formatStatusLabel(RelayUiPhase phase, std::string *out);
-bool relayControlRectHitTest(int absX, int absY, int rectX, int rectY, bool visible);
+bool relayControlRectHitTest(int absX, int absY, int rectX, int rectY, int rectW, int rectH, bool visible);
+RelayControlHit relayControlHitTarget(int absX, int absY,
+	int sendX, int sendY, int sendW, int sendH, bool sendVisible,
+	int retrieveX, int retrieveY, int retrieveW, int retrieveH, bool retrieveVisible);
 bool reconcilePendingOnDemandRelay(long long wallNowMs);
 
 } // namespace CompanionOnDemandRelayCore
