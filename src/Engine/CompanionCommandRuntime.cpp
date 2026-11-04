@@ -4,6 +4,7 @@
 #include "CompanionCommandRuntime.h"
 #include "CompanionCommandCore.h"
 #include "CompanionCommandRuntimeSupport.h"
+#include "CompanionCommandJournalCore.h"
 #include "CompanionJsonLite.h"
 #include "CompanionTacticalAuthorityCore.h"
 #include "CompanionBriefingTestSupport.h"
@@ -366,31 +367,17 @@ BattleUnit *findUnitById(SavedBattleGame *battle, int unitId)
 
 bool journalContainsCommandId(const std::string &journalJson, const std::string &commandId)
 {
+	CompanionCommandJournalCore::CommandJournalDocument doc = {};
+	if (CompanionCommandJournalCore::parseCommandJournalJson(journalJson, &doc))
+	{
+		return CompanionCommandJournalCore::journalDocumentContainsCommandId(doc, commandId);
+	}
 	return journalJson.find("\"" + commandId + "\"") != std::string::npos;
 }
 
 void appendJournalEntry(const std::string &journalPath, const std::string &commandId)
 {
-	std::string existing;
-	readTextFile(journalPath, &existing);
-	if (journalContainsCommandId(existing, commandId))
-	{
-		return;
-	}
-	if (existing.empty())
-	{
-		existing = "{\n  \"schema_version\": 1,\n  \"command_ids\": [\n  ]\n}\n";
-	}
-	const std::string::size_type insertPos = existing.rfind(']');
-	if (insertPos == std::string::npos)
-	{
-		return;
-	}
-	const std::string entry = existing.find("[\n  ]") != std::string::npos
-		? "    \"" + commandId + "\"\n  "
-		: "    \"" + commandId + "\",\n  ";
-	existing.insert(insertPos, entry);
-	writeTextFile(journalPath, existing);
+	CompanionCommandJournalCore::appendCommandJournalEntry(journalPath, commandId);
 }
 
 void writeResultFile(const std::string &resultPath, const std::string &json)

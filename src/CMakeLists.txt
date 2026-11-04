@@ -122,6 +122,7 @@ set ( engine_src
 	Engine/CompanionCommandCore.cpp
 	Engine/CompanionCommandRuntime.cpp
 	Engine/CompanionCommandRuntimeSupport.cpp
+	Engine/CompanionCommandJournalCore.cpp
 	Engine/CompanionJsonLite.cpp
 	Engine/CompanionSoldierOwnershipCore.cpp
 	Engine/CompanionCampaignIdentityCore.cpp
@@ -564,6 +565,7 @@ if ( OPENXCOM_BUILD_COMPANION_COMMAND_TESTS )
     Engine/CompanionSoldierOwnershipCore.cpp
     Engine/CompanionJsonLite.cpp
     Engine/CompanionCommandRuntimeSupport.cpp
+    Engine/CompanionCommandJournalCore.cpp
     Engine/CompanionSha256.cpp
     Engine/RNG.cpp
   )
@@ -573,6 +575,24 @@ if ( OPENXCOM_BUILD_COMPANION_COMMAND_TESTS )
     target_link_libraries ( companion_command_test ${basic_windows_libs} )
   endif ()
   add_test ( NAME companion_command_test COMMAND companion_command_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_COMMAND_JOURNAL_TESTS "Build companion command journal regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_COMMAND_JOURNAL_TESTS )
+  add_executable ( companion_command_journal_test
+    test/companion_command_journal_test.cpp
+    Engine/CompanionCommandJournalCore.cpp
+    Engine/CompanionCommandCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionSha256.cpp
+    Engine/RNG.cpp
+  )
+  target_include_directories ( companion_command_journal_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_command_journal_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_command_journal_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_command_journal_test COMMAND companion_command_journal_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_GITHUB_QUOTA_HUD_TESTS "Build companion GitHub quota HUD regression tests" ON )
