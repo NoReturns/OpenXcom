@@ -268,6 +268,22 @@ static void testRelayStatusLabels()
 	expect(labelFromStatusJson(
 		"{\"phase\":\"unknown_future_phase\",\"terminal\":true}") == "Status update",
 		"unknown future phase fallback");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"COMPLETED\"}") == "Order completed",
+		"retrieve command completed");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"FAILED\"}") == "Order failed",
+		"retrieve command failed");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"NETWORK_FAILED\"}") == "Retrieve error",
+		"retrieve network failure");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RETRIEVE_INCOMPLETE\"}") == "Retrieve incomplete",
+		"retrieve incomplete");
 }
 
 static void testLegacyStatusJsonWithoutOptionalFields()
@@ -376,7 +392,9 @@ static void testCompactBarLayoutDimensions()
 	CompactBarLayout battleLayout;
 	expect(computeBattlescapeTopBarLayout(320, 200, &battleLayout), "battlescape layout at 320px");
 	expect(battleLayout.sendY == BATTLESCAPE_TOP_BAR_Y, "battlescape top bar y");
-	expect(battleLayout.sendX == 106, "battlescape centered at 320px width");
+	expect(battleLayout.sendX == 46, "battlescape send anchors clustered bar at 320px width");
+	expect(battleLayout.autoToggleX == battleLayout.retrieveX + COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP,
+		"auto row follows retrieve");
 	expect(battleLayout.statusWidth == 200, "battlescape status width at 320px");
 	expect(battleLayout.statusX == 60, "battlescape status centered");
 	expect(battleLayout.manualNoticeY == battleLayout.statusY + RELAY_STATUS_HEIGHT + 1,
@@ -689,14 +707,49 @@ static void testAutoRetrieveIntervalAdjustment()
 	expect(label == "AUTO:OFF", "toggle off label");
 }
 
+static bool rectsOverlap(int ax, int ay, int aw, int ah, int bx, int by, int bw, int bh)
+{
+	if (ax + aw <= bx || bx + bw <= ax)
+	{
+		return false;
+	}
+	if (ay + ah <= by || by + bh <= ay)
+	{
+		return false;
+	}
+	return true;
+}
+
 static void testBattlescapeLayoutAutoRetrieveRow()
 {
 	CompactBarLayout battleLayout;
 	expect(computeBattlescapeTopBarLayout(320, 200, &battleLayout), "battlescape layout with auto row");
-	expect(battleLayout.autoRowY == 200 - COMPACT_BUTTON_HEIGHT - BATTLESCAPE_AUTO_RETRIEVE_BOTTOM_MARGIN,
-		"auto row anchored bottom-left");
-	expect(battleLayout.autoToggleX == BATTLESCAPE_AUTO_RETRIEVE_MARGIN_X, "auto toggle left margin");
+	expect(battleLayout.autoRowY == BATTLESCAPE_TOP_BAR_Y, "auto row on top bar with send/retrieve");
+	expect(battleLayout.autoToggleX == battleLayout.retrieveX + COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP,
+		"auto toggle adjacent to retrieve");
 	expect(battleLayout.autoIntervalPlusX > battleLayout.autoIntervalTextX, "plus after interval text");
+	const int autoRight = battleLayout.autoIntervalPlusX + AUTO_RETRIEVE_STEP_BUTTON_WIDTH;
+	const int topBarBottom = battleLayout.autoRowY + COMPACT_BUTTON_HEIGHT;
+	const int iconBarTopY = 200 - 56;
+	expect(topBarBottom < iconBarTopY, "top relay cluster clears soldier icon bar");
+	expect(!rectsOverlap(battleLayout.autoToggleX, battleLayout.autoRowY, autoRight - battleLayout.autoToggleX,
+		COMPACT_BUTTON_HEIGHT, 48, iconBarTopY, 224, 56),
+		"auto row does not overlap primary soldier control band at 320x200");
+	const struct { int w; int h; } resolutions[] = {
+		{320, 200},
+		{640, 400},
+		{960, 600},
+	};
+	for (const auto &res : resolutions)
+	{
+		CompactBarLayout layout;
+		expect(computeBattlescapeTopBarLayout(res.w, res.h, &layout),
+			"battlescape layout at reference resolution");
+		const int clusterRight = layout.autoIntervalPlusX + AUTO_RETRIEVE_STEP_BUTTON_WIDTH;
+		expect(layout.autoRowY == BATTLESCAPE_TOP_BAR_Y, "auto row y stable across resolutions");
+		expect(clusterRight <= res.w - 36, "cluster fits reserved right margin");
+		expect(layout.sendY == layout.autoRowY, "send and auto share top row");
+	}
 }
 
 static void testSendFreshnessManualMutationNeedsBlue()
@@ -844,10 +897,141 @@ static void testSendFreshnessRelayBusyNotBlue()
 	noteTacticalBattleMutation();
 	SendFreshnessEvaluateInput input = {};
 	input.companionConfigured = true;
-	input.relayBusy = true;
+	input.relayBusy = suppressSendPublicationHighlight(RELAY_UI_SENDING);
 	input.live.mutationGeneration = getTacticalMutationGeneration();
 	expect(evaluateSendButtonAppearance(input) == SEND_APPEARANCE_NORMAL,
-		"relay busy suppresses blue send");
+		"in-flight send suppresses needs-publication highlight");
+}
+
+static void testSendFreshnessInitialNoMutationGreyContract()
+{
+	using namespace CompanionRelayPublicationFreshnessCore;
+	resetConfirmedPublicationBinding();
+	SendFreshnessEvaluateInput input = {};
+	input.companionConfigured = true;
+	input.relayBusy = suppressSendPublicationHighlight(RELAY_UI_IDLE);
+	expect(evaluateSendButtonAppearance(input) == SEND_APPEARANCE_NORMAL,
+		"initial battlescape with no tactical mutation is normal");
+	expect(!suppressSendPublicationHighlight(RELAY_UI_IDLE), "idle does not suppress highlight");
+}
+
+static void testSendFreshnessTerminalSentDoesNotSuppressHighlight(const std::string &root)
+{
+	using namespace CompanionRelayPublicationFreshnessCore;
+	resetConfirmedPublicationBinding();
+	const std::string sha = "fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa";
+	const std::string session = "0123456789abcdef0123456789abcdef";
+	noteTacticalBattleMutation();
+	noteSnapshotExportBinding(20, sha, session, 4);
+	writeFile(root + "/briefing-ack.json",
+		"{\n"
+		"  \"status\": \"published\",\n"
+		"  \"session_id\": \"" + session + "\",\n"
+		"  \"turn\": 4,\n"
+		"  \"snapshot_sha256\": \"" + sha + "\"\n"
+		"}\n");
+	TacticalBindingSnapshot live = {};
+	live.sessionId = session;
+	live.turn = 4;
+	live.mutationGeneration = getTacticalMutationGeneration();
+	ConfirmedPublicationView confirmed;
+	expect(loadConfirmedPublicationForLiveScope(root, live, getLastExportBinding(), &confirmed),
+		"synced export before post-send mutation");
+	noteTacticalBattleMutation();
+	live.mutationGeneration = getTacticalMutationGeneration();
+	SendFreshnessEvaluateInput input = {};
+	input.companionConfigured = true;
+	input.live = live;
+	input.lastExport = getLastExportBinding();
+	input.confirmed = confirmed;
+	input.relayBusy = suppressSendPublicationHighlight(RELAY_UI_SENT);
+	expect(!suppressSendPublicationHighlight(RELAY_UI_SENT),
+		"terminal Published status is not highlight-suppressed");
+	expect(evaluateSendButtonAppearance(input) == SEND_APPEARANCE_NEEDS_PUBLICATION,
+		"new change after sent terminal status needs publication");
+}
+
+static void testSendFreshnessFailedWithStaleAckStillNeedsHighlight()
+{
+	using namespace CompanionRelayPublicationFreshnessCore;
+	resetConfirmedPublicationBinding();
+	const std::string oldSha = "1212121212121212121212121212121212121212121212121212121212121212";
+	const std::string newSha = "2323232323232323232323232323232323232323232323232323232323232323232";
+	const std::string session = "0123456789abcdef0123456789abcdef";
+	noteTacticalBattleMutation();
+	noteSnapshotExportBinding(22, newSha, session, 5);
+	ConfirmedPublicationView staleAck = {};
+	staleAck.parsed = true;
+	staleAck.terminalSuccess = true;
+	staleAck.sessionId = session;
+	staleAck.turn = 5;
+	staleAck.snapshotSha256 = oldSha;
+	SendFreshnessEvaluateInput input = {};
+	input.companionConfigured = true;
+	input.live.sessionId = session;
+	input.live.turn = 5;
+	input.live.mutationGeneration = getTacticalMutationGeneration();
+	input.lastExport = getLastExportBinding();
+	input.confirmed = staleAck;
+	input.relayBusy = suppressSendPublicationHighlight(RELAY_UI_SEND_FAILED);
+	expect(!suppressSendPublicationHighlight(RELAY_UI_SEND_FAILED), "send failed is not busy");
+	expect(evaluateSendButtonAppearance(input) == SEND_APPEARANCE_NEEDS_PUBLICATION,
+		"failed publish with export ahead of ack needs publication");
+}
+
+static void testSendFreshnessDeferredSendingSuppressesHighlight()
+{
+	using namespace CompanionRelayPublicationFreshnessCore;
+	resetConfirmedPublicationBinding();
+	noteTacticalBattleMutation();
+	SendFreshnessEvaluateInput input = {};
+	input.companionConfigured = true;
+	input.live.mutationGeneration = getTacticalMutationGeneration();
+	input.relayBusy = suppressSendPublicationHighlight(RELAY_UI_DEFERRED);
+	expect(suppressSendPublicationHighlight(RELAY_UI_DEFERRED), "deferred rate limit suppresses highlight");
+	expect(evaluateSendButtonAppearance(input) == SEND_APPEARANCE_NORMAL,
+		"deferred send shows normal colour while status explains delay");
+}
+
+static void testSendFreshnessNewSessionResetsBinding(const std::string &root)
+{
+	using namespace CompanionRelayPublicationFreshnessCore;
+	resetConfirmedPublicationBinding();
+	const std::string sha = "3434343434343434343434343434343434343434343434343434343434343434";
+	const std::string session = "0123456789abcdef0123456789abcdef";
+	noteTacticalBattleMutation();
+	noteSnapshotExportBinding(18, sha, session, 2);
+	writeFile(root + "/briefing-ack.json",
+		"{\n"
+		"  \"status\": \"published\",\n"
+		"  \"session_id\": \"" + session + "\",\n"
+		"  \"turn\": 2,\n"
+		"  \"snapshot_sha256\": \"" + sha + "\"\n"
+		"}\n");
+	TacticalBindingSnapshot live = {};
+	live.sessionId = session;
+	live.turn = 2;
+	live.mutationGeneration = getTacticalMutationGeneration();
+	ConfirmedPublicationView confirmed;
+	expect(loadConfirmedPublicationForLiveScope(root, live, getLastExportBinding(), &confirmed),
+		"session reset test: confirm loads");
+	expect(getMutationAtLastConfirmed() > 0, "precondition: confirmed mutation generation bound");
+	onBattleSessionContextChanged();
+	expect(getTacticalMutationGeneration() == 0, "new session resets mutation generation");
+	expect(getMutationAtLastConfirmed() == 0, "new session clears last-confirmed mutation");
+}
+
+static void testSendFreshnessMutationTrackedWithoutLiveSessionId()
+{
+	using namespace CompanionRelayPublicationFreshnessCore;
+	resetConfirmedPublicationBinding();
+	noteTacticalBattleMutation();
+	SendFreshnessEvaluateInput input = {};
+	input.companionConfigured = true;
+	input.live.mutationGeneration = getTacticalMutationGeneration();
+	input.relayBusy = suppressSendPublicationHighlight(RELAY_UI_IDLE);
+	expect(evaluateSendButtonAppearance(input) == SEND_APPEARANCE_NEEDS_PUBLICATION,
+		"mutation without export needs publication even when session id not wired");
 }
 
 /**
@@ -968,6 +1152,12 @@ int main()
 	testSendFreshnessMutatedAfterExportNeedsBlue();
 	testSendFreshnessStaleAckIgnored(root);
 	testSendFreshnessRelayBusyNotBlue();
+	testSendFreshnessInitialNoMutationGreyContract();
+	testSendFreshnessTerminalSentDoesNotSuppressHighlight(root);
+	testSendFreshnessFailedWithStaleAckStillNeedsHighlight();
+	testSendFreshnessDeferredSendingSuppressesHighlight();
+	testSendFreshnessNewSessionResetsBinding(root);
+	testSendFreshnessMutationTrackedWithoutLiveSessionId();
 	testSendFreshnessRegressionFailedActionPartialMutation(root);
 	testPublicationConfirmFileMerge(root);
 	testNotePlayerMutationOnlyWhenSnapshotConfigured(root);

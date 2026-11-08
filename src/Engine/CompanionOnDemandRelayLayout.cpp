@@ -43,7 +43,12 @@ bool compactBarFitsBaseViewport(int viewportWidth)
 
 bool compactBarFitsBattlescapeTop(int screenWidth, int topReservedRightPx)
 {
-	const int total = COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP + COMPACT_BUTTON_WIDTH;
+	const int autoRowTotal = AUTO_RETRIEVE_TOGGLE_WIDTH + AUTO_RETRIEVE_ROW_GAP
+	    + AUTO_RETRIEVE_STEP_BUTTON_WIDTH + AUTO_RETRIEVE_ROW_GAP
+	    + AUTO_RETRIEVE_INTERVAL_TEXT_WIDTH + AUTO_RETRIEVE_ROW_GAP
+	    + AUTO_RETRIEVE_STEP_BUTTON_WIDTH;
+	const int total = COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP + COMPACT_BUTTON_WIDTH
+	    + COMPACT_BUTTON_GAP + autoRowTotal;
 	const int usable = screenWidth - topReservedRightPx;
 	return usable >= total;
 }
@@ -87,24 +92,24 @@ bool computeBattlescapeTopBarLayout(int screenWidth, int screenHeight, CompactBa
 	{
 		return false;
 	}
-	const int layoutHeight = screenHeight > 0 ? screenHeight : BATTLESCAPE_REFERENCE_HEIGHT;
-	const int totalWidth = COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP + COMPACT_BUTTON_WIDTH;
-	const int barX = (screenWidth - totalWidth) / 2;
+	const int autoRowTotal = AUTO_RETRIEVE_TOGGLE_WIDTH + AUTO_RETRIEVE_ROW_GAP
+	    + AUTO_RETRIEVE_STEP_BUTTON_WIDTH + AUTO_RETRIEVE_ROW_GAP
+	    + AUTO_RETRIEVE_INTERVAL_TEXT_WIDTH + AUTO_RETRIEVE_ROW_GAP
+	    + AUTO_RETRIEVE_STEP_BUTTON_WIDTH;
+	const int clusterWidth = COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP + COMPACT_BUTTON_WIDTH
+	    + COMPACT_BUTTON_GAP + autoRowTotal;
+	const int barX = (screenWidth - clusterWidth) / 2;
 	out->buttonWidth = COMPACT_BUTTON_WIDTH;
 	out->buttonHeight = COMPACT_BUTTON_HEIGHT;
-	out->totalWidth = totalWidth;
+	out->totalWidth = clusterWidth;
 	out->sendX = barX;
 	out->sendY = BATTLESCAPE_TOP_BAR_Y;
 	out->retrieveX = barX + COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP;
 	out->retrieveY = BATTLESCAPE_TOP_BAR_Y;
 	assignStatusStrip(0, screenWidth, out->sendY, out->buttonHeight, out);
-	const int autoRowTotal = AUTO_RETRIEVE_TOGGLE_WIDTH + AUTO_RETRIEVE_ROW_GAP
-	    + AUTO_RETRIEVE_STEP_BUTTON_WIDTH + AUTO_RETRIEVE_ROW_GAP
-	    + AUTO_RETRIEVE_INTERVAL_TEXT_WIDTH + AUTO_RETRIEVE_ROW_GAP
-	    + AUTO_RETRIEVE_STEP_BUTTON_WIDTH;
 	out->autoRowTotalWidth = autoRowTotal;
-	out->autoRowY = layoutHeight - COMPACT_BUTTON_HEIGHT - BATTLESCAPE_AUTO_RETRIEVE_BOTTOM_MARGIN;
-	out->autoToggleX = BATTLESCAPE_AUTO_RETRIEVE_MARGIN_X;
+	out->autoRowY = BATTLESCAPE_TOP_BAR_Y;
+	out->autoToggleX = out->retrieveX + COMPACT_BUTTON_WIDTH + COMPACT_BUTTON_GAP;
 	out->autoIntervalMinusX = out->autoToggleX + AUTO_RETRIEVE_TOGGLE_WIDTH + AUTO_RETRIEVE_ROW_GAP;
 	out->autoIntervalTextX = out->autoIntervalMinusX + AUTO_RETRIEVE_STEP_BUTTON_WIDTH + AUTO_RETRIEVE_ROW_GAP;
 	out->autoIntervalPlusX = out->autoIntervalTextX + AUTO_RETRIEVE_INTERVAL_TEXT_WIDTH + AUTO_RETRIEVE_ROW_GAP;

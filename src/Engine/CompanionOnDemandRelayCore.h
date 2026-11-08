@@ -49,6 +49,9 @@ struct RelayStatusView
 	std::string phase;
 	std::string outcome;
 	std::string error_code;
+	std::string last_command_id;
+	std::string last_command_status;
+	std::string retrieve_outcome;
 	bool terminal;
 	bool parsed;
 	long long updated_at_ms;
@@ -67,6 +70,8 @@ bool shouldAcceptRelayStatusUpdate(const RelayStatusView &existing, const RelayS
 RelayUiPhase mapPhaseString(const std::string &phase, const std::string &action);
 RelayUiPhase mapStatusViewToUiPhase(const RelayStatusView &status);
 bool isRelayBusyPhase(RelayUiPhase phase);
+/** True while an in-flight relay should suppress SEND “needs publication” highlight (not terminal sent). */
+bool suppressSendPublicationHighlight(RelayUiPhase phase);
 bool tryEnqueueAction(const char *action, std::string *outRequestId, std::string *outError);
 bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 	std::string *outRequestId, std::string *outError);

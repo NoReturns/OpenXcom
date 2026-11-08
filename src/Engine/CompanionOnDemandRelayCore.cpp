@@ -407,6 +407,9 @@ bool parseRelayStatusJson(const std::string &statusJson, RelayStatusView *out)
 	CompanionJsonLite::extractJsonStringField(statusJson, "action", &out->action);
 	CompanionJsonLite::extractJsonStringField(statusJson, "outcome", &out->outcome);
 	CompanionJsonLite::extractJsonStringField(statusJson, "error_code", &out->error_code);
+	CompanionJsonLite::extractJsonStringField(statusJson, "last_command_id", &out->last_command_id);
+	CompanionJsonLite::extractJsonStringField(statusJson, "last_command_status", &out->last_command_status);
+	CompanionJsonLite::extractJsonStringField(statusJson, "retrieve_outcome", &out->retrieve_outcome);
 	CompanionJsonLite::extractJsonInt64Field(statusJson, "updated_at_ms", &out->updated_at_ms);
 	int terminalInt = 0;
 	if (CompanionJsonLite::extractJsonIntField(statusJson, "terminal", &terminalInt))
@@ -527,6 +530,11 @@ RelayUiPhase mapStatusViewToUiPhase(const RelayStatusView &status)
 bool isRelayBusyPhase(RelayUiPhase phase)
 {
 	return phase == RELAY_UI_SENDING || phase == RELAY_UI_RETRIEVING;
+}
+
+bool suppressSendPublicationHighlight(RelayUiPhase phase)
+{
+	return isRelayBusyPhase(phase) || phase == RELAY_UI_DEFERRED;
 }
 
 bool tryEnqueueAction(const char *action, std::string *outRequestId, std::string *outError)
@@ -775,7 +783,20 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 	{
 		if (status.action == "retrieve")
 		{
-			*out = "Completed";
+			if (status.last_command_status == "COMPLETED")
+			{
+				*out = "Order completed";
+			}
+			else if (status.last_command_status == "FAILED"
+			    || status.last_command_status == "REJECTED"
+			    || status.last_command_status == "INTERRUPTED")
+			{
+				*out = "Order failed";
+			}
+			else
+			{
+				*out = "Relay complete";
+			}
 		}
 		else
 		{
@@ -785,6 +806,26 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 	}
 	if (status.phase == "failed")
 	{
+		if (status.action == "retrieve")
+		{
+			if (status.error_code == "RETRIEVAL_ERROR"
+			    || status.error_code == "NETWORK_FAILED"
+			    || status.error_code == "RATE_LIMIT")
+			{
+				*out = "Retrieve error";
+				return;
+			}
+			if (status.error_code == "RETRIEVE_INCOMPLETE")
+			{
+				*out = "Retrieve incomplete";
+				return;
+			}
+			if (!status.last_command_status.empty() && status.last_command_status != "REJECTED")
+			{
+				*out = "Order failed";
+				return;
+			}
+		}
 		if (isValidationErrorCode(status.error_code))
 		{
 			*out = "Failed: VALIDATION";
@@ -792,6 +833,10 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 		else if (isAuthErrorCode(status.error_code))
 		{
 			*out = "Failed: AUTH";
+		}
+		else if (status.action == "retrieve")
+		{
+			*out = "Retrieve failed";
 		}
 		else
 		{

@@ -288,16 +288,14 @@ static SendFreshnessEvaluateInput buildSendFreshnessInput(
 {
 	SendFreshnessEvaluateInput input = {};
 	input.companionConfigured = companionSnapshotPathConfigured();
-	input.relayBusy = isRelayBusyPhase(phase)
-		|| phase == CompanionOnDemandRelayCore::RELAY_UI_DEFERRED
-		|| phase == CompanionOnDemandRelayCore::RELAY_UI_SENDING
-		|| phase == CompanionOnDemandRelayCore::RELAY_UI_SENT;
+	input.relayBusy = CompanionOnDemandRelayCore::suppressSendPublicationHighlight(phase);
+	input.live.mutationGeneration =
+		CompanionRelayPublicationFreshnessCore::getTacticalMutationGeneration();
 	if (battle != 0)
 	{
 		input.live.sessionId = battle->getCompanionEventLog().getSessionId();
 		input.live.turn = battle->getTurn();
 		input.live.stateVersion = battle->getCompanionEventLog().getLatestSeq();
-		input.live.mutationGeneration = CompanionRelayPublicationFreshnessCore::getTacticalMutationGeneration();
 	}
 	input.lastExport = CompanionRelayPublicationFreshnessCore::getLastExportBinding();
 	if (!input.lastExport.sessionId.empty() && battle != 0
@@ -471,7 +469,6 @@ void tick(Ui *ui)
 	RelayStatusView status;
 	RelayUiPhase phase = RELAY_UI_IDLE;
 	refreshStatusIfStale(wallNowMs, &status, &phase);
-	applyButtonState(ui, phase, 0);
 	std::string label;
 	if (status.parsed)
 	{
@@ -513,6 +510,15 @@ void tick(Ui *ui)
 		}
 	}
 	setControlsVisible(ui, configured);
+	if (ui->btnSend != 0)
+	{
+		RelayUiPhase labelPhase = g_cachedPhase;
+		if (g_hasCachedStatus)
+		{
+			labelPhase = mapStatusViewToUiPhase(g_cachedStatus);
+		}
+		applyButtonState(ui, labelPhase, 0);
+	}
 	refreshAutoRetrieveLabels(ui);
 }
 
