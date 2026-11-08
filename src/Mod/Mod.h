@@ -17,6 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
+#include <deque>
 #include <map>
 #include <vector>
 #include <string>
@@ -80,6 +81,13 @@ class RuleVideo;
 class RuleMusic;
 class RuleMissionScript;
 struct StatAdjustment;
+class RuleCountry;
+class RuleBaseFacility;
+class RuleCraft;
+class RuleUfo;
+class RuleAlienMission;
+class AlienDeployment;
+class RuleSoldier;
 
 /**
  * Mod data used when loading resources
@@ -167,6 +175,10 @@ private:
 	int _facilityListOrder, _craftListOrder, _itemListOrder, _researchListOrder,  _manufactureListOrder, _ufopaediaListOrder, _invListOrder;
 	std::vector<ModData> _modData;
 	ModData* _modCurrent;
+	/// Stack for companion/unit-test harnesses that register rules without loadAll().
+	/// std::deque keeps stable addresses across push_back (std::vector does not).
+	std::deque<ModData> _companionTestModStack;
+	std::vector<ModData *> _companionTestModPrevCurrent;
 	SDL_Color *_statePalette;
 	std::vector<std::string> _psiRequirements; // it's a cache for psiStrengthEval
 
@@ -356,6 +368,25 @@ public:
 	std::map<std::string, RuleInventory*> *getInventories();
 	/// Gets the ruleset for a specific inventory.
 	RuleInventory *getInventory(const std::string &id, bool error = false) const;
+	/// Register or replace an inventory rule (unit tests / harness only; takes ownership of heap rule).
+	void registerTestInventoryRule(RuleInventory *rule);
+	/// Register or replace a research rule (unit tests / harness only; takes ownership of heap rule).
+	void registerTestResearchRule(RuleResearch *rule);
+	/// Register or replace a manufacture rule (unit tests / harness only; takes ownership of heap rule).
+	void registerTestManufactureRule(RuleManufacture *rule);
+	/// Register or replace an item rule (unit tests / harness only; takes ownership of heap rule).
+	void registerTestItemRule(RuleItem *rule);
+	void registerTestArmorRule(Armor *armor);
+	void registerTestCountryRule(RuleCountry *rule);
+	void registerTestBaseFacilityRule(RuleBaseFacility *rule);
+	void registerTestCraftRule(RuleCraft *rule);
+	void registerTestUfoRule(RuleUfo *rule);
+	void registerTestAlienMissionRule(RuleAlienMission *rule);
+	void registerTestAlienDeploymentRule(AlienDeployment *rule);
+	void registerTestSoldierRule(RuleSoldier *rule);
+	/// Push a synthetic ModData so getOffset() / getModOffset() work during test rule loading.
+	void enterCompanionTestModContext();
+	void leaveCompanionTestModContext();
 	/// Gets the cost of an engineer.
 	int getEngineerCost() const;
 	/// Gets the cost of a scientist.
@@ -398,6 +429,8 @@ public:
 	const std::vector<StatString *> &getStatStrings() const;
 	/// Gets the research-requirements for Psi-Lab (it's a cache for psiStrengthEval)
 	const std::vector<std::string> &getPsiRequirements() const;
+	/// Unit tests only — set psi lab requirement ids without loading a full ruleset.
+	void setTestPsiRequirementsForHarness(const std::vector<std::string> &reqs);
 	/// Returns the sorted list of inventories.
 	const std::vector<std::string> &getInvsList() const;
 	/// Generates a new soldier.

@@ -28,7 +28,9 @@ namespace OpenXcom
 
 class BattleUnit;
 class SavedBattleGame;
+class SavedGame;
 class BattleItem;
+class RuleInventory;
 class BattleState;
 class BattlescapeState;
 class Map;
@@ -79,6 +81,9 @@ private:
 	bool _AISecondMove, _playedAggroSound;
 	bool _endTurnRequested, _endTurnProcessed;
 	bool _companionBriefingPending;
+
+	SavedGame *companionCampaignSaveForValidation() const;
+	void companionUpdateSoldierInfoIfUiPresent(bool checkFOV = false);
 
 	/// Ends the turn.
 	void endTurn();
@@ -205,6 +210,30 @@ public:
 	bool tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason);
 	/// Kneel an authorized soldier down (not a stand-up toggle); uses native kneel() rules.
 	bool tryExecuteCompanionKneelDown(BattleUnit *unit, std::string *rejectReason);
+	bool tryExecuteCompanionStandUp(BattleUnit *unit, std::string *rejectReason);
+	/// Fire one companion-authorized snap shot through the normal projectile pipeline.
+	bool tryExecuteCompanionSnapShot(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason);
+	/// Fire companion-authorized snap/auto/aimed shot through the normal projectile pipeline.
+	bool tryExecuteCompanionDirectedFire(BattleUnit *unit, Position target, BattleItem *weapon, BattleActionType actionType, std::string *rejectReason);
+	bool tryExecuteCompanionPrime(BattleUnit *unit, BattleItem *weapon, int fuseTimer, std::string *rejectReason);
+	bool tryExecuteCompanionThrow(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason);
+	/// Load an explicit compatible magazine into an empty-chamber hand-held firearm (same pathway as BattleUnit::checkAmmo / inventory reload, 15 TU).
+	bool tryExecuteCompanionReload(BattleUnit *unit, BattleItem *weapon, BattleItem *ammo, std::string *rejectReason);
+	/// Remove the inserted magazine from a hand-held firearm (mirrors Inventory::unload: 8 TU, ammo to STR_LEFT_HAND, weapon to STR_RIGHT_HAND).
+	bool tryExecuteCompanionUnload(BattleUnit *unit, BattleItem *weapon, int expectedLoadedAmmoBattleItemId, std::string *rejectReason);
+	/// Move one carried item between inventory sections (ruleset TU cost from source RuleInventory transfer costs; mirrors Inventory drag semantics).
+	bool tryExecuteCompanionInventoryMove(BattleUnit *unit, BattleItem *item, RuleInventory *destSlot, int destX, int destY, std::string *rejectReason);
+	/// Pick up one ground item on the actor tile into a carried section (ruleset TU via source slot getCost(STR_GROUND)).
+	bool tryExecuteCompanionPickup(
+		BattleUnit *unit,
+		BattleItem *item,
+		Position groundPosition,
+		RuleInventory *destSlot,
+		int destX,
+		int destY,
+		std::string *rejectReason);
+	/// Drop one carried item to ground on the actor tile (engine placement + ruleset TU via item slot getCost(STR_GROUND)).
+	bool tryExecuteCompanionDrop(BattleUnit *unit, BattleItem *item, std::string *rejectReason);
 	/// Poll local tactical-command.json when executor enabled.
 	void tickCompanionCommand(bool battleInitialized);
 	/// F4A/F4B1: human-initiated tactical order admission (companion policy scope only).

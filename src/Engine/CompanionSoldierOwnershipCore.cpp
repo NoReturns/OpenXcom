@@ -155,10 +155,7 @@ bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierCont
 	return true;
 }
 
-namespace
-{
-
-bool relayBindingMatchesDocument(
+static bool relayBindingMatchesDocument(
 	const SoldierControlDocument &doc,
 	const RelayControlBindingContext &bindingContext)
 {
@@ -178,7 +175,50 @@ bool relayBindingMatchesDocument(
 	return doc.sessionId == bindingContext.battleSessionId;
 }
 
-} // namespace
+RelayControlDiagnostics computeRelayControlDiagnostics(
+	const std::string &controlFileJson,
+	bool controlFileReadOk,
+	const RelayControlBindingContext &bindingContext,
+	int unitId,
+	SoldierControlMode campaignMode,
+	bool soldierInTacticalAiSet)
+{
+	RelayControlDiagnostics d = {};
+	d.controlFileReadOk = controlFileReadOk;
+	d.controlFileNonEmpty = !controlFileJson.empty();
+	d.soldierInTacticalAiSet = soldierInTacticalAiSet;
+	d.campaignMode = campaignMode;
+
+	SoldierControlDocument doc = {};
+	d.controlJsonParseOk = !controlFileJson.empty() && parseSoldierControlDocument(controlFileJson, &doc);
+	if (!d.controlJsonParseOk)
+	{
+		d.relayBindingMatch = false;
+		d.assignmentPresent = false;
+		d.assignmentIsAi = false;
+		d.relayAiControlled = false;
+		d.aiCommandPermitted = false;
+		return d;
+	}
+
+	d.durableIdsInDocument = !doc.tacticalBattleId.empty() && !doc.campaignId.empty();
+	d.relayCampaignIdNonEmpty = !bindingContext.campaignId.empty();
+	d.relayTacticalBattleIdNonEmpty = !bindingContext.tacticalBattleId.empty();
+	d.campaignIdMatch = !doc.campaignId.empty() && doc.campaignId == bindingContext.campaignId;
+	d.tacticalBattleIdMatch =
+	    !doc.tacticalBattleId.empty() && doc.tacticalBattleId == bindingContext.tacticalBattleId;
+	d.sessionBindingMatch =
+	    !bindingContext.battleSessionId.empty() && doc.sessionId == bindingContext.battleSessionId;
+
+	d.relayBindingMatch = relayBindingMatchesDocument(doc, bindingContext);
+
+	std::map<int, std::string>::const_iterator found = doc.assignments.find(unitId);
+	d.assignmentPresent = found != doc.assignments.end();
+	d.assignmentIsAi = d.assignmentPresent && found->second == "ai";
+	d.relayAiControlled = d.relayBindingMatch && d.assignmentIsAi;
+	d.aiCommandPermitted = (campaignMode == CONTROL_AI && d.relayAiControlled);
+	return d;
+}
 
 SoldierControlMode controlModeForUnit(
 	const std::string &controlFileJson,

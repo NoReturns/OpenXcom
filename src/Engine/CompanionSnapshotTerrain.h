@@ -9,6 +9,8 @@ namespace OpenXcom
 {
 
 class Tile;
+class SavedBattleGame;
+class Mod;
 
 namespace CompanionSnapshotTerrain
 {
@@ -20,15 +22,26 @@ const char *MEMORY_NOTE();
 
 /**
  * Append packed-v1 terrain (encoding, recordCount, data) for discovered tiles.
- * @p getTile returns nullptr for out-of-map (skipped).
- * Deterministic order: z, then y, then x.
+ * Optional semantics sparse-v1 sidecar when MapData roles can be resolved.
  */
 void appendTerrain(YAML::Node &root, int mapSizeX, int mapSizeY, int mapSizeZ,
-	const std::function<Tile *(int x, int y, int z)> &getTile);
+	SavedBattleGame *battle, Mod *mod,
+	const std::function<Tile *(int x, int y, int z)> &getTile,
+	bool testFullRevealGeometry = false);
+
+void appendTerrain(YAML::Node &root, int mapSizeX, int mapSizeY, int mapSizeZ,
+	const std::function<Tile *(int x, int y, int z)> &getTile,
+	bool testFullRevealGeometry = false);
 
 /** Verbose terrain.tiles[] export (compatibility / parity tests). */
 void appendTerrainVerbose(YAML::Node &root, int mapSizeX, int mapSizeY, int mapSizeZ,
-	const std::function<Tile *(int x, int y, int z)> &getTile);
+	SavedBattleGame *battle, Mod *mod,
+	const std::function<Tile *(int x, int y, int z)> &getTile,
+	bool testFullRevealGeometry = false);
+
+void appendTerrainVerbose(YAML::Node &root, int mapSizeX, int mapSizeY, int mapSizeZ,
+	const std::function<Tile *(int x, int y, int z)> &getTile,
+	bool testFullRevealGeometry = false);
 
 } // namespace CompanionSnapshotTerrain
 

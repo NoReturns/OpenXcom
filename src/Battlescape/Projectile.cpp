@@ -17,6 +17,7 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "Projectile.h"
+#include "../Engine/CompanionUniformShootingSpreadCore.h"
 #include "TileEngine.h"
 #include "Map.h"
 #include "Camera.h"
@@ -371,17 +372,8 @@ void Projectile::applyAccuracy(Position origin, Position *target, double accurac
 	int xDist = abs(origin.x - target->x);
 	int yDist = abs(origin.y - target->y);
 	int zDist = abs(origin.z - target->z);
-	int xyShift, zShift;
-
-	if (xDist / 2 <= yDist)				//yes, we need to add some x/y non-uniformity
-		xyShift = xDist / 4 + yDist;	//and don't ask why, please. it's The Commandment
-	else
-		xyShift = (xDist + yDist) / 2;	//that's uniform part of spreading
-
-	if (xyShift <= zDist)				//slight z deviation
-		zShift = xyShift / 2 + zDist;
-	else
-		zShift = xyShift + zDist / 2;
+	const int xyShift = CompanionUniformShootingSpreadCore::computeUniformXyShift(xDist, yDist);
+	const int zShift = CompanionUniformShootingSpreadCore::computeZShift(xyShift, zDist);
 
 	int deviation = RNG::generate(0, 100) - (accuracy * 100);
 
@@ -392,8 +384,8 @@ void Projectile::applyAccuracy(Position origin, Position *target, double accurac
 
 	deviation = std::max(1, zShift * deviation / 200);	//range ratio
 
-	target->x += RNG::generate(0, deviation) - deviation / 2;
-	target->y += RNG::generate(0, deviation) - deviation / 2;
+	CompanionUniformShootingSpreadCore::applyCircularXyJitter(
+		origin.x, origin.y, xDist, yDist, deviation, target->x, target->y);
 	target->z += RNG::generate(0, deviation / 2) / 2 - deviation / 8;
 
 	if (extendLine)

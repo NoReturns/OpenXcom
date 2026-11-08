@@ -4,6 +4,7 @@
  */
 #include <functional>
 #include <vector>
+#include "CompanionSnapshotTerrainSemantics.h"
 
 namespace OpenXcom
 {
@@ -41,15 +42,35 @@ struct TerrainTileExport
 	bool inLos;
 	bool hasBody;
 	TerrainBodyExport body;
+	unsigned char bodySemantic;
+	/// True when O_FLOOR MapData has isGravLift() (movement-relevant; independent of object-first bodySemantic).
+	bool bodyFloorGravLift;
+	bool bodyDoorStateKnown;
+	bool bodyDoorOpen;
 	bool hasWestSection;
 	TerrainWallExport west;
+	unsigned char westSemantic;
+	bool westDoorStateKnown;
+	bool westDoorOpen;
 	bool hasNorthSection;
 	TerrainWallExport north;
+	unsigned char northSemantic;
+	bool northDoorStateKnown;
+	bool northDoorOpen;
+};
+
+struct TerrainCaptureOptions
+{
+	const TerrainSemanticsContext *semanticsContext;
+	/// Test harness only: emit undiscovered cells with synthetic discovery mask; does not mutate tiles.
+	bool testFullRevealGeometry;
+	TerrainCaptureOptions() : semanticsContext(0), testFullRevealGeometry(false) {}
 };
 
 void captureTerrainTiles(int mapSizeX, int mapSizeY, int mapSizeZ,
 	const std::function<Tile *(int x, int y, int z)> &getTile,
-	std::vector<TerrainTileExport> &outTiles);
+	std::vector<TerrainTileExport> &outTiles,
+	const TerrainCaptureOptions *options = 0);
 
 } // namespace CompanionSnapshotTerrain
 

@@ -33,6 +33,8 @@
 #include "../Engine/Sound.h"
 #include "../Mod/Mod.h"
 #include "../Savegame/BattleUnitStatistics.h"
+#include "../Engine/CompanionPerceptionLog.h"
+#include "../Savegame/Soldier.h"
 
 namespace OpenXcom
 {
@@ -163,7 +165,7 @@ void PsiAttackBState::psiAttack()
 		{
 			int moraleLoss = (110-_target->getBaseStats()->bravery);
 			if (moraleLoss > 0)
-			_target->moraleChange(-moraleLoss);
+				_target->moraleChange(-moraleLoss);
 			_target->setMindControllerId(_unit->getId());
 			// Award Panic battle unit kill
 			if (!_unit->getStatistics()->duplicateEntry(STATUS_PANICKING, _target->getId()))
@@ -174,6 +176,25 @@ void PsiAttackBState::psiAttack()
 			if (_parent->getSave()->getSide() == FACTION_PLAYER)
 			{
 				game->pushState(new InfoboxState(game->getLanguage()->getString("STR_MORALE_ATTACK_SUCCESSFUL")));
+				SavedGame *campaign = _parent->getSave()->getGeoscapeSave();
+				std::string rosterDisplayName;
+				Soldier *targetSoldier = _target->getGeoscapeSoldier();
+				if (targetSoldier != 0 && campaign != 0
+					&& targetSoldier->getId() == _target->getId()
+					&& _target->getId() > 0 && _target->getId() < BattleUnit::MAX_SOLDIER_ID
+					&& campaign->isLiveRosterSoldier(_target->getId()))
+				{
+					rosterDisplayName = targetSoldier->getName(true);
+				}
+				const int observationSerial = _parent->getSave()->getCompanionPerceptionLog().allocatePsychObservationSerial();
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordPsychologicalUiNotification(
+					_parent->getSave(),
+					_target,
+					"psi_morale_attack_observed",
+					observationSerial,
+					true,
+					_target->getVisible(),
+					rosterDisplayName);
 			}
 		}
 		else if (_action.type == BA_MINDCONTROL)
@@ -191,6 +212,21 @@ void PsiAttackBState::psiAttack()
 			_target->recoverTimeUnits();
 			_target->allowReselect();
 			_target->abortTurn(); // resets unit status to STANDING
+			SavedGame *campaign = _parent->getSave()->getGeoscapeSave();
+			std::string rosterDisplayName;
+			Soldier *targetSoldier = _target->getGeoscapeSoldier();
+			if (targetSoldier != 0 && campaign != 0
+				&& targetSoldier->getId() == _target->getId()
+				&& _target->getId() > 0 && _target->getId() < BattleUnit::MAX_SOLDIER_ID
+				&& campaign->isLiveRosterSoldier(_target->getId()))
+			{
+				rosterDisplayName = targetSoldier->getName(true);
+			}
+			const char *mindControlEventType =
+				_target->getOriginalFaction() == FACTION_PLAYER
+					? "soldier_mind_controlled_observed"
+					: "alien_mind_controlled_observed";
+			const int observationSerial = _parent->getSave()->getCompanionPerceptionLog().allocatePsychObservationSerial();
 			// if all units from either faction are mind controlled - auto-end the mission.
 			if (_parent->getSave()->getSide() == FACTION_PLAYER)
 			{
@@ -200,11 +236,27 @@ void PsiAttackBState::psiAttack()
 				}
 				game->pushState(new InfoboxState(game->getLanguage()->getString("STR_MIND_CONTROL_SUCCESSFUL")));
 				_parent->getSave()->getBattleState()->updateSoldierInfo();
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordPsychologicalUiNotification(
+					_parent->getSave(),
+					_target,
+					mindControlEventType,
+					observationSerial,
+					true,
+					_target->getVisible(),
+					rosterDisplayName);
 			}
 			else
 			{
 				// show a little infobox with the name of the unit and "... is under alien control"
 				game->pushState(new InfoboxState(game->getLanguage()->getString("STR_IS_UNDER_ALIEN_CONTROL", _target->getGender()).arg(_target->getName(game->getLanguage()))));
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordPsychologicalUiNotification(
+					_parent->getSave(),
+					_target,
+					"soldier_mind_controlled_observed",
+					observationSerial,
+					true,
+					_target->getVisible(),
+					rosterDisplayName);
 			}
 		}
 	}

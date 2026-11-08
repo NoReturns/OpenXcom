@@ -35,6 +35,38 @@ struct RelayControlBindingContext
 	std::string tacticalBattleId;
 };
 
+/**
+ * WP8 diagnostic: how relay JSON + binding combined with in-memory tactical AI set.
+ * Does not include raw JSON or full document contents.
+ */
+struct RelayControlDiagnostics
+{
+	bool controlFileReadOk;
+	bool controlFileNonEmpty;
+	bool controlJsonParseOk;
+	bool soldierInTacticalAiSet;
+	SoldierControlMode campaignMode;
+	bool relayBindingMatch;
+	bool assignmentPresent;
+	bool assignmentIsAi;
+	bool durableIdsInDocument;
+	bool relayCampaignIdNonEmpty;
+	bool relayTacticalBattleIdNonEmpty;
+	bool campaignIdMatch;
+	bool tacticalBattleIdMatch;
+	bool sessionBindingMatch;
+	bool relayAiControlled;
+	bool aiCommandPermitted;
+};
+
+RelayControlDiagnostics computeRelayControlDiagnostics(
+	const std::string &controlFileJson,
+	bool controlFileReadOk,
+	const RelayControlBindingContext &bindingContext,
+	int unitId,
+	SoldierControlMode campaignMode,
+	bool soldierInTacticalAiSet);
+
 bool isExecutorEnabledFromEnvironment();
 bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierControlDocument *out);
 SoldierControlMode controlModeForUnit(

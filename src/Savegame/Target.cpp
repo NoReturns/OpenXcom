@@ -21,6 +21,7 @@
 #include "SerializationHelper.h"
 #include "../fmath.h"
 #include "../Engine/Language.h"
+#include <sstream>
 
 namespace OpenXcom
 {
@@ -171,6 +172,17 @@ std::string Target::getName(Language *lang) const
 	if (_name.empty())
 		return getDefaultName(lang);
 	return _name;
+}
+
+std::string Target::getDisplayLabelForExport() const
+{
+	if (!_name.empty())
+	{
+		return _name;
+	}
+	std::ostringstream o;
+	o << getType() << '#' << _id;
+	return o.str();
 }
 
 /**

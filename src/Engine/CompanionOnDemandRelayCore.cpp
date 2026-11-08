@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -29,7 +30,10 @@ const char *REQUEST_FILENAME = "companion-on-demand-request.json";
 const char *STATUS_FILENAME = "companion-on-demand-status.json";
 const char *BRIEFING_REQUEST_FILENAME = "briefing-request.json";
 const char *DAEMON_READY_FILENAME = ".companion-on-demand-daemon-ready.json";
+const char *DAEMON_HEALTH_FILENAME = ".companion-on-demand-daemon-health.json";
+const char *TRANSACTIONS_FILENAME = "companion-on-demand-relay-transactions.jsonl";
 const long long RELAY_OFFLINE_GRACE_MS = 2500;
+const long long DAEMON_HEALTH_STALE_MS = 4000;
 
 bool writeTextAtomically(const std::string &destPath, const std::string &content)
 {
@@ -89,6 +93,36 @@ bool fileExists(const std::string &path)
 {
 	std::ifstream in(path.c_str(), std::ios::in | std::ios::binary);
 	return static_cast<bool>(in);
+}
+
+void appendRelayButtonEnqueueDiagnostic(const std::string &relayDir, const char *action, bool accepted,
+	const char *rejectCode, const std::string *requestId)
+{
+	if (relayDir.empty() || action == 0)
+	{
+		return;
+	}
+	const long long atMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::system_clock::now().time_since_epoch()).count();
+	std::ostringstream json;
+	json << "{\"kind\":\"relay_button_enqueue\",\"at_ms\":" << atMs
+	     << ",\"action\":\"" << action << "\""
+	     << ",\"accepted\":" << (accepted ? "true" : "false");
+	if (rejectCode != 0 && rejectCode[0] != '\0')
+	{
+		json << ",\"reject_code\":\"" << rejectCode << "\"";
+	}
+	if (requestId != 0 && !requestId->empty())
+	{
+		json << ",\"request_id\":\"" << *requestId << "\"";
+	}
+	json << "}\n";
+	const std::string path = relayDir + "/" + TRANSACTIONS_FILENAME;
+	std::ofstream out(path.c_str(), std::ios::out | std::ios::app | std::ios::binary);
+	if (out)
+	{
+		out << json.str();
+	}
 }
 
 bool buildInitialStatusJson(const std::string &requestId, const char *action, long long updatedAtMs, std::string *out)
@@ -166,7 +200,111 @@ void removePendingRequestFile(const std::string &requestPath)
 #endif
 }
 
+bool requestFileHasPendingWork(const std::string &requestPath)
+{
+	std::string requestJson;
+	if (!readTextFile(requestPath, &requestJson))
+	{
+		return true;
+	}
+	std::string status;
+	if (!CompanionJsonLite::extractJsonStringField(requestJson, "status", &status))
+	{
+		return true;
+	}
+	return status == "pending";
+}
+
+bool readDaemonHealthFreshness(const std::string &relayDir, long long wallNowMs, long long *outUpdatedMs, std::string *outState)
+{
+	const std::string healthPath = relayDir + "/" + DAEMON_HEALTH_FILENAME;
+	std::string healthJson;
+	if (!readTextFile(healthPath, &healthJson))
+	{
+		return false;
+	}
+	long long updatedMs = 0;
+	if (!CompanionJsonLite::extractJsonInt64Field(healthJson, "updated_at_ms", &updatedMs))
+	{
+		return false;
+	}
+	if (outUpdatedMs != 0)
+	{
+		*outUpdatedMs = updatedMs;
+	}
+	if (outState != 0)
+	{
+		outState->clear();
+		CompanionJsonLite::extractJsonStringField(healthJson, "state", outState);
+	}
+	if (wallNowMs < updatedMs)
+	{
+		return false;
+	}
+	if (wallNowMs - updatedMs > DAEMON_HEALTH_STALE_MS)
+	{
+		return false;
+	}
+	if (outState != 0)
+	{
+		if (*outState != "ready" && *outState != "busy")
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool isDaemonLocallyServing(const std::string &relayDir, long long wallNowMs)
+{
+	std::string state;
+	long long updatedMs = 0;
+	return readDaemonHealthFreshness(relayDir, wallNowMs, &updatedMs, &state);
+}
+
+#ifdef _WIN32
+bool tryKickEnsureOnDemandDaemonHelper()
+{
+	const char *script = std::getenv("OPENXCOM_COMPANION_ENSURE_DAEMON_SCRIPT");
+	if (script == 0 || script[0] == '\0')
+	{
+		return false;
+	}
+	const char *snapshotPath = std::getenv(SNAPSHOT_ENV);
+	if (snapshotPath == 0 || snapshotPath[0] == '\0')
+	{
+		return false;
+	}
+	const char *nodeExe = std::getenv("OPENXCOM_COMPANION_NODE_EXE");
+	const std::string node = (nodeExe != 0 && nodeExe[0] != '\0') ? std::string(nodeExe) : std::string("node");
+	std::string cmd = "\"" + node + "\" \"" + std::string(script) + "\" \"" + std::string(snapshotPath) + "\"";
+	std::vector<char> cmdLine(cmd.begin(), cmd.end());
+	cmdLine.push_back('\0');
+	STARTUPINFOA si = {};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESHOWWINDOW;
+	si.wShowWindow = SW_HIDE;
+	PROCESS_INFORMATION pi = {};
+	if (!CreateProcessA(0, cmdLine.data(), 0, 0, FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS, 0, 0, &si, &pi))
+	{
+		return false;
+	}
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	return true;
+}
+#else
+bool tryKickEnsureOnDemandDaemonHelper()
+{
+	return false;
+}
+#endif
+
 } // namespace
+
+RelayStatusView::RelayStatusView() : terminal(false), parsed(false), updated_at_ms(0)
+{
+}
 
 long long companionWallClockMs()
 {
@@ -249,6 +387,79 @@ bool readStatusPhase(const std::string &statusJson, std::string *outPhase, bool 
 	return true;
 }
 
+bool parseRelayStatusJson(const std::string &statusJson, RelayStatusView *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	*out = RelayStatusView();
+	if (statusJson.empty())
+	{
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(statusJson, "phase", &out->phase))
+	{
+		return false;
+	}
+	out->parsed = true;
+	CompanionJsonLite::extractJsonStringField(statusJson, "request_id", &out->request_id);
+	CompanionJsonLite::extractJsonStringField(statusJson, "action", &out->action);
+	CompanionJsonLite::extractJsonStringField(statusJson, "outcome", &out->outcome);
+	CompanionJsonLite::extractJsonStringField(statusJson, "error_code", &out->error_code);
+	CompanionJsonLite::extractJsonInt64Field(statusJson, "updated_at_ms", &out->updated_at_ms);
+	int terminalInt = 0;
+	if (CompanionJsonLite::extractJsonIntField(statusJson, "terminal", &terminalInt))
+	{
+		out->terminal = terminalInt != 0;
+	}
+	else if (statusJson.find("\"terminal\": true") != std::string::npos
+	    || statusJson.find("\"terminal\":true") != std::string::npos)
+	{
+		out->terminal = true;
+	}
+	return true;
+}
+
+bool shouldAcceptRelayStatusUpdate(const RelayStatusView &existing, const RelayStatusView &incoming, bool hasExisting)
+{
+	if (!incoming.parsed)
+	{
+		return false;
+	}
+	if (!hasExisting || !existing.parsed)
+	{
+		return true;
+	}
+	if (!incoming.request_id.empty() && !existing.request_id.empty()
+	    && incoming.request_id == existing.request_id)
+	{
+		return true;
+	}
+	if (!incoming.request_id.empty() && !existing.request_id.empty()
+	    && incoming.request_id != existing.request_id)
+	{
+		if (incoming.updated_at_ms >= existing.updated_at_ms)
+		{
+			return true;
+		}
+		if (existing.terminal)
+		{
+			return false;
+		}
+		return incoming.updated_at_ms >= existing.updated_at_ms;
+	}
+	if (existing.terminal && incoming.updated_at_ms < existing.updated_at_ms)
+	{
+		return false;
+	}
+	if (existing.terminal && incoming.terminal == false && incoming.request_id == existing.request_id)
+	{
+		return true;
+	}
+	return true;
+}
+
 RelayUiPhase mapPhaseString(const std::string &phase, const std::string &action)
 {
 	if (phase == "sending")
@@ -266,6 +477,10 @@ RelayUiPhase mapPhaseString(const std::string &phase, const std::string &action)
 	if (phase == "not_ready")
 	{
 		return RELAY_UI_NOT_READY;
+	}
+	if (phase == "manual_upload_required")
+	{
+		return RELAY_UI_MANUAL_UPLOAD_REQUIRED;
 	}
 	if (phase == "retrieving")
 	{
@@ -287,7 +502,26 @@ RelayUiPhase mapPhaseString(const std::string &phase, const std::string &action)
 	{
 		return action == "retrieve" ? RELAY_UI_RETRIEVE_FAILED : RELAY_UI_SEND_FAILED;
 	}
-	return RELAY_UI_IDLE;
+	return RELAY_UI_UNKNOWN;
+}
+
+RelayUiPhase mapStatusViewToUiPhase(const RelayStatusView &status)
+{
+	if (!status.parsed)
+	{
+		return RELAY_UI_IDLE;
+	}
+	if (status.outcome == "deferred"
+	    || (status.phase == "sending" && status.error_code == "RATE_LIMIT" && !status.terminal))
+	{
+		return RELAY_UI_DEFERRED;
+	}
+	const RelayUiPhase mapped = mapPhaseString(status.phase, status.action);
+	if (mapped == RELAY_UI_UNKNOWN)
+	{
+		return RELAY_UI_UNKNOWN;
+	}
+	return mapped;
 }
 
 bool isRelayBusyPhase(RelayUiPhase phase)
@@ -339,6 +573,11 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 		{
 			*outError = "missing_briefing_request_id";
 		}
+		std::string relayDir;
+		if (resolveRelayDir(&relayDir))
+		{
+			appendRelayButtonEnqueueDiagnostic(relayDir, action, false, "missing_briefing_request_id", 0);
+		}
 		return false;
 	}
 	if (!companionSnapshotPathConfigured())
@@ -358,14 +597,24 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 		{
 			*outError = "path_resolution_failed";
 		}
+		std::string relayDir;
+		if (resolveRelayDir(&relayDir))
+		{
+			appendRelayButtonEnqueueDiagnostic(relayDir, action, false, "path_resolution_failed", 0);
+		}
 		return false;
 	}
 
-	if (fileExists(requestPath))
+	if (fileExists(requestPath) && requestFileHasPendingWork(requestPath))
 	{
 		if (outError != 0)
 		{
 			*outError = "request_in_flight";
+		}
+		std::string relayDir;
+		if (resolveRelayDir(&relayDir))
+		{
+			appendRelayButtonEnqueueDiagnostic(relayDir, action, false, "request_in_flight", 0);
 		}
 		return false;
 	}
@@ -378,12 +627,35 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 		bool terminal = true;
 		readStatusPhase(statusJson, &phase, &terminal);
 		CompanionJsonLite::extractJsonStringField(statusJson, "action", &statusAction);
+		RelayStatusView statusView;
+		if (parseRelayStatusJson(statusJson, &statusView))
+		{
+			const RelayUiPhase uiPhase = mapStatusViewToUiPhase(statusView);
+			if (isRelayBusyPhase(uiPhase) || uiPhase == RELAY_UI_DEFERRED || !terminal)
+			{
+				if (outError != 0)
+				{
+					*outError = "relay_busy";
+				}
+				std::string relayDir;
+				if (resolveRelayDir(&relayDir))
+				{
+					appendRelayButtonEnqueueDiagnostic(relayDir, action, false, "relay_busy", 0);
+				}
+				return false;
+			}
+		}
 		const RelayUiPhase uiPhase = mapPhaseString(phase, statusAction);
 		if (isRelayBusyPhase(uiPhase) || !terminal)
 		{
 			if (outError != 0)
 			{
 				*outError = "relay_busy";
+			}
+			std::string relayDir;
+			if (resolveRelayDir(&relayDir))
+			{
+				appendRelayButtonEnqueueDiagnostic(relayDir, action, false, "relay_busy", 0);
 			}
 			return false;
 		}
@@ -399,6 +671,11 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 		{
 			*outError = "request_write_failed";
 		}
+		std::string relayDir;
+		if (resolveRelayDir(&relayDir))
+		{
+			appendRelayButtonEnqueueDiagnostic(relayDir, action, false, "request_write_failed", 0);
+		}
 		return false;
 	}
 
@@ -410,7 +687,119 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 	{
 		*outRequestId = requestId;
 	}
+	std::string relayDir;
+	if (resolveRelayDir(&relayDir))
+	{
+		appendRelayButtonEnqueueDiagnostic(relayDir, action, true, 0, &requestId);
+	}
+	tryKickEnsureOnDemandDaemonHelper();
 	return true;
+}
+
+namespace
+{
+
+bool isValidationErrorCode(const std::string &code)
+{
+	if (code == "SNAPSHOT_VALIDATION" || code == "SNAPSHOT_ERROR" || code == "SNAPSHOT_HASH_MISMATCH"
+	    || code == "SNAPSHOT_SCHEMA" || code == "SNAPSHOT_SESSION" || code == "TURN_MISMATCH"
+	    || code == "SESSION_MISMATCH")
+	{
+		return true;
+	}
+	return false;
+}
+
+bool isAuthErrorCode(const std::string &code)
+{
+	return code == "AUTH_FAILED" || code == "AUTH" || code == "gh_not_authenticated";
+}
+
+} // namespace
+
+void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
+{
+	if (out == 0)
+	{
+		return;
+	}
+	out->clear();
+	if (!status.parsed)
+	{
+		return;
+	}
+	if (status.outcome == "deferred"
+	    || (status.phase == "sending" && status.error_code == "RATE_LIMIT" && !status.terminal))
+	{
+		*out = "Deferred: RATE LIMIT";
+		return;
+	}
+	if (status.phase == "manual_upload_required" || status.outcome == "manual_upload_required")
+	{
+		*out = "Manual upload required";
+		return;
+	}
+	if (status.phase == "not_ready")
+	{
+		*out = "Not ready";
+		return;
+	}
+	if (status.phase == "sending")
+	{
+		*out = "Sending";
+		return;
+	}
+	if (status.phase == "retrieving")
+	{
+		*out = "Retrieving";
+		return;
+	}
+	if (status.phase == "no_new_orders")
+	{
+		*out = "No new orders";
+		return;
+	}
+	if (status.phase == "sent")
+	{
+		if (status.outcome == "skipped_unchanged")
+		{
+			*out = "Unchanged";
+		}
+		else
+		{
+			*out = "Published";
+		}
+		return;
+	}
+	if (status.phase == "completed")
+	{
+		if (status.action == "retrieve")
+		{
+			*out = "Completed";
+		}
+		else
+		{
+			*out = "Published";
+		}
+		return;
+	}
+	if (status.phase == "failed")
+	{
+		if (isValidationErrorCode(status.error_code))
+		{
+			*out = "Failed: VALIDATION";
+		}
+		else if (isAuthErrorCode(status.error_code))
+		{
+			*out = "Failed: AUTH";
+		}
+		else
+		{
+			*out = "Failed";
+		}
+		return;
+	}
+	*out = "Status update";
 }
 
 void formatStatusLabel(RelayUiPhase phase, std::string *out)
@@ -419,36 +808,53 @@ void formatStatusLabel(RelayUiPhase phase, std::string *out)
 	{
 		return;
 	}
+	RelayStatusView view;
+	view.parsed = true;
 	switch (phase)
 	{
 	case RELAY_UI_SENDING:
-		*out = "Sending";
+		view.phase = "sending";
 		break;
 	case RELAY_UI_SENT:
-		*out = "Sent";
+		view.phase = "sent";
 		break;
 	case RELAY_UI_SEND_FAILED:
-		*out = "Failed";
+		view.phase = "failed";
+		view.action = "send";
 		break;
 	case RELAY_UI_NOT_READY:
-		*out = "Not ready";
+		view.phase = "not_ready";
 		break;
 	case RELAY_UI_RETRIEVING:
-		*out = "Retrieving";
+		view.phase = "retrieving";
 		break;
 	case RELAY_UI_COMPLETED:
-		*out = "Completed";
+		view.phase = "completed";
+		view.action = "retrieve";
 		break;
 	case RELAY_UI_NO_NEW_ORDERS:
-		*out = "No new orders";
+		view.phase = "no_new_orders";
 		break;
 	case RELAY_UI_RETRIEVE_FAILED:
-		*out = "Failed";
+		view.phase = "failed";
+		view.action = "retrieve";
+		break;
+	case RELAY_UI_MANUAL_UPLOAD_REQUIRED:
+		view.phase = "manual_upload_required";
+		break;
+	case RELAY_UI_DEFERRED:
+		view.phase = "sending";
+		view.outcome = "deferred";
+		view.error_code = "RATE_LIMIT";
+		break;
+	case RELAY_UI_UNKNOWN:
+		view.phase = "unexpected_phase";
 		break;
 	default:
 		out->clear();
-		break;
+		return;
 	}
+	formatRelayStatusLabel(view, out);
 }
 
 bool relayControlRectHitTest(int absX, int absY, int rectX, int rectY, int rectW, int rectH, bool visible)
@@ -533,17 +939,17 @@ bool reconcilePendingOnDemandRelay(long long wallNowMs)
 		}
 	}
 
-	int createdAtMsInt = 0;
 	long long createdAtMs = 0;
-	if (CompanionJsonLite::extractJsonIntField(requestJson, "created_at_ms", &createdAtMsInt))
-	{
-		createdAtMs = createdAtMsInt;
-	}
+	CompanionJsonLite::extractJsonInt64Field(requestJson, "created_at_ms", &createdAtMs);
 	const std::string readyPath = relayDir + "/" + DAEMON_READY_FILENAME;
-	if (!fileExists(readyPath)
-	    && createdAtMs > 0
+	const bool withinStartupGrace = createdAtMs > 0
 	    && wallNowMs >= createdAtMs
-	    && wallNowMs - createdAtMs >= RELAY_OFFLINE_GRACE_MS)
+	    && wallNowMs - createdAtMs < RELAY_OFFLINE_GRACE_MS;
+	if (withinStartupGrace)
+	{
+		return false;
+	}
+	if (!isDaemonLocallyServing(relayDir, wallNowMs))
 	{
 		writeTerminalFailureStatus(statusPath, requestId, action.c_str(),
 			"Relay offline; start companion launcher.", wallNowMs);

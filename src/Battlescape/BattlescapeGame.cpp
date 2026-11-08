@@ -57,18 +57,60 @@
 #include "../Engine/Logger.h"
 #include "../Engine/CompanionSnapshot.h"
 #include "../Engine/CompanionCommandRuntime.h"
+#include "../Engine/CompanionRelayPublicationFreshnessCore.h"
 #include "../Engine/CompanionCommandRuntimeSupport.h"
+#include "../Engine/CompanionCommandCore.h"
 #include "../Engine/CompanionBriefingRequest.h"
 #include "../Engine/CompanionBriefingTestSupport.h"
 #include "../Engine/CompanionOnDemandRelayCore.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
+#include "../Engine/CompanionPerceptionLog.h"
+#include "../Engine/CompanionGroundInventoryCore.h"
 #include "../Savegame/BattleUnitStatistics.h"
+#include "../Savegame/Soldier.h"
 #include "../fmath.h"
+#include <map>
 
 namespace OpenXcom
 {
 
 bool BattlescapeGame::_debugPlay = false;
+
+namespace
+{
+
+static bool companionInventoryOverlapItems(BattleUnit *unit, BattleItem *movingItem,
+	RuleInventory *destSlot, int destX, int destY)
+{
+	if (unit == 0 || movingItem == 0 || destSlot == 0)
+	{
+		return true;
+	}
+	if (destSlot->getType() == INV_GROUND)
+	{
+		return true;
+	}
+	for (std::vector<BattleItem*>::const_iterator i = unit->getInventory()->begin();
+	     i != unit->getInventory()->end(); ++i)
+	{
+		if (*i == 0 || *i == movingItem)
+		{
+			continue;
+		}
+		// Nested magazines use no inventory slot; they do not occupy grid cells.
+		if ((*i)->getSlot() == 0)
+		{
+			continue;
+		}
+		if ((*i)->getSlot() == destSlot && (*i)->occupiesSlot(destX, destY, movingItem))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+} // namespace
 
 /**
  * Initializes all the elements in the Battlescape screen.
@@ -84,7 +126,10 @@ BattlescapeGame::BattlescapeGame(SavedBattleGame *save, BattlescapeState *parent
 
 	_debugPlay = false;
 
-	checkForCasualties(0, 0, true);
+	if (_parentState != 0)
+	{
+		checkForCasualties(0, 0, true);
+	}
 	cancelCurrentAction();
 }
 
@@ -175,9 +220,24 @@ void BattlescapeGame::init()
 	SavedGame *campaign = _save->getGeoscapeSave();
 	_save->ensureCompanionTacticalOwnershipInitialized(campaign);
 	CompanionCommandRuntime::onBattleCompanionBindingContext(_save);
-	if (_save->getCompanionEventLog().getSessionId().empty())
+	const std::string &companionSessionId = _save->getCompanionEventLog().getSessionId();
+	if (companionSessionId.empty())
 	{
 		_save->getCompanionEventLog().beginSession();
+		const std::string &newSessionId = _save->getCompanionEventLog().getSessionId();
+		_save->getCompanionPerceptionLog().beginSession(newSessionId);
+		_save->getCompanionGroundItemMemory().beginSession(newSessionId);
+	}
+	else
+	{
+		if (_save->getCompanionPerceptionLog().getSessionId() != companionSessionId)
+		{
+			_save->getCompanionPerceptionLog().syncSessionId(companionSessionId);
+		}
+		if (_save->getCompanionGroundItemMemory().getSessionId() != companionSessionId)
+		{
+			_save->getCompanionGroundItemMemory().syncSessionId(companionSessionId);
+		}
 	}
 	CompanionSnapshot::tryPublishSoldierControl(_save, campaign);
 	if (_save->getSide() == FACTION_PLAYER && _save->getTurn() > 1)
@@ -365,6 +425,11 @@ bool BattlescapeGame::kneel(BattleUnit *bu)
 			getMap()->cacheUnits();
 			_parentState->updateSoldierInfo();
 			getTileEngine()->checkReactionFire(bu);
+			if (bu->getFaction() == FACTION_PLAYER
+			    && (_save->getSide() == FACTION_PLAYER || _debugPlay))
+			{
+				CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+			}
 			return true;
 		}
 		else
@@ -1042,11 +1107,49 @@ void BattlescapeGame::popState()
 
 	BattleAction action = _states.front()->getAction();
 
+	if (action.actor != 0 && action.playerOrdered &&
+	    (action.type == BA_SNAPSHOT || action.type == BA_AUTOSHOT || action.type == BA_AIMEDSHOT))
+	{
+		CompanionCommandRuntime::noteSnapShotBattleActionPop(action.actor->getId(), action.result);
+	}
+	if (action.actor != 0 && action.playerOrdered && action.type == BA_THROW)
+	{
+		CompanionCommandRuntime::noteThrowBattleActionPop(action.actor->getId(), action.result);
+	}
+	if (action.actor != 0 && action.playerOrdered && action.type == BA_WALK)
+	{
+		CompanionCommandRuntime::noteWalkBattleActionPop(action.actor->getId(), action.result);
+	}
+
 	if (action.actor && !action.result.empty() && action.actor->getFaction() == FACTION_PLAYER
 		&& _playerPanicHandled && (_save->getSide() == FACTION_PLAYER || _debugPlay))
 	{
 		_parentState->warning(action.result);
 		actionFailed = true;
+	}
+	// M1 blue SEND: skip mutation when actionFailed (non-empty action.result warning). The engine may
+	// still have applied partial deltas (e.g. walk abort with 1 TU / facing) similar to Companion MOVE
+	// interrupt diagnostics — see testSendFreshnessRegressionFailedActionPartialMutation in relay tests.
+	if (!actionFailed && action.actor != 0 && action.playerOrdered
+	    && action.actor->getFaction() == FACTION_PLAYER
+	    && (_save->getSide() == FACTION_PLAYER || _debugPlay))
+	{
+		switch (action.type)
+		{
+		case BA_WALK:
+		case BA_THROW:
+		case BA_AUTOSHOT:
+		case BA_SNAPSHOT:
+		case BA_AIMEDSHOT:
+		case BA_HIT:
+		case BA_LAUNCH:
+		case BA_USE:
+		case BA_PRIME:
+			CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+			break;
+		default:
+			break;
+		}
 	}
 	_deleted.push_back(_states.front());
 	_states.pop_front();
@@ -1302,6 +1405,39 @@ bool BattlescapeGame::handlePanickingPlayer()
 	return true;
 }
 
+namespace
+{
+
+bool isLiveRosterSoldierIdentityForPsychObservation(const BattleUnit *unit, const SavedGame *campaign)
+{
+	if (unit == 0 || campaign == 0)
+	{
+		return false;
+	}
+	Soldier *soldier = unit->getGeoscapeSoldier();
+	if (soldier == 0 || soldier->getId() != unit->getId())
+	{
+		return false;
+	}
+	if (unit->getId() <= 0 || unit->getId() >= BattleUnit::MAX_SOLDIER_ID)
+	{
+		return false;
+	}
+	return campaign->isLiveRosterSoldier(unit->getId());
+}
+
+const char *psychPanicObserveEventType(const BattleUnit *unit, UnitStatus status, const SavedGame *campaign)
+{
+	const bool roster = isLiveRosterSoldierIdentityForPsychObservation(unit, campaign);
+	if (status == STATUS_PANICKING)
+	{
+		return roster ? "soldier_panicked_observed" : "alien_panicked_observed";
+	}
+	return roster ? "soldier_berserk_observed" : "alien_berserk_observed";
+}
+
+} // namespace
+
 /**
  * Common function for handling panicking units.
  * @return False when unit not in panicking mode.
@@ -1315,7 +1451,10 @@ bool BattlescapeGame::handlePanickingUnit(BattleUnit *unit)
 
 	// show a little infobox with the name of the unit and "... is panicking"
 	Game *game = _parentState->getGame();
-	if (unit->getVisible() || !Options::noAlienPanicMessages)
+	// Matches OpenXcom infobox gate. While panic states are on the stack, think() does not re-enter here;
+	// perception dedupe also keys panic/berserk by subject+turn (one engine episode per turn).
+	const bool uiNotificationShown = unit->getVisible() || !Options::noAlienPanicMessages;
+	if (uiNotificationShown)
 	{
 		getMap()->getCamera()->centerOnPosition(unit->getPosition());
 		if (status == STATUS_PANICKING)
@@ -1326,6 +1465,21 @@ bool BattlescapeGame::handlePanickingUnit(BattleUnit *unit)
 		{
 			game->pushState(new InfoboxState(game->getLanguage()->getString("STR_HAS_GONE_BERSERK", unit->getGender()).arg(unit->getName(game->getLanguage()))));
 		}
+		const SavedGame *campaign = _save->getGeoscapeSave();
+		std::string rosterDisplayName;
+		if (isLiveRosterSoldierIdentityForPsychObservation(unit, campaign))
+		{
+			rosterDisplayName = unit->getGeoscapeSoldier()->getName(true);
+		}
+		const int observationSerial = _save->getCompanionPerceptionLog().allocatePsychObservationSerial();
+		_save->getCompanionPerceptionLog().tryRecordPsychologicalUiNotification(
+			_save,
+			unit,
+			psychPanicObserveEventType(unit, status, campaign),
+			observationSerial,
+			uiNotificationShown,
+			unit->getVisible(),
+			rosterDisplayName);
 	}
 
 
@@ -1383,6 +1537,16 @@ bool BattlescapeGame::handlePanickingUnit(BattleUnit *unit)
   */
 bool BattlescapeGame::cancelCurrentAction(bool bForce)
 {
+	// Unit tests and companion-only harnesses construct BattlescapeGame without BattlescapeState.
+	if (_parentState == 0)
+	{
+		_currentAction = BattleAction();
+		_currentAction.actor = 0;
+		_currentAction.targeting = false;
+		_currentAction.type = BA_NONE;
+		return false;
+	}
+
 	bool bPreviewed = Options::battleNewPreviewPath != PATH_NONE;
 
 	if (_save->getPathfinding()->removePreview() && bPreviewed) return true;
@@ -1812,7 +1976,44 @@ Pathfinding *BattlescapeGame::getPathfinding()
  */
 Mod *BattlescapeGame::getMod()
 {
-	return _parentState->getGame()->getMod();
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		return _parentState->getGame()->getMod();
+	}
+	if (_save != 0)
+	{
+		BattlescapeState *bs = _save->getBattleState();
+		if (bs != 0 && bs->getGame() != 0)
+		{
+			return bs->getGame()->getMod();
+		}
+		if (_save->getTestMod() != 0)
+		{
+			return _save->getTestMod();
+		}
+	}
+	return 0;
+}
+
+SavedGame *BattlescapeGame::companionCampaignSaveForValidation() const
+{
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		return _parentState->getGame()->getSavedGame();
+	}
+	if (_save != 0)
+	{
+		return _save->getGeoscapeSave();
+	}
+	return 0;
+}
+
+void BattlescapeGame::companionUpdateSoldierInfoIfUiPresent(bool checkFOV)
+{
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo(checkFOV);
+	}
 }
 
 
@@ -2426,6 +2627,54 @@ bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, s
 	return true;
 }
 
+bool BattlescapeGame::tryExecuteCompanionStandUp(BattleUnit *unit, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!unit->isKneeled())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit is not kneeling.";
+		}
+		return false;
+	}
+	if (unit->getType() != "SOLDIER" || unit->isFloating())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit cannot stand.";
+		}
+		return false;
+	}
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	_parentState->updateSoldierInfo();
+	if (!kneel(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to stand.";
+		}
+		return false;
+	}
+	return true;
+}
+
 bool BattlescapeGame::tryExecuteCompanionKneelDown(BattleUnit *unit, std::string *rejectReason)
 {
 	if (unit == 0 || unit->isOut())
@@ -2474,15 +2723,1484 @@ bool BattlescapeGame::tryExecuteCompanionKneelDown(BattleUnit *unit, std::string
 	return true;
 }
 
+static bool companionFirearmHasAmmo(BattleItem *weapon)
+{
+	if (weapon == 0 || weapon->getRules()->getBattleType() != BT_FIREARM)
+	{
+		return false;
+	}
+	if (!weapon->needsAmmo())
+	{
+		return true;
+	}
+	BattleItem *ammo = weapon->getAmmoItem();
+	return ammo != 0 && ammo->getAmmoQuantity() > 0;
+}
+
+static bool companionFirearmSupportsDirectedFire(BattleItem *weapon, BattleActionType actionType)
+{
+	if (weapon == 0)
+	{
+		return false;
+	}
+	RuleItem *rules = weapon->getRules();
+	if (rules->getBattleType() != BT_FIREARM)
+	{
+		return false;
+	}
+	if (rules->getWaypoints() != 0)
+	{
+		return false;
+	}
+	BattleItem *ammo = weapon->getAmmoItem();
+	if (ammo != 0 && ammo->getRules()->getWaypoints() != 0)
+	{
+		return false;
+	}
+	switch (actionType)
+	{
+	case BA_SNAPSHOT:
+		return rules->getAccuracySnap() != 0;
+	case BA_AUTOSHOT:
+		return rules->getAccuracyAuto() != 0;
+	case BA_AIMEDSHOT:
+		return rules->getAccuracyAimed() != 0;
+	default:
+		return false;
+	}
+}
+
+static const char *companionDirectedFireModeLabel(BattleActionType actionType)
+{
+	switch (actionType)
+	{
+	case BA_SNAPSHOT: return "snap shot";
+	case BA_AUTOSHOT: return "automatic fire";
+	case BA_AIMEDSHOT: return "aimed shot";
+	default: return "fire";
+	}
+}
+
+bool BattlescapeGame::tryExecuteCompanionDirectedFire(
+	BattleUnit *unit,
+	Position target,
+	BattleItem *weapon,
+	BattleActionType actionType,
+	std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (weapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No weapon in hand.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!companionFirearmSupportsDirectedFire(weapon, actionType))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = std::string("Weapon does not support ") + companionDirectedFireModeLabel(actionType) + ".";
+		}
+		return false;
+	}
+	if (!_save->getItemUsable(weapon).empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon is not usable.";
+		}
+		return false;
+	}
+	if (!companionFirearmHasAmmo(weapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon has no ammunition.";
+		}
+		return false;
+	}
+	const int fireTu = unit->getActionTUs(actionType, weapon);
+	if (fireTu <= 0 || !checkReservedTU(unit, fireTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = std::string("Not enough time units for ") + companionDirectedFireModeLabel(actionType) + ".";
+		}
+		return false;
+	}
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	_parentState->updateSoldierInfo();
+
+	_currentAction = BattleAction();
+	_currentAction.type = actionType;
+	_currentAction.actor = unit;
+	_currentAction.weapon = weapon;
+	_currentAction.target = target;
+	_currentAction.TU = fireTu;
+	_currentAction.targeting = true;
+	_currentAction.playerOrdered = true;
+	_currentAction.autoShotCounter = 0;
+	_currentAction.cameraPosition = getMap()->getCamera()->getMapOffset();
+
+	getMap()->setCursorType(CT_NONE);
+	_parentState->getGame()->getCursor()->setVisible(false);
+	_states.push_back(new ProjectileFlyBState(this, _currentAction));
+	statePushFront(new UnitTurnBState(this, _currentAction));
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionSnapShot(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason)
+{
+	return tryExecuteCompanionDirectedFire(unit, target, weapon, BA_SNAPSHOT, rejectReason);
+}
+
+static bool companionItemIsThrowableGrenade(BattleItem *weapon)
+{
+	if (weapon == 0 || weapon->getRules()->isFixed())
+	{
+		return false;
+	}
+	const BattleType bt = weapon->getRules()->getBattleType();
+	return bt == BT_GRENADE || bt == BT_PROXIMITYGRENADE;
+}
+
+bool BattlescapeGame::tryExecuteCompanionPrime(BattleUnit *unit, BattleItem *weapon, int fuseTimer, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (weapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No grenade in hand.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	const BattleType bt = weapon->getRules()->getBattleType();
+	if (bt != BT_GRENADE && bt != BT_PROXIMITYGRENADE)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item in hand does not support priming.";
+		}
+		return false;
+	}
+	if (weapon->getFuseTimer() >= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Grenade is already primed.";
+		}
+		return false;
+	}
+	if (!CompanionCommandCore::isValidPrimeFuseTimerForBattleType(fuseTimer, bt))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Fuse timer selection is invalid for this grenade type.";
+		}
+		return false;
+	}
+	if (!_save->getItemUsable(weapon).empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Grenade is not usable.";
+		}
+		return false;
+	}
+	const int primeTu = unit->getActionTUs(BA_PRIME, weapon);
+	if (primeTu <= 0 || !checkReservedTU(unit, primeTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to prime grenade.";
+		}
+		return false;
+	}
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	companionUpdateSoldierInfoIfUiPresent(true);
+	if (!unit->spendTimeUnits(primeTu))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to prime grenade.";
+		}
+		return false;
+	}
+	weapon->setFuseTimer(fuseTimer);
+	companionUpdateSoldierInfoIfUiPresent(false);
+	return true;
+}
+
+static bool companionWeaponIsHeldInLeftOrRightHand(BattleItem *weapon)
+{
+	if (weapon == 0 || weapon->getSlot() == 0)
+	{
+		return false;
+	}
+	if (weapon->getSlot()->getType() != INV_HAND)
+	{
+		return false;
+	}
+	const std::string &id = weapon->getSlot()->getId();
+	return id == "STR_LEFT_HAND" || id == "STR_RIGHT_HAND";
+}
+
+/**
+ * Replicates Inventory::moveItem for a unit without the full Inventory UI (companion UNLOAD path).
+ */
+static void companionInventoryMoveItemForUnit(BattleUnit *unit, BattleItem *item, RuleInventory *slot, int x, int y)
+{
+	if (item == 0 || unit == 0)
+	{
+		return;
+	}
+	// Make items vanish (eg. ammo in weapons) — same logic as Inventory::moveItem.
+	if (slot == 0)
+	{
+		if (item->getSlot()->getType() == INV_GROUND)
+		{
+			unit->getTile()->removeItem(item);
+		}
+		else
+		{
+			item->moveToOwner(0);
+		}
+	}
+	else
+	{
+		// Handle dropping from/to ground.
+		if (slot != item->getSlot())
+		{
+		if (slot->getType() == INV_GROUND)
+		{
+			item->moveToOwner(0);
+			Tile *unitTile = unit->getTile();
+			if (unitTile != 0)
+			{
+				unitTile->addItem(item, item->getSlot());
+			}
+			if (item->getUnit() && item->getUnit()->getStatus() == STATUS_UNCONSCIOUS)
+			{
+				item->getUnit()->setPosition(unit->getPosition());
+			}
+		}
+		else if (item->getSlot() == 0 || item->getSlot()->getType() == INV_GROUND)
+		{
+			item->moveToOwner(unit);
+			Tile *unitTile = unit->getTile();
+			if (unitTile != 0)
+			{
+				unitTile->removeItem(item);
+			}
+			item->setTurnFlag(false);
+				if (item->getUnit() && item->getUnit()->getStatus() == STATUS_UNCONSCIOUS)
+				{
+					item->getUnit()->setPosition(Position(-1, -1, -1));
+				}
+			}
+		}
+		item->setSlot(slot);
+		item->setSlotX(x);
+		item->setSlotY(y);
+	}
+}
+
+static bool companionUnloadOtherHandIsClear(BattleUnit *unit, BattleItem *weapon)
+{
+	if (unit == 0 || weapon == 0 || weapon->getSlot() == 0)
+	{
+		return false;
+	}
+	const std::string &sid = weapon->getSlot()->getId();
+	if (sid == "STR_RIGHT_HAND")
+	{
+		return unit->getItem("STR_LEFT_HAND") == 0;
+	}
+	if (sid == "STR_LEFT_HAND")
+	{
+		return unit->getItem("STR_RIGHT_HAND") == 0;
+	}
+	return false;
+}
+
+bool BattlescapeGame::tryExecuteCompanionReload(BattleUnit *unit, BattleItem *weapon, BattleItem *ammo, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (weapon == 0 || ammo == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon or ammunition missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+
+	RuleItem *weaponRules = weapon->getRules();
+	RuleItem *ammoRules = ammo->getRules();
+	if (weaponRules == 0 || ammoRules == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid item rules.";
+		}
+		return false;
+	}
+
+	if (weaponRules->getBattleType() != BT_FIREARM)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item is not a firearm.";
+		}
+		return false;
+	}
+	if (!weapon->needsAmmo())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon does not use insertable ammunition.";
+		}
+		return false;
+	}
+	// Vanilla magazine weapons list compatibleAmmo on the firearm; clip capacity is on the BT_AMMO rule
+	// (weapon clipSize is often 0). Rely on needsAmmo + compatibleAmmo, not weapon clipSize.
+	if (weaponRules->getCompatibleAmmo()->empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon does not use insertable ammunition.";
+		}
+		return false;
+	}
+	if (!companionWeaponIsHeldInLeftOrRightHand(weapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon must be in STR_LEFT_HAND or STR_RIGHT_HAND.";
+		}
+		return false;
+	}
+	if (weapon->getOwner() != unit || ammo->getOwner() != unit)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon and ammunition must belong to the actor.";
+		}
+		return false;
+	}
+	if (ammo->getSlot() == 0 || ammo->getSlot()->getType() == INV_GROUND)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Cannot reload from ground ammunition.";
+		}
+		return false;
+	}
+	if (ammoRules->getBattleType() != BT_AMMO)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Selected item is not ammunition.";
+		}
+		return false;
+	}
+	if (weapon->getAmmoItem() != 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon already contains a magazine.";
+		}
+		return false;
+	}
+
+	bool compatible = false;
+	for (std::vector<std::string>::const_iterator c = weaponRules->getCompatibleAmmo()->begin();
+	     c != weaponRules->getCompatibleAmmo()->end(); ++c)
+	{
+		if (*c == ammoRules->getType())
+		{
+			compatible = true;
+			break;
+		}
+	}
+	if (!compatible)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Ammunition type is not compatible with this weapon.";
+		}
+		return false;
+	}
+
+	SavedGame *campaign = companionCampaignSaveForValidation();
+	if (campaign == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Campaign save unavailable for research validation.";
+		}
+		return false;
+	}
+	if (!_save->getItemUsable(weapon).empty() || !_save->getItemUsable(ammo).empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon or ammunition is not usable in current battlescape conditions.";
+		}
+		return false;
+	}
+	if (!campaign->isResearched(weaponRules->getRequirements()) ||
+	    !campaign->isResearched(ammoRules->getRequirements()))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon or ammunition is not researched for use.";
+		}
+		return false;
+	}
+
+	const int reloadTu = 15;
+	if (reloadTu <= 0 || !checkReservedTU(unit, reloadTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to reload (15 TU).";
+		}
+		return false;
+	}
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	companionUpdateSoldierInfoIfUiPresent(true);
+
+	const int tuBefore = unit->getTimeUnits();
+	if (!unit->spendTimeUnits(reloadTu))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to reload (15 TU).";
+		}
+		return false;
+	}
+
+	const int setCode = weapon->setAmmoItem(ammo);
+	if (setCode != 0)
+	{
+		unit->setTimeUnits(tuBefore);
+		if (rejectReason != 0)
+		{
+			*rejectReason = setCode == -1
+				? "Weapon already contains a magazine."
+				: "Ammunition could not be attached to weapon.";
+		}
+		return false;
+	}
+
+	ammo->moveToOwner(0);
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		_parentState->getGame()->getMod()->getSoundByDepth(_save->getDepth(), Mod::ITEM_RELOAD)->play(
+			-1, getMap()->getSoundAngle(unit->getPosition()));
+	}
+	companionUpdateSoldierInfoIfUiPresent(false);
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionUnload(BattleUnit *unit, BattleItem *weapon, int expectedLoadedAmmoBattleItemId, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (weapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+
+	RuleItem *weaponRules = weapon->getRules();
+	if (weaponRules == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid item rules.";
+		}
+		return false;
+	}
+
+	if (weaponRules->getBattleType() != BT_FIREARM)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item is not a firearm.";
+		}
+		return false;
+	}
+	if (!weapon->needsAmmo())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon does not use insertable ammunition.";
+		}
+		return false;
+	}
+	if (weaponRules->getCompatibleAmmo()->empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon does not use insertable ammunition.";
+		}
+		return false;
+	}
+	if (!companionWeaponIsHeldInLeftOrRightHand(weapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon must be in STR_LEFT_HAND or STR_RIGHT_HAND.";
+		}
+		return false;
+	}
+	if (weapon->getOwner() != unit)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon must belong to the actor.";
+		}
+		return false;
+	}
+
+	BattleItem *ammo = weapon->getAmmoItem();
+	if (ammo == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon has no magazine inserted.";
+		}
+		return false;
+	}
+	if (expectedLoadedAmmoBattleItemId > 0 && ammo->getId() != expectedLoadedAmmoBattleItemId)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "loaded_ammo_battle_item_id does not match inserted magazine.";
+		}
+		return false;
+	}
+	RuleItem *ammoRules = ammo->getRules();
+	if (ammoRules == 0 || ammoRules->getBattleType() != BT_AMMO)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Inserted item is not ammunition.";
+		}
+		return false;
+	}
+
+	if (!companionUnloadOtherHandIsClear(unit, weapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Other hand must be empty to unload (matches inventory unload rules).";
+		}
+		return false;
+	}
+
+	SavedGame *campaign = companionCampaignSaveForValidation();
+	if (campaign == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Campaign save unavailable for research validation.";
+		}
+		return false;
+	}
+	if (!_save->getItemUsable(weapon).empty() || !_save->getItemUsable(ammo).empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon or ammunition is not usable in current battlescape conditions.";
+		}
+		return false;
+	}
+	if (!campaign->isResearched(weaponRules->getRequirements()) ||
+	    !campaign->isResearched(ammoRules->getRequirements()))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon or ammunition is not researched for use.";
+		}
+		return false;
+	}
+
+	Mod *mod = getMod();
+	if (mod == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mod unavailable.";
+		}
+		return false;
+	}
+	RuleInventory *leftHand = mod->getInventory("STR_LEFT_HAND", true);
+	RuleInventory *rightHand = mod->getInventory("STR_RIGHT_HAND", true);
+	if (leftHand == 0 || rightHand == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Hand inventory rules unavailable.";
+		}
+		return false;
+	}
+
+	const int unloadTu = 8;
+	if (unloadTu <= 0 || !checkReservedTU(unit, unloadTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to unload (8 TU).";
+		}
+		return false;
+	}
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	companionUpdateSoldierInfoIfUiPresent(true);
+
+	const int tuBefore = unit->getTimeUnits();
+	if (!unit->spendTimeUnits(unloadTu))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to unload (8 TU).";
+		}
+		return false;
+	}
+
+	companionInventoryMoveItemForUnit(unit, ammo, leftHand, 0, 0);
+	ammo->moveToOwner(unit);
+	companionInventoryMoveItemForUnit(unit, weapon, rightHand, 0, 0);
+	weapon->moveToOwner(unit);
+	const int clearCode = weapon->setAmmoItem(0);
+	if (clearCode != 0)
+	{
+		unit->setTimeUnits(tuBefore);
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Could not detach magazine from weapon.";
+		}
+		return false;
+	}
+
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		_parentState->getGame()->getMod()->getSoundByDepth(_save->getDepth(), Mod::ITEM_DROP)->play(
+			-1, getMap()->getSoundAngle(unit->getPosition()));
+	}
+	companionUpdateSoldierInfoIfUiPresent(false);
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionInventoryMove(
+	BattleUnit *unit,
+	BattleItem *item,
+	RuleInventory *destSlot,
+	int destX,
+	int destY,
+	std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (item == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item missing.";
+		}
+		return false;
+	}
+	if (destSlot == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Destination section missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+
+	RuleItem *rules = item->getRules();
+	if (rules == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid item rules.";
+		}
+		return false;
+	}
+	if (rules->isFixed())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Fixed equipment cannot be moved.";
+		}
+		return false;
+	}
+
+	if (item->isAmmo() && item->getSlot() == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Nested ammunition cannot be moved (unload first).";
+		}
+		return false;
+	}
+
+	if (item->getOwner() != unit)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item does not belong to the actor.";
+		}
+		return false;
+	}
+
+	RuleInventory *srcSlot = item->getSlot();
+	if (srcSlot == 0 || srcSlot->getType() == INV_GROUND)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item must be carried in inventory, not on ground.";
+		}
+		return false;
+	}
+
+	if (destSlot->getType() == INV_GROUND)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Ground moves are not supported.";
+		}
+		return false;
+	}
+
+	if (item->getFuseTimer() >= 0 &&
+	    (rules->getBattleType() == BT_GRENADE || rules->getBattleType() == BT_PROXIMITYGRENADE))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Primed explosives cannot be moved via inventory.";
+		}
+		return false;
+	}
+
+	Mod *mod = 0;
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		mod = _parentState->getGame()->getMod();
+	}
+	else if (_save != 0)
+	{
+		BattlescapeState *bs = _save->getBattleState();
+		if (bs != 0 && bs->getGame() != 0)
+		{
+			mod = bs->getGame()->getMod();
+		}
+		else if (_save->getTestMod() != 0)
+		{
+			mod = _save->getTestMod();
+		}
+	}
+	if (mod == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mod unavailable.";
+		}
+		return false;
+	}
+
+	const std::map<std::string, int> &srcCosts = srcSlot->getTransferCosts();
+	std::map<std::string, int>::const_iterator costIt = srcCosts.find(destSlot->getId());
+	if (costIt == srcCosts.end())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No TU cost defined between these sections in the active ruleset.";
+		}
+		return false;
+	}
+	const int moveTu = costIt->second;
+	if (moveTu < 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid transfer TU cost.";
+		}
+		return false;
+	}
+
+	if (!destSlot->fitItemInSlot(rules, destX, destY))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item does not fit at destination coordinates.";
+		}
+		return false;
+	}
+	if (companionInventoryOverlapItems(unit, item, destSlot, destX, destY))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Destination overlaps another item.";
+		}
+		return false;
+	}
+
+	if (moveTu > 0 && !checkReservedTU(unit, moveTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for inventory move.";
+		}
+		return false;
+	}
+
+	if (_parentState != 0)
+	{
+		cancelCurrentAction();
+	}
+	_save->setSelectedUnit(unit);
+	companionUpdateSoldierInfoIfUiPresent(true);
+
+	const int tuBefore = unit->getTimeUnits();
+	if (moveTu > 0 && !unit->spendTimeUnits(moveTu))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for inventory move.";
+		}
+		return false;
+	}
+
+	companionInventoryMoveItemForUnit(unit, item, destSlot, destX, destY);
+	item->moveToOwner(unit);
+
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		_parentState->getGame()->getMod()->getSoundByDepth(_save->getDepth(), Mod::ITEM_DROP)->play(
+			-1, getMap()->getSoundAngle(unit->getPosition()));
+	}
+	companionUpdateSoldierInfoIfUiPresent(false);
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionPickup(
+	BattleUnit *unit,
+	BattleItem *item,
+	Position groundPosition,
+	RuleInventory *destSlot,
+	int destX,
+	int destY,
+	std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (item == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item missing.";
+		}
+		return false;
+	}
+	if (destSlot == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Destination section missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+
+	Tile *actorTile = unit->getTile();
+	if (actorTile == 0 || actorTile->isVoid())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor has no ground tile.";
+		}
+		return false;
+	}
+	if (groundPosition != unit->getPosition())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Ground position does not match actor tile.";
+		}
+		return false;
+	}
+
+	RuleItem *rules = item->getRules();
+	if (rules == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid item rules.";
+		}
+		return false;
+	}
+	if (rules->isFixed())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Fixed equipment cannot be picked up.";
+		}
+		return false;
+	}
+
+	if (item->isAmmo() && item->getSlot() == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Nested ammunition cannot be picked up directly.";
+		}
+		return false;
+	}
+
+	RuleInventory *srcSlot = item->getSlot();
+	if (srcSlot == 0 || srcSlot->getType() != INV_GROUND)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item is not on the ground.";
+		}
+		return false;
+	}
+	if (item->getOwner() != 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Ground item has unexpected owner.";
+		}
+		return false;
+	}
+	Tile *itemTile = item->getTile();
+	if (itemTile == 0 || itemTile != actorTile)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Ground item is not on the actor tile.";
+		}
+		return false;
+	}
+	if (destSlot->getType() == INV_GROUND)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Destination must be a carried inventory section.";
+		}
+		return false;
+	}
+
+	Mod *mod = 0;
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		mod = _parentState->getGame()->getMod();
+	}
+	else if (_save != 0)
+	{
+		BattlescapeState *bs = _save->getBattleState();
+		if (bs != 0 && bs->getGame() != 0)
+		{
+			mod = bs->getGame()->getMod();
+		}
+		else if (_save->getTestMod() != 0)
+		{
+			mod = _save->getTestMod();
+		}
+	}
+	if (mod == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mod unavailable.";
+		}
+		return false;
+	}
+
+	RuleInventory *groundRule = mod->getInventory("STR_GROUND", true);
+	if (groundRule == 0 || srcSlot != groundRule)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Ground slot mismatch.";
+		}
+		return false;
+	}
+
+	const std::map<std::string, int> &groundCosts = groundRule->getTransferCosts();
+	std::map<std::string, int>::const_iterator costIt = groundCosts.find(destSlot->getId());
+	if (costIt == groundCosts.end())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No TU cost defined from ground to destination in the active ruleset.";
+		}
+		return false;
+	}
+	const int moveTu = costIt->second;
+	if (moveTu < 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid transfer TU cost.";
+		}
+		return false;
+	}
+
+	if (!destSlot->fitItemInSlot(rules, destX, destY))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item does not fit at destination coordinates.";
+		}
+		return false;
+	}
+	if (companionInventoryOverlapItems(unit, item, destSlot, destX, destY))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Destination overlaps another item.";
+		}
+		return false;
+	}
+
+	if (moveTu > 0 && !checkReservedTU(unit, moveTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for ground pickup.";
+		}
+		return false;
+	}
+
+	if (_parentState != 0)
+	{
+		cancelCurrentAction();
+	}
+	_save->setSelectedUnit(unit);
+	companionUpdateSoldierInfoIfUiPresent(true);
+
+	const int tuBefore = unit->getTimeUnits();
+	if (moveTu > 0 && !unit->spendTimeUnits(moveTu))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for ground pickup.";
+		}
+		return false;
+	}
+
+	companionInventoryMoveItemForUnit(unit, item, destSlot, destX, destY);
+	item->moveToOwner(unit);
+
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		_parentState->getGame()->getMod()->getSoundByDepth(_save->getDepth(), Mod::ITEM_DROP)->play(
+			-1, getMap()->getSoundAngle(unit->getPosition()));
+	}
+	companionUpdateSoldierInfoIfUiPresent(false);
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionDrop(BattleUnit *unit, BattleItem *item, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (item == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+
+	RuleItem *rules = item->getRules();
+	if (rules == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid item rules.";
+		}
+		return false;
+	}
+	if (rules->isFixed())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Fixed equipment cannot be dropped.";
+		}
+		return false;
+	}
+
+	if (item->isAmmo() && item->getSlot() == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Nested ammunition cannot be dropped directly.";
+		}
+		return false;
+	}
+
+	if (item->getOwner() != unit)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item does not belong to the actor.";
+		}
+		return false;
+	}
+
+	RuleInventory *srcSlot = item->getSlot();
+	if (srcSlot == 0 || srcSlot->getType() == INV_GROUND)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item must be carried to drop to ground.";
+		}
+		return false;
+	}
+
+	Tile *actorTile = unit->getTile();
+	if (actorTile == 0 || actorTile->isVoid())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor has no ground tile.";
+		}
+		return false;
+	}
+
+	Mod *mod = 0;
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		mod = _parentState->getGame()->getMod();
+	}
+	else if (_save != 0)
+	{
+		BattlescapeState *bs = _save->getBattleState();
+		if (bs != 0 && bs->getGame() != 0)
+		{
+			mod = bs->getGame()->getMod();
+		}
+		else if (_save->getTestMod() != 0)
+		{
+			mod = _save->getTestMod();
+		}
+	}
+	if (mod == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mod unavailable.";
+		}
+		return false;
+	}
+
+	RuleInventory *groundRule = mod->getInventory("STR_GROUND", true);
+	if (groundRule == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Ground inventory rules unavailable.";
+		}
+		return false;
+	}
+
+	const std::map<std::string, int> &srcCosts = srcSlot->getTransferCosts();
+	std::map<std::string, int>::const_iterator dropCostIt = srcCosts.find(groundRule->getId());
+	if (dropCostIt == srcCosts.end())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No TU cost defined from this section to ground in the active ruleset.";
+		}
+		return false;
+	}
+	const int moveTu = dropCostIt->second;
+	if (moveTu < 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid transfer TU cost.";
+		}
+		return false;
+	}
+
+	int destX = 0;
+	int destY = 0;
+	if (!companionFindFirstGroundPlacement(unit, groundRule, item, &destX, &destY))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No room on ground for this item.";
+		}
+		return false;
+	}
+
+	if (moveTu > 0 && !checkReservedTU(unit, moveTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for ground drop.";
+		}
+		return false;
+	}
+
+	if (_parentState != 0)
+	{
+		cancelCurrentAction();
+	}
+	_save->setSelectedUnit(unit);
+	companionUpdateSoldierInfoIfUiPresent(true);
+
+	if (moveTu > 0 && !unit->spendTimeUnits(moveTu))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for ground drop.";
+		}
+		return false;
+	}
+
+	companionInventoryMoveItemForUnit(unit, item, groundRule, destX, destY);
+
+	if (_parentState != 0 && _parentState->getGame() != 0)
+	{
+		_parentState->getGame()->getMod()->getSoundByDepth(_save->getDepth(), Mod::ITEM_DROP)->play(
+			-1, getMap()->getSoundAngle(unit->getPosition()));
+	}
+	companionUpdateSoldierInfoIfUiPresent(false);
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionThrow(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (weapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No grenade in hand.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!companionItemIsThrowableGrenade(weapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item in hand does not support throwing.";
+		}
+		return false;
+	}
+	if (!_save->getItemUsable(weapon).empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Grenade is not usable.";
+		}
+		return false;
+	}
+	const int throwTu = unit->getActionTUs(BA_THROW, weapon);
+	if (throwTu <= 0 || !checkReservedTU(unit, throwTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to throw grenade.";
+		}
+		return false;
+	}
+	if (target.x < 0 || target.y < 0 || target.z < 0 ||
+	    target.x >= _save->getMapSizeX() || target.y >= _save->getMapSizeY() || target.z >= _save->getMapSizeZ())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target out of map bounds.";
+		}
+		return false;
+	}
+	Tile *targetTile = _save->getTile(target);
+	if (targetTile == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid target.";
+		}
+		return false;
+	}
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	_parentState->updateSoldierInfo();
+
+	_currentAction = BattleAction();
+	_currentAction.type = BA_THROW;
+	_currentAction.actor = unit;
+	_currentAction.weapon = weapon;
+	_currentAction.target = target;
+	_currentAction.TU = throwTu;
+	_currentAction.targeting = true;
+	_currentAction.playerOrdered = true;
+	_currentAction.cameraPosition = getMap()->getCamera()->getMapOffset();
+
+	if (!ProjectileFlyBState::validThrowRange(&_currentAction, unit->getPosition(), targetTile))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target is outside throwing range.";
+		}
+		cancelCurrentAction();
+		return false;
+	}
+
+	getMap()->setCursorType(CT_NONE);
+	_parentState->getGame()->getCursor()->setVisible(false);
+	_states.push_back(new ProjectileFlyBState(this, _currentAction));
+	statePushFront(new UnitTurnBState(this, _currentAction));
+	return true;
+}
+
 bool BattlescapeGame::humanPlayerOrderPermitted(BattleUnit *unit) const
 {
 	if (unit == 0)
 	{
 		return true;
 	}
-	SavedGame *campaign = _parentState != 0 && _parentState->getGame() != 0
-		? _parentState->getGame()->getSavedGame()
-		: 0;
+	SavedGame *campaign = companionCampaignSaveForValidation();
 	std::string controlJson;
 	CompanionTacticalAuthorityCore::tryReadRelayControlJsonFromSnapshotEnvironment(&controlJson);
 	return CompanionTacticalAuthorityCore::humanPlayerOrderPermitted(campaign, _save, unit, controlJson);
@@ -2500,9 +4218,7 @@ bool BattlescapeGame::warnIfHumanPlayerOrderDenied(BattleUnit *unit) const
 
 void BattlescapeGame::tickCompanionCommand(bool battleInitialized)
 {
-	SavedGame *campaign = _parentState != 0 && _parentState->getGame() != 0
-		? _parentState->getGame()->getSavedGame()
-		: 0;
+	SavedGame *campaign = companionCampaignSaveForValidation();
 	CompanionCommandRuntime::tick(this, _save, campaign, battleInitialized);
 }
 

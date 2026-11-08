@@ -67,6 +67,9 @@
 #include "../Engine/CompanionGithubQuotaHudOverlay.h"
 #include "../Engine/CompanionGithubQuotaHudCore.h"
 #include "../Engine/CompanionOnDemandRelayOverlay.h"
+#include "../Engine/CompanionBattlescapeOwnershipCore.h"
+#include "../Engine/CompanionTacticalAuthorityCore.h"
+#include "../Engine/CompanionSoldierOwnershipCore.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/Tile.h"
 #include "../Savegame/BattleUnit.h"
@@ -146,6 +149,7 @@ BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseSc
 
 	// Create soldier stats summary
 	_txtName = new Text(136, 10, x + 135, y + 32);
+	_txtCompanionOwner = new Text(48, 9, x + 135, y + 22);
 
 	_numTimeUnits = new NumberText(15, 5, x + 136, y + 42);
 	_barTimeUnits = new Bar(102, 3, x + 170, y + 41);
@@ -222,6 +226,7 @@ BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseSc
 	add(_btnAbort, "buttonAbort", "battlescape", _icons);
 	add(_btnStats, "buttonStats", "battlescape", _icons);
 	add(_txtName, "textName", "battlescape", _icons);
+	add(_txtCompanionOwner, "textName", "battlescape", _icons);
 	add(_numTimeUnits, "numTUs", "battlescape", _icons);
 	add(_numEnergy, "numEnergy", "battlescape", _icons);
 	add(_numHealth, "numHealth", "battlescape", _icons);
@@ -443,6 +448,8 @@ BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseSc
 	_btnPsi->onMouseClick((ActionHandler)&BattlescapeState::btnPsiClick);
 
 	_txtName->setHighContrast(true);
+	_txtCompanionOwner->setHighContrast(true);
+	_txtCompanionOwner->setVisible(false);
 
 	_barTimeUnits->setScale(1.0);
 	_barEnergy->setScale(1.0);
@@ -479,8 +486,24 @@ BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseSc
 
 	add(_txtGithubQuota);
 	CompanionOnDemandRelayOverlay::createUi(this, &_companionRelayUi, "battlescape");
+	CompanionOnDemandRelayOverlay::enterBattlescapeSession();
 	_companionRelayUi.btnSend->onMouseClick((ActionHandler)&BattlescapeState::btnCompanionSendClick);
 	_companionRelayUi.btnRetrieve->onMouseClick((ActionHandler)&BattlescapeState::btnCompanionRetrieveClick);
+	if (_companionRelayUi.btnAutoRetrieve != 0)
+	{
+		_companionRelayUi.btnAutoRetrieve->onMouseClick(
+			(ActionHandler)&BattlescapeState::btnCompanionAutoRetrieveToggleClick);
+	}
+	if (_companionRelayUi.btnAutoIntervalLess != 0)
+	{
+		_companionRelayUi.btnAutoIntervalLess->onMouseClick(
+			(ActionHandler)&BattlescapeState::btnCompanionAutoRetrieveIntervalLessClick);
+	}
+	if (_companionRelayUi.btnAutoIntervalMore != 0)
+	{
+		_companionRelayUi.btnAutoIntervalMore->onMouseClick(
+			(ActionHandler)&BattlescapeState::btnCompanionAutoRetrieveIntervalMoreClick);
+	}
 
 	_barHealthColor = _barHealth->getColor();
 }
@@ -491,6 +514,7 @@ BattlescapeState::BattlescapeState() : _reserve(0), _firstInit(true), _isMouseSc
  */
 BattlescapeState::~BattlescapeState()
 {
+	CompanionOnDemandRelayOverlay::leaveBattlescapeSession();
 	delete _animTimer;
 	delete _gameTimer;
 	delete _battleGame;
@@ -508,7 +532,8 @@ void BattlescapeState::init()
 	}
 
 	State::init();
-	CompanionOnDemandRelayOverlay::layoutForBattlescapeTop(&_companionRelayUi, Options::baseXResolution);
+	CompanionOnDemandRelayOverlay::layoutForBattlescapeTop(
+		&_companionRelayUi, Options::baseXResolution, Options::baseYResolution);
 	_animTimer->start();
 	_gameTimer->start();
 	CompanionGithubQuotaHudOverlay::layoutHudText(
@@ -578,7 +603,7 @@ void BattlescapeState::think()
 	static bool popped = false;
 
 	CompanionGithubQuotaHudOverlay::tick(_txtGithubQuota);
-	CompanionOnDemandRelayOverlay::tick(&_companionRelayUi);
+	CompanionOnDemandRelayOverlay::tickBattlescape(&_companionRelayUi, _save);
 
 	if (_gameTimer->isRunning())
 	{
@@ -1351,12 +1376,17 @@ void BattlescapeState::updateSoldierInfo(bool checkFOV)
 	if (!playableUnit)
 	{
 		_txtName->setText("");
+		_txtName->setColor(
+			CompanionBattlescapeOwnershipCore::defaultBattlescapeSoldierNameColor(_game->getMod()));
+		_txtCompanionOwner->setVisible(false);
 		showPsiButton(false);
 		toggleKneelButton(0);
 		return;
 	}
 
 	_txtName->setText(battleUnit->getName(_game->getLanguage(), false));
+	refreshCompanionOwnershipIndicator();
+	applySelectedSoldierNameOwnershipColor(battleUnit);
 	Soldier *soldier = battleUnit->getGeoscapeSoldier();
 	if (soldier != 0)
 	{
@@ -2429,6 +2459,78 @@ void BattlescapeState::btnCompanionRetrieveClick(Action *action)
 	{
 		action->getDetails()->type = SDL_NOEVENT;
 	}
+}
+
+void BattlescapeState::btnCompanionAutoRetrieveToggleClick(Action *action)
+{
+	CompanionOnDemandRelayOverlay::onAutoRetrieveTogglePressed();
+	if (action != 0 && action->getDetails() != 0)
+	{
+		action->getDetails()->type = SDL_NOEVENT;
+	}
+}
+
+void BattlescapeState::btnCompanionAutoRetrieveIntervalLessClick(Action *action)
+{
+	CompanionOnDemandRelayOverlay::onAutoRetrieveIntervalLessPressed();
+	if (action != 0 && action->getDetails() != 0)
+	{
+		action->getDetails()->type = SDL_NOEVENT;
+	}
+}
+
+void BattlescapeState::btnCompanionAutoRetrieveIntervalMoreClick(Action *action)
+{
+	CompanionOnDemandRelayOverlay::onAutoRetrieveIntervalMorePressed();
+	if (action != 0 && action->getDetails() != 0)
+	{
+		action->getDetails()->type = SDL_NOEVENT;
+	}
+}
+
+void BattlescapeState::applySelectedSoldierNameOwnershipColor(BattleUnit *battleUnit)
+{
+	if (battleUnit == 0)
+	{
+		_txtName->setColor(
+			CompanionBattlescapeOwnershipCore::defaultBattlescapeSoldierNameColor(_game->getMod()));
+		return;
+	}
+	SavedGame *campaign = _save->getGeoscapeSave();
+	if (campaign == 0 ||
+	    !CompanionBattlescapeOwnershipCore::isDeployedRosterSoldierUnit(battleUnit, campaign))
+	{
+		_txtName->setColor(
+			CompanionBattlescapeOwnershipCore::defaultBattlescapeSoldierNameColor(_game->getMod()));
+		return;
+	}
+	const CompanionSoldierOwnershipCore::SoldierControlMode mode =
+		CompanionBattlescapeOwnershipCore::effectiveTacticalOwner(
+			_save,
+			battleUnit->getId(),
+			campaign->isLiveRosterSoldier(battleUnit->getId()));
+	_txtName->setColor(CompanionBattlescapeOwnershipCore::soldierNameColorForEffectiveOwner(
+		_game->getMod(), mode));
+}
+
+void BattlescapeState::refreshCompanionOwnershipIndicator()
+{
+	SavedGame *campaign = _save->getGeoscapeSave();
+	BattleUnit *battleUnit = _save->getSelectedUnit();
+	if (campaign == 0 || battleUnit == 0 ||
+	    !CompanionBattlescapeOwnershipCore::isDeployedRosterSoldierUnit(battleUnit, campaign))
+	{
+		_txtCompanionOwner->setVisible(false);
+		return;
+	}
+	if (!CompanionTacticalAuthorityCore::isLiveCampaignPlayerSoldierUnit(battleUnit, campaign))
+	{
+		_txtCompanionOwner->setVisible(true);
+		_txtCompanionOwner->setText(tr("STR_COMPANION_STATUS_MIND_CONTROLLED"));
+		return;
+	}
+	// WP7B: ownership is shown by soldier name colour only (no HUMAN/ASTER caption).
+	_txtCompanionOwner->setVisible(false);
 }
 
 }

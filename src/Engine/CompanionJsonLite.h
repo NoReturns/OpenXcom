@@ -22,6 +22,13 @@ bool extractJsonStringField(const std::string &json, const std::string &key, std
 
 bool extractJsonIntField(const std::string &json, const std::string &key, int *out);
 
+/// Sets *out when the key exists and parses as int; returns false when the key is absent (out unchanged).
+bool tryExtractJsonIntField(const std::string &json, const std::string &key, int *out);
+
+bool parseJsonInt64Value(const std::string &json, std::string::size_type valueStart, long long *out);
+
+bool extractJsonInt64Field(const std::string &json, const std::string &key, long long *out);
+
 } // namespace CompanionJsonLite
 
 } // namespace OpenXcom

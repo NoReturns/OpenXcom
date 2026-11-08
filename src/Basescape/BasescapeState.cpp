@@ -40,6 +40,9 @@
 #include "../Engine/CompanionGithubQuotaHudOverlay.h"
 #include "../Engine/CompanionGithubQuotaHudCore.h"
 #include "../Engine/CompanionOnDemandRelayOverlay.h"
+#include "../Engine/CompanionRulesReferenceExport.h"
+#include "../Engine/CompanionBaseIntelligenceExport.h"
+#include <SDL.h>
 #include "BaseInfoState.h"
 #include "SoldiersState.h"
 #include "CraftsState.h"
@@ -522,6 +525,16 @@ void BasescapeState::handleKeyPress(Action *action)
 				init();
 				break;
 			}
+		}
+		if ((SDL_GetModState() & KMOD_CTRL) != 0
+		    && (SDL_GetModState() & KMOD_SHIFT) != 0
+		    && key == SDLK_r)
+		{
+			CompanionRulesReferenceExport::tryExport(_game->getSavedGame(), _game->getMod());
+		}
+		else if (key == SDLK_F8)
+		{
+			CompanionBaseIntelligenceExport::tryExport(_game->getSavedGame(), _game->getMod());
 		}
 	}
 }

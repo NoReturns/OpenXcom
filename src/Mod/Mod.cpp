@@ -2159,6 +2159,246 @@ RuleInventory *Mod::getInventory(const std::string &id, bool error) const
 	return getRule(id, "Inventory", _invs, error);
 }
 
+void Mod::registerTestInventoryRule(RuleInventory *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	const std::string id = rule->getId();
+	std::map<std::string, RuleInventory*>::iterator existing = _invs.find(id);
+	if (existing != _invs.end() && existing->second != 0 && existing->second != rule)
+	{
+		delete existing->second;
+	}
+	_invs[id] = rule;
+	bool found = false;
+	for (std::vector<std::string>::iterator i = _invsIndex.begin(); i != _invsIndex.end(); ++i)
+	{
+		if (*i == id)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		_invsIndex.push_back(id);
+	}
+}
+
+void Mod::registerTestResearchRule(RuleResearch *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	const std::string id = rule->getName();
+	std::map<std::string, RuleResearch *>::iterator existing = _research.find(id);
+	if (existing != _research.end() && existing->second != 0 && existing->second != rule)
+	{
+		delete existing->second;
+	}
+	_research[id] = rule;
+	bool found = false;
+	for (std::vector<std::string>::iterator i = _researchIndex.begin(); i != _researchIndex.end(); ++i)
+	{
+		if (*i == id)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		_researchIndex.push_back(id);
+	}
+}
+
+void Mod::registerTestManufactureRule(RuleManufacture *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	const std::string id = rule->getName();
+	std::map<std::string, RuleManufacture *>::iterator existing = _manufacture.find(id);
+	if (existing != _manufacture.end() && existing->second != 0 && existing->second != rule)
+	{
+		delete existing->second;
+	}
+	_manufacture[id] = rule;
+	bool found = false;
+	for (std::vector<std::string>::iterator i = _manufactureIndex.begin(); i != _manufactureIndex.end(); ++i)
+	{
+		if (*i == id)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		_manufactureIndex.push_back(id);
+	}
+}
+
+void Mod::registerTestItemRule(RuleItem *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	const std::string id = rule->getType();
+	std::map<std::string, RuleItem *>::iterator existing = _items.find(id);
+	if (existing != _items.end() && existing->second != 0 && existing->second != rule)
+	{
+		delete existing->second;
+	}
+	_items[id] = rule;
+	bool found = false;
+	for (std::vector<std::string>::iterator i = _itemsIndex.begin(); i != _itemsIndex.end(); ++i)
+	{
+		if (*i == id)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		_itemsIndex.push_back(id);
+	}
+}
+
+namespace
+{
+
+template <typename T>
+void registerTestRuleInMap(std::map<std::string, T *> *map, std::vector<std::string> *index, T *rule, const std::string &id)
+{
+	if (map == 0 || index == 0 || rule == 0)
+	{
+		return;
+	}
+	typename std::map<std::string, T *>::iterator existing = map->find(id);
+	if (existing != map->end() && existing->second != 0 && existing->second != rule)
+	{
+		delete existing->second;
+	}
+	(*map)[id] = rule;
+	bool found = false;
+	for (std::vector<std::string>::iterator i = index->begin(); i != index->end(); ++i)
+	{
+		if (*i == id)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		index->push_back(id);
+	}
+}
+
+} // namespace
+
+void Mod::registerTestArmorRule(Armor *armor)
+{
+	if (armor == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_armors, &_armorsIndex, armor, armor->getType());
+}
+
+void Mod::registerTestCountryRule(RuleCountry *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_countries, &_countriesIndex, rule, rule->getType());
+}
+
+void Mod::registerTestBaseFacilityRule(RuleBaseFacility *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_facilities, &_facilitiesIndex, rule, rule->getType());
+}
+
+void Mod::registerTestCraftRule(RuleCraft *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_crafts, &_craftsIndex, rule, rule->getType());
+}
+
+void Mod::registerTestUfoRule(RuleUfo *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_ufos, &_ufosIndex, rule, rule->getType());
+}
+
+void Mod::registerTestAlienMissionRule(RuleAlienMission *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_alienMissions, &_alienMissionsIndex, rule, rule->getType());
+}
+
+void Mod::registerTestAlienDeploymentRule(AlienDeployment *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_alienDeployments, &_deploymentsIndex, rule, rule->getType());
+}
+
+void Mod::registerTestSoldierRule(RuleSoldier *rule)
+{
+	if (rule == 0)
+	{
+		return;
+	}
+	registerTestRuleInMap(&_soldiers, &_soldiersIndex, rule, rule->getType());
+}
+
+void Mod::enterCompanionTestModContext()
+{
+	ModData d;
+	d.name = "companion_test";
+	d.info = 0;
+	d.offset = 0;
+	d.size = 1000000;
+	_companionTestModStack.push_back(d);
+	_companionTestModPrevCurrent.push_back(_modCurrent);
+	_modCurrent = &_companionTestModStack.back();
+}
+
+void Mod::leaveCompanionTestModContext()
+{
+	if (_companionTestModStack.empty())
+	{
+		return;
+	}
+	_modCurrent = _companionTestModPrevCurrent.back();
+	_companionTestModPrevCurrent.pop_back();
+	_companionTestModStack.pop_back();
+}
+
 /**
  * Returns the list of inventories.
  * @return The list of inventories.
@@ -2501,6 +2741,11 @@ void Mod::sortLists()
 const std::vector<std::string> &Mod::getPsiRequirements() const
 {
 	return _psiRequirements;
+}
+
+void Mod::setTestPsiRequirementsForHarness(const std::vector<std::string> &reqs)
+{
+	_psiRequirements = reqs;
 }
 
 /**

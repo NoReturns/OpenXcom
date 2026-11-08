@@ -22,6 +22,7 @@
 #include "Map.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/SavedBattleGame.h"
+#include "../Engine/CompanionPerceptionLog.h"
 #include "../Mod/Mod.h"
 #include "../Engine/Sound.h"
 #include "../Engine/Options.h"
@@ -78,10 +79,12 @@ void UnitTurnBState::init()
 			if (door == 0)
 			{
 				_parent->getMod()->getSoundByDepth(_parent->getDepth(), Mod::DOOR_OPEN)->play(-1, _parent->getMap()->getSoundAngle(_unit->getPosition())); // normal door
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordDoorSoundHeard(_parent->getSave(), _unit->getPosition());
 			}
 			if (door == 1)
 			{
 				_parent->getMod()->getSoundByDepth(_parent->getDepth(), Mod::SLIDING_DOOR_OPEN)->play(-1, _parent->getMap()->getSoundAngle(_unit->getPosition())); // ufo door
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordDoorSoundHeard(_parent->getSave(), _unit->getPosition());
 			}
 			if (door == 4)
 			{

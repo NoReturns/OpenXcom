@@ -38,6 +38,8 @@ private:
 	bool _noSound, _noCorpse;
 	int _extraFrame;
 public:
+	/// Companion: dying unit while this BState remains queued (snapshot settlement gating).
+	BattleUnit *getDyingUnit() const { return _unit; }
 	/// Creates a new UnitDieBState class
 	UnitDieBState(BattlescapeGame *parent, BattleUnit *unit, ItemDamageType damageType, bool noSound, bool noCorpse);
 	/// Cleans up the UnitDieBState.

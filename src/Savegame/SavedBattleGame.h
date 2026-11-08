@@ -24,6 +24,8 @@
 #include "BattleUnit.h"
 #include "../Mod/AlienDeployment.h"
 #include "../Engine/CompanionEventLog.h"
+#include "../Engine/CompanionPerceptionLog.h"
+#include "../Engine/CompanionGroundItemMemory.h"
 
 namespace OpenXcom
 {
@@ -82,8 +84,14 @@ private:
 	ChronoTrigger _chronoTrigger;
 	bool _beforeGame;
 	CompanionEventLog _companionEventLog;
+	CompanionPerceptionLog _companionPerceptionLog;
+	CompanionGroundItemMemory _companionGroundItemMemory;
 	std::string _companionTacticalBattleId;
 	std::set<int> _companionTacticalAiSoldierIds;
+	/// Optional mod pointer for headless / unit-test harnesses (not serialized).
+	Mod *_testMod;
+	/// Test harness: geoscape save when no BattlescapeState link (not serialized).
+	SavedGame *_geoscapeSaveHint;
 	/// Selects a soldier.
 	BattleUnit *selectPlayerUnit(int dir, bool checkReselect = false, bool setReselect = false, bool checkInventory = false);
 public:
@@ -177,6 +185,10 @@ public:
 	/// Companion observation log for the current battle session (not serialized to saves).
 	CompanionEventLog &getCompanionEventLog() { return _companionEventLog; }
 	const CompanionEventLog &getCompanionEventLog() const { return _companionEventLog; }
+	CompanionPerceptionLog &getCompanionPerceptionLog() { return _companionPerceptionLog; }
+	const CompanionPerceptionLog &getCompanionPerceptionLog() const { return _companionPerceptionLog; }
+	CompanionGroundItemMemory &getCompanionGroundItemMemory() { return _companionGroundItemMemory; }
+	const CompanionGroundItemMemory &getCompanionGroundItemMemory() const { return _companionGroundItemMemory; }
 	/// Tactical companion ownership (M1-25B): authoritative during battlescape.
 	void ensureCompanionTacticalOwnershipInitialized(const SavedGame *campaign);
 	const std::string &getCompanionTacticalBattleId() const { return _companionTacticalBattleId; }
@@ -237,6 +249,12 @@ public:
 	BattlescapeGame *getBattleGame();
 	/// Sets the pointer to the BattlescapeState.
 	void setBattleState(BattlescapeState *bs);
+	/// Test harness: provide Mod when no BattlescapeState is linked.
+	void setTestMod(Mod *mod);
+	/// Test harness: mod for engine paths without BattlescapeState.
+	Mod *getTestMod() const;
+	/// Test harness: campaign save for getGeoscapeSave when _battleState is null.
+	void setGeoscapeSaveHint(SavedGame *save);
 	/// Gets the highest ranked, living XCom unit.
 	BattleUnit* getHighestRankedXCom();
 	/// Gets the morale modifier for XCom based on the highest ranked, living XCom unit, or the modifier for the unit passed to this function.

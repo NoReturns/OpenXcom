@@ -63,6 +63,7 @@ private:
 	BattleUnit *_visibleUnit[VISIBLE_MAX];
 	WarningMessage *_warning;
 	Text *_txtName;
+	Text *_txtCompanionOwner;
 	NumberText *_numTimeUnits, *_numEnergy, *_numHealth, *_numMorale, *_numLayers, *_numAmmoLeft, *_numAmmoRight;
 	Bar *_barTimeUnits, *_barEnergy, *_barHealth, *_barMorale;
 	Timer *_animTimer, *_gameTimer;
@@ -154,6 +155,11 @@ public:
 	/// Companion send/retrieve relay controls (M1-25E).
 	void btnCompanionSendClick(Action *action);
 	void btnCompanionRetrieveClick(Action *action);
+	void btnCompanionAutoRetrieveToggleClick(Action *action);
+	void btnCompanionAutoRetrieveIntervalLessClick(Action *action);
+	void btnCompanionAutoRetrieveIntervalMoreClick(Action *action);
+	void refreshCompanionOwnershipIndicator();
+	void applySelectedSoldierNameOwnershipColor(BattleUnit *battleUnit);
 	/// Handler for clicking the stats.
 	void btnStatsClick(Action *action);
 	/// Handler for clicking the left hand item button.

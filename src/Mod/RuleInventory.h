@@ -76,6 +76,8 @@ public:
 	/// Gets a certain cost in the inventory.
 	int getCost(RuleInventory *slot) const;
 	int getListOrder() const;
+	/// All destination slot ids to TU costs for moving an item from this section (ruleset `costs` map).
+	const std::map<std::string, int> &getTransferCosts() const { return _costs; }
 };
 
 }

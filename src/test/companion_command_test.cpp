@@ -1,9 +1,12 @@
 /*
  * Open X-Com Companion — tactical MOVE command core regression tests (M1-19).
  */
+#include "../Mod/RuleItem.h"
 #include "Engine/CompanionCommandCore.h"
+#include "Engine/CompanionWalkStopTokens.h"
 #include "Engine/CompanionSoldierOwnershipCore.h"
 #include "Engine/CompanionCommandRuntimeSupport.h"
+#include "Engine/CompanionCommandCasualtySettlementCore.h"
 #include <iostream>
 #include <string>
 
@@ -115,6 +118,34 @@ static void testOwnershipInvalidAssignmentModeRejected()
 		"{\n  \"schema_version\": 1,\n  \"session_id\": \"db56c99b83f74cad25b6ecb62447906c\",\n  \"assignments\": { \"3\": \"remote\" }\n}\n";
 	SoldierControlDocument doc = {};
 	expect(!parseSoldierControlDocument(control, &doc), "invalid assignment mode must fail parse");
+}
+
+static void testDeferInFlightCompletionWhileReentrant()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	expect(!shouldDeferInFlightCommandCompletionWhileReentrant(1),
+		"outer command tick may complete in-flight commands");
+	expect(shouldDeferInFlightCommandCompletionWhileReentrant(2),
+		"nested tick from popState must defer premature terminal completion");
+}
+
+static void testOrphanDirectedFireSessionBinding()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	const std::string live = "f45561e99281ff2d71a1a28b993e3f82";
+	const std::string other = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+	expect(commandSessionBindingMatchesLiveBattle(live, live, live),
+		"matching command and result sessions bind to live battle");
+	expect(commandSessionBindingMatchesLiveBattle(live, live, std::string()),
+		"empty result session may still match when command session matches live");
+	expect(!commandSessionBindingMatchesLiveBattle(live, other, live),
+		"stale command session must not rehydrate after battle reload");
+	expect(!commandSessionBindingMatchesLiveBattle(live, live, other),
+		"stale result session must not rehydrate");
+	expect(shouldRehydrateOrphanedDirectedFireForSession(live, live, live),
+		"rehydrate only when sessions align with live battle");
+	expect(!shouldRehydrateOrphanedDirectedFireForSession(other, live, live),
+		"rehydrate blocked when live battle session rotated");
 }
 
 static void testCompanionCommandPollDuringIdleThink()
@@ -372,6 +403,87 @@ static void testHumanOverrideDuringWalk()
 	input.actorAlive = true;
 	input.actorStillAiControlled = false;
 	expect(evaluateWalkTerminalStatus(input) == CMD_INTERRUPTED, "human override interrupts");
+}
+
+static void testWalkStopDiagnosticsTurnAndSpot()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(1, 1, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	input.actionResult = CompanionWalkStopTokens::HOSTILE_SPOTTED;
+	const CommandLifecycleStatus terminal = evaluateWalkTerminalStatus(input);
+	expect(terminal == CMD_INTERRUPTED, "hostile spot with engine token interrupts");
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(terminal, input);
+	expect(diag.movementStopReason == "hostile_spotted", "turn-and-spot maps hostile_spotted");
+	expect(!diag.publicReason.empty(), "turn-and-spot exposes public_reason");
+	expect(diag.engineActionResult == CompanionWalkStopTokens::HOSTILE_SPOTTED,
+		"engine_action_result present for companion token");
+}
+
+static void testWalkStopDiagnosticsPartialUnknown()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(25, 8, 0);
+	input.currentPos = Position(25, 9, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	const CommandLifecycleStatus terminal = evaluateWalkTerminalStatus(input);
+	expect(terminal == CMD_INTERRUPTED, "one-tile partial move interrupts");
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(terminal, input);
+	expect(diag.movementStopReason == "movement_incomplete", "partial without token is movement_incomplete");
+	expect(diag.engineActionResult.empty(), "no engine_action_result without evidence");
+}
+
+static void testWalkStopDiagnosticsInsufficientTu()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(2, 1, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	input.actionResult = "STR_NOT_ENOUGH_TIME_UNITS";
+	const CommandLifecycleStatus terminal = evaluateWalkTerminalStatus(input);
+	expect(terminal == CMD_INTERRUPTED, "TU abort interrupts");
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(terminal, input);
+	expect(diag.movementStopReason == "insufficient_time_units", "TU string maps to insufficient_time_units");
+	expect(diag.engineActionResult == "STR_NOT_ENOUGH_TIME_UNITS", "STR token on wire");
+}
+
+static void testWalkStopDiagnosticsReactionFire()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(9, 20, 0);
+	input.startPos = Position(25, 8, 0);
+	input.currentPos = Position(25, 9, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	input.actionResult = CompanionWalkStopTokens::REACTION_FIRE;
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(
+		evaluateWalkTerminalStatus(input), input);
+	expect(diag.movementStopReason == "reaction_fire", "reaction_fire token maps");
+}
+
+static void testWalkStopDiagnosticsCompletedOmitsReason()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(5, 5, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(
+		evaluateWalkTerminalStatus(input), input);
+	expect(diag.movementStopReason.empty(), "completed move has no movement_stop_reason");
 }
 
 static const char *SAMPLE_MOVE_COMMAND =
@@ -695,6 +807,101 @@ static KneelValidationInput validKneelInput()
 	return input;
 }
 
+static StandValidationInput validStandInput()
+{
+	StandValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.actorKneeling = true;
+	input.actorCanKneelPosture = true;
+	input.insufficientTuForStandUp = false;
+	return input;
+}
+
+static void testStandAuthorizedAccepted()
+{
+	expect(validateStandCommand(validStandInput()).accepted, "authorized stand accepted");
+}
+
+static void testStandAlreadyStandingRejected()
+{
+	StandValidationInput input = validStandInput();
+	input.actorKneeling = false;
+	const MoveValidationResult result = validateStandCommand(input);
+	expect(!result.accepted && result.rejectCode == "ALREADY_STANDING", "already standing rejected");
+}
+
+static void testStandInsufficientTuRejected()
+{
+	StandValidationInput input = validStandInput();
+	input.insufficientTuForStandUp = true;
+	const MoveValidationResult result = validateStandCommand(input);
+	expect(!result.accepted && result.rejectCode == "INSUFFICIENT_TU", "stand insufficient TU rejected");
+}
+
+static void testKneelThenStandValidationFlow()
+{
+	KneelValidationInput kneel = validKneelInput();
+	expect(validateKneelCommand(kneel).accepted, "kneel accepted before stand");
+	kneel.actorAlreadyKneeled = true;
+	expect(!validateKneelCommand(kneel).accepted, "second kneel rejected");
+	StandValidationInput stand = validStandInput();
+	expect(validateStandCommand(stand).accepted, "stand accepted after kneel");
+}
+
+static void testParseStandCommandJson()
+{
+	const char *json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"stand-test-1\",\n"
+		"  \"command_type\": \"STAND\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	StandCommandParsed parsed = {};
+	expect(parseStandCommandJson(json, &parsed) && parsed.valid && parsed.commandType == "STAND",
+		"stand command parses");
+}
+
+static void testWalkHostileSpotZeroTileInterruptedClassification()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(1, 1, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	input.actionResult = CompanionWalkStopTokens::HOSTILE_SPOTTED;
+	expect(evaluateWalkTerminalStatus(input) == CMD_INTERRUPTED, "zero-tile hostile spot is INTERRUPTED");
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(
+		evaluateWalkTerminalStatus(input), input);
+	expect(diag.movementStopReason == "hostile_spotted", "zero-tile hostile spot reason encoded");
+}
+
 static void testKneelAuthorizedAccepted()
 {
 	expect(validateKneelCommand(validKneelInput()).accepted, "authorized kneel accepted");
@@ -846,6 +1053,895 @@ static void testStaleInboxArchiveEvaluation()
 	expect(parseInboxCommandBinding(SAMPLE_MOVE_COMMAND, &inbox), "sample move parses binding");
 }
 
+static void testRosterCasualtySettlementDeferBounds()
+{
+	using namespace CompanionCommandCasualtySettlementCore;
+	expect(ROSTER_CASUALTY_SETTLEMENT_DEFER_MAX_MS < 8000,
+		"defer budget stays below cooperative relay local wait");
+	expect(shouldDeferRosterCasualtySettlement(0, 1000), "unsettled roster casualty defers immediately");
+	expect(shouldDeferRosterCasualtySettlement(1000, 2000), "within budget still defers");
+	expect(shouldDeferRosterCasualtySettlement(1000, 1000 + ROSTER_CASUALTY_SETTLEMENT_DEFER_MAX_MS - 1),
+		"last millisecond inside budget defers");
+	expect(!shouldDeferRosterCasualtySettlement(1000, 1000 + ROSTER_CASUALTY_SETTLEMENT_DEFER_MAX_MS),
+		"timeout releases defer for best-effort terminal export");
+	expect(!shouldDeferRosterCasualtySettlement(1000, 1000 + ROSTER_CASUALTY_SETTLEMENT_DEFER_MAX_MS + 5000),
+		"well past timeout does not defer");
+}
+
+static void testPostCommandSnapshotExportPolicy()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	expect(shouldExportSnapshotBeforeTerminalCommandResult(CMD_COMPLETED),
+		"completed commands export snapshot before terminal result");
+	expect(shouldExportSnapshotBeforeTerminalCommandResult(CMD_INTERRUPTED),
+		"interrupted commands export snapshot before terminal result");
+	expect(shouldExportSnapshotBeforeTerminalCommandResult(CMD_FAILED),
+		"failed commands export snapshot before terminal result");
+	expect(!shouldExportSnapshotBeforeTerminalCommandResult(CMD_EXECUTING),
+		"executing must not bind terminal snapshot export");
+	expect(!shouldExportSnapshotBeforeTerminalCommandResult(CMD_REJECTED),
+		"rejected commands must not export snapshot for result binding");
+}
+
+static void testWalkExecutingDefersTerminalSnapshotBinding()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(3, 1, 0);
+	input.battleBusy = true;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	expect(evaluateWalkTerminalStatus(input) == CMD_EXECUTING, "busy walk stays executing");
+	expect(!CompanionCommandRuntimeSupport::shouldExportSnapshotBeforeTerminalCommandResult(CMD_EXECUTING),
+		"executing walk must not export terminal snapshot");
+}
+
+static SnapShotValidationInput validSnapInput()
+{
+	SnapShotValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.targetX = 5;
+	input.targetY = 5;
+	input.targetZ = 0;
+	input.mapSizeX = 10;
+	input.mapSizeY = 10;
+	input.mapSizeZ = 1;
+	input.activeHandValid = true;
+	input.weaponPresentInHand = true;
+	input.weaponSupportsFireMode = true;
+	input.weaponHasAmmo = true;
+	input.weaponUsable = true;
+	input.insufficientTuForFireMode = false;
+	return input;
+}
+
+static void testSnapShotAuthorizedAccepted()
+{
+	expect(validateSnapShotCommand(validSnapInput()).accepted, "authorized snap accepted");
+}
+
+static void testSnapShotInvalidTargetRejected()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.targetX = 99;
+	const MoveValidationResult result = validateSnapShotCommand(input);
+	expect(!result.accepted && result.rejectCode == "INVALID_TARGET", "invalid target rejected");
+}
+
+static void testSnapShotNoAmmoRejected()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.weaponHasAmmo = false;
+	const MoveValidationResult result = validateSnapShotCommand(input);
+	expect(!result.accepted && result.rejectCode == "NO_AMMUNITION", "no ammo rejected");
+}
+
+static void testSnapShotInsufficientTuRejected()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.insufficientTuForFireMode = true;
+	const MoveValidationResult result = validateSnapShotCommand(input);
+	expect(!result.accepted && result.rejectCode == "INSUFFICIENT_TU", "insufficient TU rejected");
+}
+
+static void testSnapShotUnsupportedWeaponRejected()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.weaponSupportsFireMode = false;
+	const MoveValidationResult result = validateSnapShotCommand(input);
+	expect(!result.accepted && result.rejectCode == "UNSUPPORTED_WEAPON", "unsupported weapon rejected");
+}
+
+static void testSnapShotHumanActorRejected()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.actorAiControlled = false;
+	const MoveValidationResult result = validateSnapShotCommand(input);
+	expect(!result.accepted && result.rejectCode == "NOT_AI_CONTROLLED", "human-controlled snap rejected");
+}
+
+static void testParseSnapShotCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"snap-test-1\",\n"
+		"  \"command_type\": \"SNAP_SHOT\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"target\": { \"x\": 5, \"y\": 5, \"z\": 0 },\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	SnapShotCommandParsed parsed = {};
+	expect(parseSnapShotCommandJson(json, &parsed), "snap parse must succeed");
+	expect(parsed.valid && parsed.commandType == "SNAP_SHOT" && parsed.targetX == 5, "snap fields parsed");
+	expect(parsed.activeHand == "STR_RIGHT_HAND", "active hand parsed");
+}
+
+static void testSnapShotTerminalLifecycle()
+{
+	SnapShotCompletionInput busy = {};
+	busy.battleBusy = true;
+	busy.actorAlive = true;
+	busy.actorStillAiControlled = true;
+	busy.projectileLaunched = false;
+	expect(evaluateSnapShotTerminalStatus(busy) == CMD_EXECUTING, "busy snap stays executing");
+
+	SnapShotCompletionInput done = {};
+	done.battleBusy = false;
+	done.actorAlive = true;
+	done.actorStillAiControlled = true;
+	done.projectileLaunched = true;
+	expect(evaluateSnapShotTerminalStatus(done) == CMD_COMPLETED, "resolved snap completes after projectile");
+
+	SnapShotCompletionInput missIdle = done;
+	expect(evaluateSnapShotTerminalStatus(missIdle) == CMD_COMPLETED, "miss still completes when projectile launched");
+
+	SnapShotCompletionInput aborted = {};
+	aborted.battleBusy = false;
+	aborted.actorAlive = true;
+	aborted.actorStillAiControlled = true;
+	aborted.projectileLaunched = false;
+	aborted.actionResult = "STR_NO_LINE_OF_FIRE";
+	expect(evaluateSnapShotTerminalStatus(aborted) == CMD_FAILED, "idle without projectile is failed not completed");
+
+	SnapShotCompletionInput interrupted = {};
+	interrupted.battleBusy = false;
+	interrupted.actorAlive = true;
+	interrupted.actorStillAiControlled = false;
+	interrupted.projectileLaunched = true;
+	expect(evaluateSnapShotTerminalStatus(interrupted) == CMD_INTERRUPTED, "authority loss interrupts snap");
+
+	SnapShotCompletionInput burstMidFlight = done;
+	burstMidFlight.battleBusy = true;
+	burstMidFlight.projectileLaunched = true;
+	expect(evaluateSnapShotTerminalStatus(burstMidFlight) == CMD_EXECUTING,
+		"auto burst stays executing while battle busy after first projectile");
+}
+
+static void testAutoShotAuthorizedAccepted()
+{
+	SnapShotValidationInput input = validSnapInput();
+	expect(validateAutoShotCommand(input).accepted, "authorized auto accepted");
+}
+
+static void testAutoShotUnsupportedWeaponRejected()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.weaponSupportsFireMode = false;
+	expect(!validateAutoShotCommand(input).accepted, "unsupported auto rejected");
+}
+
+static void testAimedShotAuthorizedAccepted()
+{
+	SnapShotValidationInput input = validSnapInput();
+	expect(validateAimedShotCommand(input).accepted, "authorized aimed accepted");
+}
+
+static void testParseAutoShotCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"auto-test-1\",\n"
+		"  \"command_type\": \"AUTO_SHOT\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"target\": { \"x\": 5, \"y\": 5, \"z\": 0 },\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	SnapShotCommandParsed parsed = {};
+	expect(parseAutoShotCommandJson(json, &parsed), "auto parse must succeed");
+	expect(parsed.commandType == "AUTO_SHOT", "auto command type parsed");
+}
+
+static void testParseAimedShotCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"aim-test-1\",\n"
+		"  \"command_type\": \"AIMED_SHOT\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"target\": { \"x\": 5, \"y\": 5, \"z\": 0 },\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	SnapShotCommandParsed parsed = {};
+	expect(parseAimedShotCommandJson(json, &parsed), "aimed parse must succeed");
+	expect(parsed.commandType == "AIMED_SHOT", "aimed command type parsed");
+}
+
+static PrimeValidationInput validPrimeInput()
+{
+	PrimeValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.activeHandValid = true;
+	input.grenadePresentInHand = true;
+	input.grenadeSupportsPrime = true;
+	input.grenadeAlreadyPrimed = false;
+	input.invalidFuseTimer = false;
+	input.grenadeUsable = true;
+	input.insufficientTuForPrime = false;
+	return input;
+}
+
+static ThrowValidationInput validThrowInput()
+{
+	ThrowValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.targetX = 5;
+	input.targetY = 5;
+	input.targetZ = 0;
+	input.mapSizeX = 10;
+	input.mapSizeY = 10;
+	input.mapSizeZ = 1;
+	input.activeHandValid = true;
+	input.grenadePresentInHand = true;
+	input.grenadeSupportsThrow = true;
+	input.grenadeUsable = true;
+	input.targetOutOfThrowRange = false;
+	input.insufficientTuForThrow = false;
+	return input;
+}
+
+static void testPrimeAuthorizedAccepted()
+{
+	expect(validatePrimeCommand(validPrimeInput()).accepted, "authorized prime accepted");
+}
+
+static void testPrimeAlreadyPrimedRejected()
+{
+	PrimeValidationInput input = validPrimeInput();
+	input.grenadeAlreadyPrimed = true;
+	const MoveValidationResult result = validatePrimeCommand(input);
+	expect(!result.accepted && result.rejectCode == "ALREADY_PRIMED", "already primed rejected");
+}
+
+static void testPrimeInvalidFuseRejected()
+{
+	PrimeValidationInput input = validPrimeInput();
+	input.invalidFuseTimer = true;
+	const MoveValidationResult result = validatePrimeCommand(input);
+	expect(!result.accepted && result.rejectCode == "INVALID_FUSE_TIMER", "invalid fuse rejected");
+}
+
+static void testParsePrimeCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"prime-test-1\",\n"
+		"  \"command_type\": \"PRIME\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"fuse_timer\": 3,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	PrimeCommandParsed parsed = {};
+	expect(parsePrimeCommandJson(json, &parsed), "prime parse must succeed");
+	expect(parsed.valid && parsed.fuseTimer == 3, "fuse timer parsed");
+}
+
+static void testParseThrowCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"throw-test-1\",\n"
+		"  \"command_type\": \"THROW\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"active_hand\": \"STR_LEFT_HAND\",\n"
+		"  \"target\": { \"x\": 5, \"y\": 5, \"z\": 0 },\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	ThrowCommandParsed parsed = {};
+	expect(parseThrowCommandJson(json, &parsed), "throw parse must succeed");
+	expect(parsed.valid && parsed.targetX == 5, "throw target parsed");
+}
+
+static ReloadValidationInput validReloadInput()
+{
+	ReloadValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.weaponBattleItemId = 10;
+	input.ammoBattleItemId = 20;
+	input.weaponResolved = true;
+	input.ammoResolved = true;
+	input.campaignResearchAvailable = true;
+	input.weaponBelongsToActor = true;
+	input.ammoBelongsToActor = true;
+	input.weaponInEitherHand = true;
+	input.weaponIsFirearm = true;
+	input.weaponNeedsPhysicalMagazine = true;
+	input.weaponChamberEmptyForReloadUi = true;
+	input.ammoIsPhysicalClip = true;
+	input.ammoCarriedOffGround = true;
+	input.ammoNotAlreadyLoadedInWeapon = true;
+	input.ammunitionCompatible = true;
+	input.weaponUsableEnvironment = true;
+	input.weaponResearchAuthorized = true;
+	input.ammoResearchAuthorized = true;
+	input.insufficientTuForReload = false;
+	return input;
+}
+
+static void testReloadAuthorizedAccepted()
+{
+	expect(validateReloadCommand(validReloadInput()).accepted, "authorized reload accepted");
+}
+
+static void testReloadNoCampaignResearchRejected()
+{
+	ReloadValidationInput input = validReloadInput();
+	input.campaignResearchAvailable = false;
+	const MoveValidationResult result = validateReloadCommand(input);
+	expect(!result.accepted && result.rejectCode == "RESEARCH_CONTEXT_UNAVAILABLE", "missing campaign rejects reload");
+}
+
+static void testReloadWeaponAlreadyLoadedRejected()
+{
+	ReloadValidationInput input = validReloadInput();
+	input.weaponChamberEmptyForReloadUi = false;
+	const MoveValidationResult result = validateReloadCommand(input);
+	expect(!result.accepted && result.rejectCode == "WEAPON_ALREADY_LOADED", "loaded weapon rejects reload");
+}
+
+static void testParseReloadCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"reload-test-1\",\n"
+		"  \"command_type\": \"RELOAD\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"weapon_battle_item_id\": 10,\n"
+		"  \"ammo_battle_item_id\": 20,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	ReloadCommandParsed parsed = {};
+	expect(parseReloadCommandJson(json, &parsed), "reload parse must succeed");
+	expect(parsed.valid && parsed.weaponBattleItemId == 10 && parsed.ammoBattleItemId == 20, "reload item ids parsed");
+}
+
+static UnloadValidationInput validUnloadInput()
+{
+	UnloadValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.weaponBattleItemId = 10;
+	input.loadedAmmoBattleItemId = 20;
+	input.weaponResolved = true;
+	input.campaignResearchAvailable = true;
+	input.weaponBelongsToActor = true;
+	input.weaponInEitherHand = true;
+	input.weaponIsFirearm = true;
+	input.weaponNeedsPhysicalMagazine = true;
+	input.weaponHasLoadedMagazine = true;
+	input.loadedAmmoIdentityMatches = true;
+	input.loadedAmmoIsPhysicalClip = true;
+	input.otherHandClearExceptWeapon = true;
+	input.weaponUsableEnvironment = true;
+	input.weaponResearchAuthorized = true;
+	input.ammoResearchAuthorized = true;
+	input.insufficientTuForUnload = false;
+	return input;
+}
+
+static void testUnloadAuthorizedAccepted()
+{
+	expect(validateUnloadCommand(validUnloadInput()).accepted, "authorized unload accepted");
+}
+
+static void testUnloadNoMagazineRejected()
+{
+	UnloadValidationInput input = validUnloadInput();
+	input.weaponHasLoadedMagazine = false;
+	input.loadedAmmoIdentityMatches = false;
+	input.loadedAmmoIsPhysicalClip = false;
+	const MoveValidationResult result = validateUnloadCommand(input);
+	expect(!result.accepted && result.rejectCode == "NO_MAGAZINE_INSERTED", "no magazine rejects unload");
+}
+
+static void testUnloadMagazineIdentityMismatchRejected()
+{
+	UnloadValidationInput input = validUnloadInput();
+	input.loadedAmmoIdentityMatches = false;
+	const MoveValidationResult result = validateUnloadCommand(input);
+	expect(!result.accepted && result.rejectCode == "MAGAZINE_IDENTITY_MISMATCH", "wrong magazine id rejects unload");
+}
+
+static void testUnloadHandsNotFreeRejected()
+{
+	UnloadValidationInput input = validUnloadInput();
+	input.otherHandClearExceptWeapon = false;
+	const MoveValidationResult result = validateUnloadCommand(input);
+	expect(!result.accepted && result.rejectCode == "UNLOAD_HANDS_NOT_FREE", "occupied off-hand rejects unload");
+}
+
+static void testUnloadNoCampaignResearchRejected()
+{
+	UnloadValidationInput input = validUnloadInput();
+	input.campaignResearchAvailable = false;
+	const MoveValidationResult result = validateUnloadCommand(input);
+	expect(!result.accepted && result.rejectCode == "RESEARCH_CONTEXT_UNAVAILABLE", "missing campaign rejects unload");
+}
+
+static InventoryMoveValidationInput validInventoryMoveInput()
+{
+	InventoryMoveValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.itemBattleItemId = 200;
+	input.sourceSlotId = "STR_BELT";
+	input.destinationSlotId = "STR_RIGHT_HAND";
+	input.destinationX = 0;
+	input.destinationY = 0;
+	input.sourceCoordsGuard = false;
+	input.sourceX = 0;
+	input.sourceY = 0;
+	input.itemResolved = true;
+	input.itemBelongsToActor = true;
+	input.itemCarriedOffGround = true;
+	input.itemSlotMatchesCommand = true;
+	input.sourceCoordsMatch = true;
+	input.itemIsFixedWeapon = false;
+	input.itemNestedInFirearm = false;
+	input.primedExplosiveBlocked = false;
+	input.destinationSlotResolved = true;
+	input.destinationIsGround = false;
+	input.destinationAllowedCarriedType = true;
+	input.destinationSameSectionAsCommand = true;
+	input.itemFitsDestinationGeometry = true;
+	input.destinationOccupied = false;
+	input.transferCostResolved = true;
+	input.transferCostTu = 4;
+	input.insufficientTuForInventoryMove = false;
+	return input;
+}
+
+static void testInventoryMoveAuthorizedAccepted()
+{
+	expect(validateInventoryMoveCommand(validInventoryMoveInput()).accepted, "authorized inventory move accepted");
+}
+
+static void testInventoryMoveItemNotFoundRejected()
+{
+	InventoryMoveValidationInput input = validInventoryMoveInput();
+	input.itemResolved = false;
+	const MoveValidationResult result = validateInventoryMoveCommand(input);
+	expect(!result.accepted && result.rejectCode == "INVALID_ITEM_ID", "missing item rejects");
+}
+
+static void testInventoryMoveGroundDestinationRejected()
+{
+	InventoryMoveValidationInput input = validInventoryMoveInput();
+	input.destinationIsGround = true;
+	const MoveValidationResult result = validateInventoryMoveCommand(input);
+	expect(!result.accepted && result.rejectCode == "INVALID_DESTINATION_SECTION", "ground destination rejects");
+}
+
+static void testInventoryMoveNestedAmmoRejected()
+{
+	InventoryMoveValidationInput input = validInventoryMoveInput();
+	input.itemNestedInFirearm = true;
+	const MoveValidationResult result = validateInventoryMoveCommand(input);
+	expect(!result.accepted && result.rejectCode == "NESTED_AMMUNITION", "nested magazine rejects move");
+}
+
+static void testInventoryMovePrimedExplosiveRejected()
+{
+	InventoryMoveValidationInput input = validInventoryMoveInput();
+	input.primedExplosiveBlocked = true;
+	const MoveValidationResult result = validateInventoryMoveCommand(input);
+	expect(!result.accepted && result.rejectCode == "PRIMED_EXPLOSIVE_NOT_MOVABLE", "primed explosive rejects move");
+}
+
+static PickupValidationInput validPickupInput()
+{
+	PickupValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.itemBattleItemId = 900;
+	input.groundX = 5;
+	input.groundY = 6;
+	input.groundZ = 0;
+	input.destinationSlotId = "STR_RIGHT_HAND";
+	input.destinationX = 0;
+	input.destinationY = 0;
+
+	input.campaignResearchAvailable = true;
+	input.groundPositionMatchesActor = true;
+	input.itemResolvedOnActorGround = true;
+	input.itemResearchAuthorized = true;
+	input.itemIsFixedWeapon = false;
+	input.destinationSlotResolved = true;
+	input.destinationAllowedCarriedType = true;
+	input.destinationSameSectionAsCommand = true;
+	input.itemFitsDestinationGeometry = true;
+	input.destinationOccupied = false;
+	input.transferCostResolved = true;
+	input.transferCostTu = 8;
+	input.insufficientTuForPickup = false;
+	return input;
+}
+
+static void testPickupAuthorizedAccepted()
+{
+	expect(validatePickupCommand(validPickupInput()).accepted, "authorized pickup accepted");
+}
+
+static void testPickupGroundPositionRejected()
+{
+	PickupValidationInput input = validPickupInput();
+	input.groundPositionMatchesActor = false;
+	const MoveValidationResult result = validatePickupCommand(input);
+	expect(!result.accepted && result.rejectCode == "GROUND_POSITION_MISMATCH", "ground position mismatch rejects pickup");
+}
+
+static void testPickupGroundItemUnknownRejected()
+{
+	PickupValidationInput input = validPickupInput();
+	input.itemResolvedOnActorGround = false;
+	const MoveValidationResult result = validatePickupCommand(input);
+	expect(!result.accepted && result.rejectCode == "GROUND_ITEM_NOT_KNOWN", "missing ground export rejects pickup");
+}
+
+static void testParsePickupCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"pickup-test-1\",\n"
+		"  \"command_type\": \"PICKUP\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"item_battle_item_id\": 900,\n"
+		"  \"ground_position\": { \"x\": 5, \"y\": 6, \"z\": 0 },\n"
+		"  \"destination_slot\": \"STR_RIGHT_HAND\",\n"
+		"  \"destination_x\": 0,\n"
+		"  \"destination_y\": 0,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	PickupCommandParsed parsed = {};
+	expect(parsePickupCommandJson(json, &parsed), "pickup parse must succeed");
+	expect(parsed.valid && parsed.itemBattleItemId == 900 && parsed.groundX == 5 && parsed.destinationSlot == "STR_RIGHT_HAND",
+		"pickup fields parsed");
+}
+
+static DropValidationInput validDropInput()
+{
+	DropValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.itemBattleItemId = 400;
+	input.sourceSlotId = "STR_BELT";
+	input.sourceCoordsGuard = false;
+	input.sourceX = 0;
+	input.sourceY = 0;
+
+	input.campaignResearchAvailable = true;
+	input.itemResolved = true;
+	input.itemBelongsToActor = true;
+	input.itemCarriedOffGround = true;
+	input.itemSlotMatchesCommand = true;
+	input.sourceCoordsMatch = true;
+	input.itemIsFixedWeapon = false;
+	input.itemNestedInFirearm = false;
+	input.itemResearchAuthorized = true;
+	input.groundRuleResolved = true;
+	input.transferCostResolved = true;
+	input.transferCostTu = 6;
+	input.groundHasRoom = true;
+	input.insufficientTuForDrop = false;
+	return input;
+}
+
+static void testDropAuthorizedAccepted()
+{
+	expect(validateDropCommand(validDropInput()).accepted, "authorized drop accepted");
+}
+
+static void testDropNestedAmmoRejected()
+{
+	DropValidationInput input = validDropInput();
+	input.itemNestedInFirearm = true;
+	const MoveValidationResult result = validateDropCommand(input);
+	expect(!result.accepted && result.rejectCode == "NESTED_AMMUNITION", "nested magazine rejects drop");
+}
+
+static void testParseDropCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"drop-test-1\",\n"
+		"  \"command_type\": \"DROP\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"item_battle_item_id\": 400,\n"
+		"  \"source_slot\": \"STR_BELT\",\n"
+		"  \"source_x\": 0,\n"
+		"  \"source_y\": 1,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	DropCommandParsed parsed = {};
+	expect(parseDropCommandJson(json, &parsed), "drop parse must succeed");
+	expect(parsed.valid && parsed.itemBattleItemId == 400 && parsed.sourceCoordsGuard &&
+		parsed.sourceX == 0 && parsed.sourceY == 1, "drop optional source coords parsed");
+}
+
+static void testParseInventoryMoveCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"inv-move-1\",\n"
+		"  \"command_type\": \"INVENTORY_MOVE\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"item_battle_item_id\": 200,\n"
+		"  \"source_slot\": \"STR_BELT\",\n"
+		"  \"destination_slot\": \"STR_RIGHT_HAND\",\n"
+		"  \"destination_x\": 0,\n"
+		"  \"destination_y\": 0,\n"
+		"  \"source_x\": 1,\n"
+		"  \"source_y\": 0,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	InventoryMoveCommandParsed parsed = {};
+	expect(parseInventoryMoveCommandJson(json, &parsed), "inventory move parse must succeed");
+	expect(parsed.valid && parsed.itemBattleItemId == 200 && parsed.sourceCoordsGuard &&
+		parsed.sourceX == 1 && parsed.sourceY == 0, "inventory move optional source coords parsed");
+}
+
+static void testParseUnloadCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"unload-test-1\",\n"
+		"  \"command_type\": \"UNLOAD\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"weapon_battle_item_id\": 10,\n"
+		"  \"loaded_ammo_battle_item_id\": 20,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	UnloadCommandParsed parsed = {};
+	expect(parseUnloadCommandJson(json, &parsed), "unload parse must succeed");
+	expect(parsed.valid && parsed.weaponBattleItemId == 10 && parsed.loadedAmmoBattleItemId == 20, "unload item ids parsed");
+}
+
+static void testThrowOutOfRangeRejected()
+{
+	ThrowValidationInput input = validThrowInput();
+	input.targetOutOfThrowRange = true;
+	const MoveValidationResult result = validateThrowCommand(input);
+	expect(!result.accepted && result.rejectCode == "OUT_OF_RANGE", "out of range throw rejected");
+}
+
+static void testThrowTerminalLifecycle()
+{
+	SnapShotCompletionInput done = {};
+	done.battleBusy = false;
+	done.actorAlive = true;
+	done.actorStillAiControlled = true;
+	done.projectileLaunched = true;
+	expect(evaluateThrowTerminalStatus(done) == CMD_COMPLETED, "throw completes when grenade released");
+}
+
+static void testPrimeFuseTimerBattleTypeRules()
+{
+	expect(isValidPrimeFuseTimerForBattleType(3, BT_GRENADE), "timed grenade fuse 3 ok");
+	expect(!isValidPrimeFuseTimerForBattleType(24, BT_GRENADE), "timed grenade fuse 24 invalid");
+	expect(isValidPrimeFuseTimerForBattleType(0, BT_PROXIMITYGRENADE), "proximity fuse 0 ok");
+	expect(!isValidPrimeFuseTimerForBattleType(1, BT_PROXIMITYGRENADE), "proximity fuse 1 invalid");
+}
+
 int main()
 {
 	testOwnershipDefaultHuman();
@@ -855,6 +1951,8 @@ int main()
 	testOwnershipWrongSessionRejected();
 	testOwnershipMalformedJsonRejected();
 	testOwnershipInvalidAssignmentModeRejected();
+	testDeferInFlightCompletionWhileReentrant();
+	testOrphanDirectedFireSessionBinding();
 	testCompanionCommandPollDuringIdleThink();
 	testCompanionCommandInboxThrottle();
 	testExecutorDisabledByDefault();
@@ -875,6 +1973,17 @@ int main()
 	testWalkCompletionDetection();
 	testWalkInterruptionDetection();
 	testHumanOverrideDuringWalk();
+	testWalkStopDiagnosticsTurnAndSpot();
+	testWalkStopDiagnosticsPartialUnknown();
+	testWalkStopDiagnosticsInsufficientTu();
+	testWalkStopDiagnosticsReactionFire();
+	testWalkStopDiagnosticsCompletedOmitsReason();
+	testWalkHostileSpotZeroTileInterruptedClassification();
+	testStandAuthorizedAccepted();
+	testStandAlreadyStandingRejected();
+	testStandInsufficientTuRejected();
+	testKneelThenStandValidationFlow();
+	testParseStandCommandJson();
 	testDuplicateInboxNoOpPreservesCompletedResult();
 	testDuplicateInboxNoOpPreservesLegacyTerminalResult();
 	testDuplicateInboxNoOpPreservesOrphanExecutingResult();
@@ -905,6 +2014,53 @@ int main()
 	testHandleStateCompanionStageOrder();
 	testExportKneeledSnapshotField();
 	testStaleInboxArchiveEvaluation();
+	testRosterCasualtySettlementDeferBounds();
+	testPostCommandSnapshotExportPolicy();
+	testWalkExecutingDefersTerminalSnapshotBinding();
+	testSnapShotAuthorizedAccepted();
+	testSnapShotInvalidTargetRejected();
+	testSnapShotNoAmmoRejected();
+	testSnapShotInsufficientTuRejected();
+	testSnapShotUnsupportedWeaponRejected();
+	testSnapShotHumanActorRejected();
+	testParseSnapShotCommandJson();
+	testSnapShotTerminalLifecycle();
+	testAutoShotAuthorizedAccepted();
+	testAutoShotUnsupportedWeaponRejected();
+	testAimedShotAuthorizedAccepted();
+	testParseAutoShotCommandJson();
+	testParseAimedShotCommandJson();
+	testPrimeAuthorizedAccepted();
+	testPrimeAlreadyPrimedRejected();
+	testPrimeInvalidFuseRejected();
+	testParsePrimeCommandJson();
+	testParseThrowCommandJson();
+	testReloadAuthorizedAccepted();
+	testReloadNoCampaignResearchRejected();
+	testReloadWeaponAlreadyLoadedRejected();
+	testParseReloadCommandJson();
+	testUnloadAuthorizedAccepted();
+	testUnloadNoMagazineRejected();
+	testUnloadMagazineIdentityMismatchRejected();
+	testUnloadHandsNotFreeRejected();
+	testUnloadNoCampaignResearchRejected();
+	testParseUnloadCommandJson();
+	testInventoryMoveAuthorizedAccepted();
+	testInventoryMoveItemNotFoundRejected();
+	testInventoryMoveGroundDestinationRejected();
+	testInventoryMoveNestedAmmoRejected();
+	testInventoryMovePrimedExplosiveRejected();
+	testParseInventoryMoveCommandJson();
+	testPickupAuthorizedAccepted();
+	testPickupGroundPositionRejected();
+	testPickupGroundItemUnknownRejected();
+	testParsePickupCommandJson();
+	testDropAuthorizedAccepted();
+	testDropNestedAmmoRejected();
+	testParseDropCommandJson();
+	testThrowOutOfRangeRejected();
+	testThrowTerminalLifecycle();
+	testPrimeFuseTimerBattleTypeRules();
 
 	if (g_failures != 0)
 	{

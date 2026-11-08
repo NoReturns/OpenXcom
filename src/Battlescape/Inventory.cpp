@@ -28,6 +28,7 @@
 #include "../Interface/NumberText.h"
 #include "../Engine/Font.h"
 #include "../Engine/Language.h"
+#include "../Engine/CompanionRelayPublicationFreshnessCore.h"
 #include "../Engine/Options.h"
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/SavedBattleGame.h"
@@ -48,6 +49,15 @@ namespace OpenXcom
 
 namespace
 {
+
+void noteCompanionTacticalInventoryMutation(bool tuMode, BattleUnit *unit)
+{
+	if (!tuMode || unit == 0 || unit->getFaction() != FACTION_PLAYER)
+	{
+		return;
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+}
 
 bool warnCompanionInventoryMutationDenied(Game *game, BattleUnit *unit, WarningMessage *warning)
 {
@@ -621,6 +631,7 @@ void Inventory::mouseClick(Action *action, State *state)
 							{
 								placed = true;
 								moveItem(item, newSlot, 0, 0);
+								noteCompanionTacticalInventoryMutation(_tu, _selUnit);
 								_game->getMod()->getSoundByDepth(_depth, Mod::ITEM_DROP)->play();
 								arrangeGround(false);
 							}
@@ -680,6 +691,7 @@ void Inventory::mouseClick(Action *action, State *state)
 						if (!_tu || _selUnit->spendTimeUnits(_selItem->getSlot()->getCost(slot)))
 						{
 							moveItem(_selItem, slot, x, y);
+							noteCompanionTacticalInventoryMutation(_tu, _selUnit);
 							if (slot->getType() == INV_GROUND)
 							{
 								_stackLevel[x][y] += 1;
@@ -697,6 +709,7 @@ void Inventory::mouseClick(Action *action, State *state)
 						if (!_tu || _selUnit->spendTimeUnits(_selItem->getSlot()->getCost(slot)))
 						{
 							moveItem(_selItem, slot, item->getSlotX(), item->getSlotY());
+							noteCompanionTacticalInventoryMutation(_tu, _selUnit);
 							_stackLevel[item->getSlotX()][item->getSlotY()] += 1;
 							setSelectedItem(0);
 							_game->getMod()->getSoundByDepth(_depth, Mod::ITEM_DROP)->play();
@@ -734,6 +747,7 @@ void Inventory::mouseClick(Action *action, State *state)
 							moveItem(_selItem, 0, 0, 0);
 							item->setAmmoItem(_selItem);
 							_selItem->moveToOwner(0);
+							noteCompanionTacticalInventoryMutation(_tu, _selUnit);
 							setSelectedItem(0);
 							_game->getMod()->getSoundByDepth(_depth, Mod::ITEM_RELOAD)->play();
 							if (item->getSlot()->getType() == INV_GROUND)
@@ -764,6 +778,7 @@ void Inventory::mouseClick(Action *action, State *state)
 						if (!_tu || _selUnit->spendTimeUnits(_selItem->getSlot()->getCost(slot)))
 						{
 							moveItem(_selItem, slot, item->getSlotX(), item->getSlotY());
+							noteCompanionTacticalInventoryMutation(_tu, _selUnit);
 							_stackLevel[item->getSlotX()][item->getSlotY()] += 1;
 							setSelectedItem(0);
 							_game->getMod()->getSoundByDepth(_depth, Mod::ITEM_DROP)->play();
@@ -894,6 +909,7 @@ bool Inventory::unload()
 		moveItem(_selItem, _game->getMod()->getInventory("STR_RIGHT_HAND", true), 0, 0);
 		_selItem->moveToOwner(_selUnit);
 		_selItem->setAmmoItem(0);
+		noteCompanionTacticalInventoryMutation(_tu, _selUnit);
 		setSelectedItem(0);
 	}
 	else
@@ -1025,6 +1041,7 @@ bool Inventory::fitItem(RuleInventory *newSlot, BattleItem *item, std::string &w
 				{
 					placed = true;
 					moveItem(item, newSlot, x2, y2);
+					noteCompanionTacticalInventoryMutation(_tu, _selUnit);
 					_game->getMod()->getSoundByDepth(_depth, Mod::ITEM_DROP)->play();
 					drawItems();
 				}

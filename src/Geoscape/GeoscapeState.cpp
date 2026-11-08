@@ -37,6 +37,8 @@
 #include "../Savegame/GameTime.h"
 #include "../Engine/CompanionGithubQuotaHudOverlay.h"
 #include "../Engine/CompanionGithubQuotaHudCore.h"
+#include "../Engine/CompanionRulesReferenceExport.h"
+#include "../Engine/CompanionBaseIntelligenceExport.h"
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/Base.h"
 #include "../Savegame/BaseFacility.h"
@@ -485,6 +487,17 @@ void GeoscapeState::handle(Action *action)
 			{
 				popup(new LoadGameState(OPT_GEOSCAPE, SAVE_QUICK, _palette));
 			}
+		}
+		if ((SDL_GetModState() & KMOD_CTRL) != 0
+		    && (SDL_GetModState() & KMOD_SHIFT) != 0
+		    && action->getDetails()->key.keysym.sym == SDLK_r)
+		{
+			CompanionRulesReferenceExport::tryExport(_game->getSavedGame(), _game->getMod());
+		}
+		// F7 is the default FPS counter; use F8 for Companion base intelligence (manual export).
+		else if (action->getDetails()->key.keysym.sym == SDLK_F8)
+		{
+			CompanionBaseIntelligenceExport::tryExport(_game->getSavedGame(), _game->getMod());
 		}
 	}
 	if (!_dogfights.empty())

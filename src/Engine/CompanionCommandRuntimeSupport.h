@@ -2,6 +2,7 @@
 /*
  * Open X-Com Companion — testable command polling policy (M1-21C).
  */
+#include "CompanionCommandCore.h"
 #include <ctime>
 #include <string>
 
@@ -62,6 +63,20 @@ bool shouldRunCompanionCommandTickDuringThink(
 	bool battleBusy,
 	bool moveInFlight);
 
+/** Battlescape popState can re-enter CompanionCommandRuntime::tick during command start. */
+bool shouldDeferInFlightCommandCompletionWhileReentrant(int commandTickDepth);
+
+/** Orphan rehydrate is only valid when command/result session_id still matches the live battle session. */
+bool commandSessionBindingMatchesLiveBattle(
+	const std::string &liveSessionId,
+	const std::string &commandSessionId,
+	const std::string &resultSessionId);
+
+bool shouldRehydrateOrphanedDirectedFireForSession(
+	const std::string &liveSessionId,
+	const std::string &commandSessionId,
+	const std::string &resultSessionId);
+
 enum HandleStateCompanionStage
 {
 	HANDLE_STATE_COMPANION_BRIEFING = 1,
@@ -72,6 +87,8 @@ enum HandleStateCompanionStage
 const HandleStateCompanionStage *handleStateCompanionStageOrder(size_t *outCount);
 
 bool exportKneeledSnapshotField(bool unitIsKneeled);
+
+bool shouldExportSnapshotBeforeTerminalCommandResult(CompanionCommandCore::CommandLifecycleStatus status);
 
 bool shouldPollCommandInboxFile(
 	bool moveInFlight,

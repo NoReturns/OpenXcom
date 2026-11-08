@@ -27,10 +27,13 @@
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Engine/CompanionEventLog.h"
+#include "../Engine/CompanionPerceptionLog.h"
+#include "../Engine/CompanionCommandRuntime.h"
 #include "../Savegame/Tile.h"
 #include "../Mod/Mod.h"
 #include "../Engine/Sound.h"
 #include "../Mod/RuleItem.h"
+#include "../Mod/MapData.h"
 #include "../Engine/Options.h"
 #include "AIModule.h"
 #include "Camera.h"
@@ -41,6 +44,30 @@
 
 namespace OpenXcom
 {
+
+namespace
+{
+
+void recordCompanionProjectileImpact(
+	SavedBattleGame *save,
+	const Position &voxelPos,
+	int voxelPart,
+	bool audible)
+{
+	if (save == 0)
+	{
+		return;
+	}
+	const Position mapTile(voxelPos.x / 16, voxelPos.y / 16, voxelPos.z / 24);
+	Tile *tile = save->getTile(mapTile);
+	BattleUnit *victim = tile != 0 ? tile->getUnit() : 0;
+	CompanionPerceptionLog &log = save->getCompanionPerceptionLog();
+	const int flightId = log.getActiveProjectileFlightId();
+	const int impactOrdinal = log.allocateProjectileImpactOrdinal();
+	log.tryRecordProjectileImpactObserved(save, mapTile, audible, voxelPart, victim, flightId, impactOrdinal);
+}
+
+} // namespace
 
 /**
  * Sets up an ProjectileFlyBState.
@@ -438,6 +465,28 @@ bool ProjectileFlyBState::createNewProjectile()
 
 	_parent->getSave()->getCompanionEventLog().tryRecordWeaponFired(_parent->getSave(), _action, _unit);
 
+	if (_action.type != BA_THROW && _action.type != BA_LAUNCH)
+	{
+		_parent->getSave()->getCompanionPerceptionLog().tryRecordGunfireObserved(
+			_parent->getSave(), _unit, _unit->getPosition(), true);
+	}
+
+	if (_action.playerOrdered &&
+	    (_action.type == BA_SNAPSHOT || _action.type == BA_AUTOSHOT || _action.type == BA_AIMEDSHOT))
+	{
+		CompanionCommandRuntime::notifySnapShotProjectileLaunched(_unit->getId());
+	}
+	if (_action.playerOrdered && _action.type == BA_THROW)
+	{
+		CompanionCommandRuntime::notifyThrowProjectileLaunched(_unit->getId());
+	}
+
+	if (_action.type != BA_THROW && _action.type != BA_LAUNCH)
+	{
+		_parent->getSave()->getCompanionPerceptionLog().beginProjectileDirectionObservation(
+			_parent->getSave(), _unit->getId(), _action.autoShotCounter, _action.type);
+	}
+
 	return true;
 }
 
@@ -573,7 +622,10 @@ void ProjectileFlyBState::think()
 						offset = -2;
 					}
 
-					_parent->statePushFront(new ExplosionBState(_parent, _parent->getMap()->getProjectile()->getPosition(offset), _ammo, _action.actor, 0, (_action.type != BA_AUTOSHOT || _action.autoShotCounter == _action.weapon->getRules()->getAutoShots() || !_action.weapon->getAmmoItem())));
+					const Position impactVoxel = _parent->getMap()->getProjectile()->getPosition(offset);
+					const bool impactAudible = _ammo != 0 && _ammo->getRules()->getHitSound() != -1;
+					recordCompanionProjectileImpact(_parent->getSave(), impactVoxel, _projectileImpact, impactAudible);
+					_parent->statePushFront(new ExplosionBState(_parent, impactVoxel, _ammo, _action.actor, 0, (_action.type != BA_AUTOSHOT || _action.autoShotCounter == _action.weapon->getRules()->getAutoShots() || !_action.weapon->getAmmoItem())));
 
 					if (_projectileImpact == V_UNIT)
 					{
@@ -598,11 +650,14 @@ void ProjectileFlyBState::think()
 								// insert an explosion and hit
 								if (secondaryImpact != V_OUTOFBOUNDS)
 								{
+									const Position pelletVoxel = proj->getPosition(offset);
+									const bool pelletAudible = _ammo->getRules()->getHitSound() != -1;
+									recordCompanionProjectileImpact(_parent->getSave(), pelletVoxel, secondaryImpact, pelletAudible);
 									if (secondaryImpact == V_UNIT)
 									{
-										projectileHitUnit(proj->getPosition(offset));
+										projectileHitUnit(pelletVoxel);
 									}
-									Explosion *explosion = new Explosion(proj->getPosition(offset), _ammo->getRules()->getHitAnimation());
+									Explosion *explosion = new Explosion(pelletVoxel, _ammo->getRules()->getHitAnimation());
 									_parent->getMap()->getExplosions()->push_back(explosion);
 									if (_ammo->getRules()->getExplosionRadius() != 0)
 									{
@@ -632,6 +687,7 @@ void ProjectileFlyBState::think()
 				}
 			}
 
+			_parent->getSave()->getCompanionPerceptionLog().finalizeProjectileDirectionObservation(_parent->getSave());
 			delete _parent->getMap()->getProjectile();
 			_parent->getMap()->setProjectile(0);
 		}

@@ -57,6 +57,7 @@ set ( battlescape_src
   Battlescape/BattlescapeGenerator.cpp
   Battlescape/BattlescapeMessage.cpp
   Battlescape/BattlescapeState.cpp
+  Battlescape/CompanionSquadOwnershipState.cpp
   Battlescape/BriefingState.cpp
   Battlescape/Camera.cpp
   Battlescape/CannotReequipState.cpp
@@ -106,22 +107,41 @@ set ( engine_src
   Engine/CatFile.cpp
   Engine/CompanionEventLogCore.cpp
 	Engine/CompanionEventLog.cpp
+  Engine/CompanionPerceptionLogCore.cpp
+  Engine/CompanionUniformShootingSpreadCore.cpp
+	Engine/CompanionPerceptionLog.cpp
+	Engine/CompanionGroundItemObservationCore.cpp
+	Engine/CompanionGroundItemMemory.cpp
+	Engine/CompanionSnapshotGroundItems.cpp
+	Engine/CompanionGroundInventoryCore.cpp
 	Engine/CompanionSnapshot.cpp
 	Engine/CompanionGithubQuotaHudCore.cpp
 	Engine/CompanionGithubQuotaHudOverlay.cpp
+	Engine/CompanionAutoRetrieveCore.cpp
 	Engine/CompanionOnDemandRelayCore.cpp
 	Engine/CompanionOnDemandRelayLayout.cpp
 	Engine/CompanionOnDemandRelayOverlay.cpp
+	Engine/CompanionRelayPublicationFreshnessCore.cpp
 	Engine/CompanionSnapshotExportCore.cpp
+	Engine/CompanionManualV5Export.cpp
+	Engine/CompanionManualUploadHudCore.cpp
+	Engine/CompanionManualExportRetention.cpp
 	Engine/CompanionSnapshotTerrain.cpp
 	Engine/CompanionSnapshotTerrainCapture.cpp
 	Engine/CompanionSnapshotTerrainPacked.cpp
+	Engine/CompanionSnapshotTerrainSemantics.cpp
+	Engine/CompanionSnapshotTerrainSemanticsSparse.cpp
+	Engine/CompanionSnapshotMissionContext.cpp
+	Engine/CompanionSnapshotUnitState.cpp
+	Engine/CompanionSnapshotUnitStateCore.cpp
 	Engine/CompanionSha256.cpp
 	Engine/CompanionBriefingRequest.cpp
 	Engine/CompanionBriefingRequestCore.cpp
 	Engine/CompanionCommandCore.cpp
 	Engine/CompanionCommandRuntime.cpp
 	Engine/CompanionCommandRuntimeSupport.cpp
+	Engine/CompanionCommandCasualtySettlement.cpp
+	Engine/CompanionCommandCasualtySettlementCore.cpp
 	Engine/CompanionCommandJournalCore.cpp
 	Engine/CompanionJsonLite.cpp
 	Engine/CompanionSoldierOwnershipCore.cpp
@@ -130,7 +150,13 @@ set ( engine_src
 	Engine/CompanionTacticalOwnershipCore.cpp
 	Engine/CompanionTacticalAuthorityCore.cpp
 	Engine/CompanionTacticalHumanOrderAdmission.cpp
+	Engine/CompanionBattlescapeOwnershipCore.cpp
+	Engine/CompanionOwnershipHandoffCore.cpp
 	Engine/CompanionSoldierControlPublishCore.cpp
+	Engine/CompanionRulesReferenceExportCore.cpp
+	Engine/CompanionRulesReferenceExport.cpp
+	Engine/CompanionBaseIntelligenceExportCore.cpp
+	Engine/CompanionBaseIntelligenceExport.cpp
   Engine/CrossPlatform.cpp
   Engine/FastLineClip.cpp
   Engine/FileMap.cpp
@@ -527,6 +553,20 @@ endif ()
 target_link_libraries ( openxcom ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
 
 option ( OPENXCOM_BUILD_COMPANION_EVENT_LOG_TESTS "Build companion event log regression tests" ON )
+if ( WIN32 )
+  function ( openxcom_stage_win32_runtime_deps target_name )
+    if ( CMAKE_CL_64 )
+      file ( GLOB _oxc_stage_dlls "${DEPS_DIR}/lib/x64/*.dll" )
+    else ()
+      file ( GLOB _oxc_stage_dlls "${DEPS_DIR}/lib/Win32/*.dll" )
+    endif ()
+    foreach ( _dll ${_oxc_stage_dlls} )
+      add_custom_command ( TARGET ${target_name} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_dll} $<TARGET_FILE_DIR:${target_name}>
+        VERBATIM )
+    endforeach ()
+  endfunction ()
+endif ()
 if ( OPENXCOM_BUILD_COMPANION_EVENT_LOG_TESTS )
   add_executable ( companion_event_log_test
     test/companion_event_log_test.cpp
@@ -539,6 +579,51 @@ if ( OPENXCOM_BUILD_COMPANION_EVENT_LOG_TESTS )
     target_link_libraries ( companion_event_log_test ${basic_windows_libs} )
   endif ()
   add_test ( NAME companion_event_log_test COMMAND companion_event_log_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_PERCEPTION_LOG_TESTS "Build companion perception log regression tests (M1-WP6)" ON )
+if ( OPENXCOM_BUILD_COMPANION_PERCEPTION_LOG_TESTS )
+  add_executable ( companion_perception_log_test
+    test/companion_perception_log_test.cpp
+    Engine/CompanionPerceptionLogCore.cpp
+    Engine/CompanionSnapshotUnitStateCore.cpp
+    Engine/RNG.cpp
+  )
+  target_include_directories ( companion_perception_log_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_perception_log_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_perception_log_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_perception_log_test COMMAND companion_perception_log_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_UNIFORM_SHOOTING_SPREAD_TESTS "Build uniform shooting spread regression tests (M1)" ON )
+if ( OPENXCOM_BUILD_COMPANION_UNIFORM_SHOOTING_SPREAD_TESTS )
+  add_executable ( companion_uniform_shooting_spread_test
+    test/companion_uniform_shooting_spread_test.cpp
+    Engine/CompanionUniformShootingSpreadCore.cpp
+    Engine/RNG.cpp
+  )
+  target_include_directories ( companion_uniform_shooting_spread_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_uniform_shooting_spread_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_uniform_shooting_spread_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_uniform_shooting_spread_test COMMAND companion_uniform_shooting_spread_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_GROUND_ITEM_TESTS "Build companion ground-item observation tests (M1-WP9)" ON )
+if ( OPENXCOM_BUILD_COMPANION_GROUND_ITEM_TESTS )
+  add_executable ( companion_ground_item_test
+    test/companion_ground_item_test.cpp
+    Engine/CompanionGroundItemObservationCore.cpp
+  )
+  target_include_directories ( companion_ground_item_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_ground_item_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_ground_item_test ${basic_windows_libs} )
+  endif ()
+  add_test ( NAME companion_ground_item_test COMMAND companion_ground_item_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_BRIEFING_REQUEST_TESTS "Build companion briefing request regression tests" ON )
@@ -565,6 +650,7 @@ if ( OPENXCOM_BUILD_COMPANION_COMMAND_TESTS )
     Engine/CompanionSoldierOwnershipCore.cpp
     Engine/CompanionJsonLite.cpp
     Engine/CompanionCommandRuntimeSupport.cpp
+    Engine/CompanionCommandCasualtySettlementCore.cpp
     Engine/CompanionCommandJournalCore.cpp
     Engine/CompanionSha256.cpp
     Engine/RNG.cpp
@@ -575,6 +661,40 @@ if ( OPENXCOM_BUILD_COMPANION_COMMAND_TESTS )
     target_link_libraries ( companion_command_test ${basic_windows_libs} )
   endif ()
   add_test ( NAME companion_command_test COMMAND companion_command_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_INVENTORY_MOVE_ENGINE_TEST "Build companion INVENTORY_MOVE engine integration test (WP8B3)" ON )
+if ( OPENXCOM_BUILD_COMPANION_INVENTORY_MOVE_ENGINE_TEST )
+  add_executable ( companion_inventory_move_engine_test
+    test/companion_inventory_move_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_inventory_move_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_inventory_move_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_inventory_move_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_inventory_move_engine_test )
+  else ()
+    target_link_libraries ( companion_inventory_move_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_inventory_move_engine_test COMMAND companion_inventory_move_engine_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_PICKUP_DROP_ENGINE_TEST "Build companion PICKUP/DROP engine integration test (WP8B4V)" ON )
+if ( OPENXCOM_BUILD_COMPANION_PICKUP_DROP_ENGINE_TEST )
+  add_executable ( companion_pickup_drop_engine_test
+    test/companion_pickup_drop_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_pickup_drop_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_pickup_drop_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_pickup_drop_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_pickup_drop_engine_test )
+  else ()
+    target_link_libraries ( companion_pickup_drop_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_pickup_drop_engine_test COMMAND companion_pickup_drop_engine_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_COMMAND_JOURNAL_TESTS "Build companion command journal regression tests" ON )
@@ -616,8 +736,10 @@ option ( OPENXCOM_BUILD_COMPANION_ON_DEMAND_RELAY_TESTS "Build companion on-dema
 if ( OPENXCOM_BUILD_COMPANION_ON_DEMAND_RELAY_TESTS )
   add_executable ( companion_on_demand_relay_test
     test/companion_on_demand_relay_test.cpp
+    Engine/CompanionAutoRetrieveCore.cpp
     Engine/CompanionOnDemandRelayCore.cpp
     Engine/CompanionOnDemandRelayLayout.cpp
+    Engine/CompanionRelayPublicationFreshnessCore.cpp
     Engine/CompanionBriefingRequestCore.cpp
     Engine/CompanionSha256.cpp
     Engine/CompanionJsonLite.cpp
@@ -630,6 +752,22 @@ if ( OPENXCOM_BUILD_COMPANION_ON_DEMAND_RELAY_TESTS )
     target_link_libraries ( companion_on_demand_relay_test ${system_libs} )
   endif ()
   add_test ( NAME companion_on_demand_relay_test COMMAND companion_on_demand_relay_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_JSON_LITE_TESTS "Build companion JSON lite regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_JSON_LITE_TESTS )
+  add_executable ( companion_json_lite_test
+    test/companion_json_lite_test.cpp
+    Engine/CompanionJsonLite.cpp
+  )
+  target_include_directories ( companion_json_lite_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_json_lite_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_json_lite_test ${basic_windows_libs} )
+  else ()
+    target_link_libraries ( companion_json_lite_test ${system_libs} )
+  endif ()
+  add_test ( NAME companion_json_lite_test COMMAND companion_json_lite_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_CAMPAIGN_IDENTITY_TESTS "Build companion campaign identity regression tests" ON )
@@ -748,6 +886,23 @@ if ( OPENXCOM_BUILD_COMPANION_SOLDIER_ASSIGNMENT_UI_TESTS )
   add_test ( NAME companion_soldier_assignment_ui_test COMMAND companion_soldier_assignment_ui_test )
 endif ()
 
+option ( OPENXCOM_BUILD_COMPANION_BATTLESCAPE_OWNERSHIP_TESTS "Build companion battlescape ownership regression tests" ON )
+if ( OPENXCOM_BUILD_COMPANION_BATTLESCAPE_OWNERSHIP_TESTS )
+  add_executable ( companion_battlescape_ownership_test
+    test/companion_battlescape_ownership_test.cpp
+    Engine/CompanionOwnershipHandoffCore.cpp
+    Engine/CompanionCampaignOwnershipCore.cpp
+  )
+  target_include_directories ( companion_battlescape_ownership_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_battlescape_ownership_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_battlescape_ownership_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_battlescape_ownership_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_battlescape_ownership_test COMMAND companion_battlescape_ownership_test )
+endif ()
+
 option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS "Build companion snapshot terrain regression tests" ON )
 if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS )
   add_executable ( companion_snapshot_terrain_test
@@ -762,6 +917,9 @@ if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS )
     target_link_libraries ( companion_snapshot_terrain_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_snapshot_terrain_test COMMAND companion_snapshot_terrain_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_snapshot_terrain_test )
+  endif ()
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_EXPORT_TESTS "Build companion snapshot export fallback regression tests" ON )
@@ -769,6 +927,15 @@ if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_EXPORT_TESTS )
   add_executable ( companion_snapshot_export_test
     test/companion_snapshot_export_test.cpp
     Engine/CompanionSnapshotExportCore.cpp
+    Engine/CompanionSha256.cpp
+  )
+  add_executable ( companion_manual_v5_export_test
+    test/companion_manual_v5_export_test.cpp
+    Engine/CompanionManualV5Export.cpp
+    Engine/CompanionManualExportRetention.cpp
+    Engine/CompanionSnapshotExportCore.cpp
+    Engine/CompanionBriefingRequestCore.cpp
+    Engine/CompanionJsonLite.cpp
     Engine/CompanionSha256.cpp
   )
   target_include_directories ( companion_snapshot_export_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
@@ -779,6 +946,176 @@ if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_EXPORT_TESTS )
     target_link_libraries ( companion_snapshot_export_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_snapshot_export_test COMMAND companion_snapshot_export_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_snapshot_export_test )
+  endif ()
+  target_include_directories ( companion_manual_v5_export_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_manual_v5_export_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_manual_v5_export_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_manual_v5_export_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_manual_v5_export_test COMMAND companion_manual_v5_export_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_manual_v5_export_test )
+  endif ()
+  add_executable ( companion_manual_upload_hud_test
+    test/companion_manual_upload_hud_test.cpp
+    Engine/CompanionManualUploadHudCore.cpp
+    Engine/CompanionManualV5Export.cpp
+    Engine/CompanionManualExportRetention.cpp
+    Engine/CompanionOnDemandRelayLayout.cpp
+    Engine/CompanionOnDemandRelayCore.cpp
+    Engine/CompanionSnapshotExportCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionBriefingRequestCore.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_manual_upload_hud_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_manual_upload_hud_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_manual_upload_hud_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_manual_upload_hud_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_manual_upload_hud_test COMMAND companion_manual_upload_hud_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_manual_upload_hud_test )
+  endif ()
+  add_executable ( companion_manual_export_retention_test
+    test/companion_manual_export_retention_test.cpp
+    Engine/CompanionManualExportRetention.cpp
+    Engine/CompanionManualV5Export.cpp
+    Engine/CompanionSnapshotExportCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionBriefingRequestCore.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_manual_export_retention_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_manual_export_retention_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_manual_export_retention_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_manual_export_retention_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_manual_export_retention_test COMMAND companion_manual_export_retention_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_manual_export_retention_test )
+  endif ()
+  add_executable ( companion_manual_upload_integration_test
+    test/companion_manual_upload_integration_test.cpp
+    Engine/CompanionManualUploadHudCore.cpp
+    Engine/CompanionManualV5Export.cpp
+    Engine/CompanionManualExportRetention.cpp
+    Engine/CompanionSnapshotExportCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionBriefingRequestCore.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_manual_upload_integration_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_manual_upload_integration_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_manual_upload_integration_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_manual_upload_integration_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_manual_upload_integration_test COMMAND companion_manual_upload_integration_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_manual_upload_integration_test )
+  endif ()
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_UNIT_STATE_TESTS "Build companion snapshot unit state tests (M1-WP2)" ON )
+if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_UNIT_STATE_TESTS )
+  add_executable ( companion_snapshot_unit_state_test
+    test/companion_snapshot_unit_state_test.cpp
+    Engine/CompanionSnapshotUnitStateCore.cpp
+  )
+  target_include_directories ( companion_snapshot_unit_state_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_snapshot_unit_state_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_snapshot_unit_state_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_snapshot_unit_state_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_snapshot_unit_state_test COMMAND companion_snapshot_unit_state_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_snapshot_unit_state_test )
+  endif ()
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_SERIALIZATION_TESTS "Build companion snapshot serialization integration tests (M1-WP2B)" ON )
+if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_SERIALIZATION_TESTS )
+  add_executable ( companion_snapshot_serialization_test
+    test/companion_snapshot_serialization_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_snapshot_serialization_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_snapshot_serialization_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_snapshot_serialization_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_snapshot_serialization_test )
+  else ()
+    target_link_libraries ( companion_snapshot_serialization_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_snapshot_serialization_test COMMAND companion_snapshot_serialization_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_RULES_REFERENCE_TESTS "Build companion rules reference export tests (M1-WP5)" ON )
+if ( OPENXCOM_BUILD_COMPANION_RULES_REFERENCE_TESTS )
+  add_executable ( companion_rules_reference_export_test
+    test/companion_rules_reference_export_test.cpp
+    Engine/CompanionRulesReferenceExportCore.cpp
+    Engine/CompanionCampaignIdentityCore.cpp
+    Engine/CompanionJsonLite.cpp
+    Engine/CompanionSha256.cpp
+  )
+  target_include_directories ( companion_rules_reference_export_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_rules_reference_export_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_rules_reference_export_test ${basic_windows_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  else ()
+    target_link_libraries ( companion_rules_reference_export_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_rules_reference_export_test COMMAND companion_rules_reference_export_test )
+  if ( WIN32 )
+    openxcom_stage_win32_runtime_deps ( companion_rules_reference_export_test )
+  endif ()
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_BASE_INTELLIGENCE_TESTS "Build companion base intelligence export tests (M1-BI1)" ON )
+if ( OPENXCOM_BUILD_COMPANION_BASE_INTELLIGENCE_TESTS )
+  # Full engine link (minus main.cpp) — same pattern as companion_snapshot_serialization_test.
+  add_executable ( companion_base_intelligence_export_test
+    test/companion_base_intelligence_export_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_base_intelligence_export_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_base_intelligence_export_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_base_intelligence_export_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_base_intelligence_export_test )
+  else ()
+    target_link_libraries ( companion_base_intelligence_export_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_base_intelligence_export_test COMMAND companion_base_intelligence_export_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_P5_FULL_REVEAL_STRESS_HARNESS "Build P4 step 5 direct battle generation stress harness" ON )
+if ( OPENXCOM_BUILD_COMPANION_P5_FULL_REVEAL_STRESS_HARNESS )
+  add_executable ( companion_p5_full_reveal_stress_harness
+    test/companion_p5_full_reveal_stress_harness.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_p5_full_reveal_stress_harness PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_p5_full_reveal_stress_harness PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_p5_full_reveal_stress_harness ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_p5_full_reveal_stress_harness )
+  else ()
+    target_link_libraries ( companion_p5_full_reveal_stress_harness ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
 endif ()
 
 # Pack libraries into bundle and link executable appropriately

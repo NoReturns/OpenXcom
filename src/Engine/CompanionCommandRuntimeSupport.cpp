@@ -234,6 +234,39 @@ std::string buildDuplicateResultIdentityConflictJson(
 	return json.str();
 }
 
+bool shouldDeferInFlightCommandCompletionWhileReentrant(int commandTickDepth)
+{
+	return commandTickDepth > 1;
+}
+
+bool commandSessionBindingMatchesLiveBattle(
+	const std::string &liveSessionId,
+	const std::string &commandSessionId,
+	const std::string &resultSessionId)
+{
+	if (liveSessionId.empty() || commandSessionId.empty())
+	{
+		return false;
+	}
+	if (commandSessionId != liveSessionId)
+	{
+		return false;
+	}
+	if (!resultSessionId.empty() && resultSessionId != liveSessionId)
+	{
+		return false;
+	}
+	return true;
+}
+
+bool shouldRehydrateOrphanedDirectedFireForSession(
+	const std::string &liveSessionId,
+	const std::string &commandSessionId,
+	const std::string &resultSessionId)
+{
+	return commandSessionBindingMatchesLiveBattle(liveSessionId, commandSessionId, resultSessionId);
+}
+
 bool shouldRunCompanionCommandTickDuringThink(
 	bool playerTurn,
 	bool debugMode,
@@ -276,6 +309,19 @@ bool exportKneeledSnapshotField(bool unitIsKneeled)
 	return unitIsKneeled;
 }
 
+bool shouldExportSnapshotBeforeTerminalCommandResult(CompanionCommandCore::CommandLifecycleStatus status)
+{
+	switch (status)
+	{
+	case CompanionCommandCore::CMD_COMPLETED:
+	case CompanionCommandCore::CMD_INTERRUPTED:
+	case CompanionCommandCore::CMD_FAILED:
+		return true;
+	default:
+		return false;
+	}
+}
+
 bool shouldPollCommandInboxFile(
 	bool moveInFlight,
 	time_t fileMtime,
@@ -307,7 +353,9 @@ bool parseInboxCommandBinding(const std::string &commandJson, InboxCommandBindin
 	}
 	std::string commandType;
 	if (!CompanionJsonLite::extractJsonStringField(commandJson, "command_type", &commandType) ||
-	    (commandType != "MOVE" && commandType != "KNEEL"))
+	    (commandType != "MOVE" && commandType != "KNEEL" && commandType != "SNAP_SHOT" &&
+	     commandType != "AUTO_SHOT" && commandType != "AIMED_SHOT" &&
+	     commandType != "PRIME" && commandType != "THROW"))
 	{
 		return false;
 	}

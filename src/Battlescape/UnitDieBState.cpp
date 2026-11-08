@@ -35,6 +35,7 @@
 #include "InfoboxOKState.h"
 #include "InfoboxState.h"
 #include "../Savegame/Node.h"
+#include "../Engine/CompanionPerceptionLog.h"
 
 namespace OpenXcom
 {
@@ -184,21 +185,27 @@ void UnitDieBState::think()
 		if (_unit->getOriginalFaction() == FACTION_PLAYER)
 		{
 			Game *game = _parent->getSave()->getBattleState()->getGame();
+			bool uiNotificationShown = false;
 			if (_unit->getStatus() == STATUS_DEAD)
 			{
 				if (_damageType == DT_NONE && _unit->getSpawnUnit().empty())
 				{
 					game->pushState(new InfoboxOKState(game->getLanguage()->getString("STR_HAS_DIED_FROM_A_FATAL_WOUND", _unit->getGender()).arg(_unit->getName(game->getLanguage()))));
+					uiNotificationShown = true;
 				}
 				else if (Options::battleNotifyDeath && _unit->getGeoscapeSoldier() != 0)
 				{
 					game->pushState(new InfoboxState(game->getLanguage()->getString("STR_HAS_BEEN_KILLED", _unit->getGender()).arg(_unit->getName(game->getLanguage()))));
+					uiNotificationShown = true;
 				}
 			}
 			else
 			{
 				game->pushState(new InfoboxOKState(game->getLanguage()->getString("STR_HAS_BECOME_UNCONSCIOUS", _unit->getGender()).arg(_unit->getName(game->getLanguage()))));
+				uiNotificationShown = true;
 			}
+			_parent->getSave()->getCompanionPerceptionLog().tryRecordSoldierDown(
+				_parent->getSave(), _unit, uiNotificationShown);
 		}
 		// if all units from either faction are killed - auto-end the mission.
 		if (_parent->getSave()->getSide() == FACTION_PLAYER)
@@ -220,6 +227,18 @@ void UnitDieBState::think()
 		if (_unit->getStatus() == STATUS_UNCONSCIOUS && !_unit->getCapturable())
 		{
 			_unit->instaKill();
+		}
+		if (_unit->getOriginalFaction() == FACTION_HOSTILE)
+		{
+			const Position deathPos = _unit->getPosition();
+			const bool hadCarried = _unit->hasInventory();
+			if (deathPos != Position(-1, -1, -1))
+			{
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordHostileDeathObserved(
+					_parent->getSave(),
+					deathPos,
+					hadCarried);
+			}
 		}
 		if (_unit->getTurnsSinceSpotted() < 255)
 		{

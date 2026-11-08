@@ -3,6 +3,7 @@
  */
 #include "CompanionJsonLite.h"
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 
 namespace OpenXcom
@@ -78,6 +79,29 @@ bool parseJsonStringValue(const std::string &json, std::string::size_type valueS
 		}
 		if (c == '\\')
 		{
+			if (pos + 1 >= json.size())
+			{
+				return false;
+			}
+			const char next = json[pos + 1];
+			if (next == '\\' || next == '"')
+			{
+				value.push_back(next);
+				pos += 2;
+				continue;
+			}
+			if (next == 'n')
+			{
+				value.push_back('\n');
+				pos += 2;
+				continue;
+			}
+			if (next == 'r')
+			{
+				value.push_back('\r');
+				pos += 2;
+				continue;
+			}
 			return false;
 		}
 		value.push_back(c);
@@ -125,6 +149,60 @@ bool extractJsonIntField(const std::string &json, const std::string &key, int *o
 		return false;
 	}
 	return parseJsonIntValue(json, valueStart, out);
+}
+
+bool tryExtractJsonIntField(const std::string &json, const std::string &key, int *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	std::string::size_type valueStart = 0;
+	if (!findJsonKeyValueStart(json, key, &valueStart))
+	{
+		return false;
+	}
+	return parseJsonIntValue(json, valueStart, out);
+}
+
+bool parseJsonInt64Value(const std::string &json, std::string::size_type valueStart, long long *out)
+{
+	if (out == 0 || valueStart >= json.size())
+	{
+		return false;
+	}
+	std::string::size_type pos = valueStart;
+	if (!skipWhitespace(json, &pos))
+	{
+		return false;
+	}
+	if (json[pos] == '"')
+	{
+		return false;
+	}
+	errno = 0;
+	char *endPtr = 0;
+	const long long value = std::strtoll(json.c_str() + pos, &endPtr, 10);
+	if (endPtr == json.c_str() + pos)
+	{
+		return false;
+	}
+	if (errno == ERANGE)
+	{
+		return false;
+	}
+	*out = value;
+	return true;
+}
+
+bool extractJsonInt64Field(const std::string &json, const std::string &key, long long *out)
+{
+	std::string::size_type valueStart = 0;
+	if (!findJsonKeyValueStart(json, key, &valueStart))
+	{
+		return false;
+	}
+	return parseJsonInt64Value(json, valueStart, out);
 }
 
 } // namespace CompanionJsonLite

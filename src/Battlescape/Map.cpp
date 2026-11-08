@@ -47,7 +47,8 @@
 #include "../Interface/NumberText.h"
 #include "../Interface/Text.h"
 #include "../fmath.h"
-
+#include "../Engine/CompanionPerceptionLog.h"
+#include "../Engine/CompanionPerceptionLogCore.h"
 
 /*
   1) Map origin is top corner.
@@ -64,6 +65,37 @@
 
 namespace OpenXcom
 {
+
+namespace
+{
+
+void companionNoteDrawnProjectileVoxel(
+	SavedBattleGame *save,
+	TileEngine *tileEngine,
+	Camera *camera,
+	bool projectileInFov,
+	Position voxelPos)
+{
+	if (save == 0 || save->getDebugMode())
+	{
+		return;
+	}
+	const Position mapTile(voxelPos.x / 16, voxelPos.y / 16, voxelPos.z / 24);
+	Tile *tile = save->getTile(mapTile);
+	CompanionPerceptionLogCore::ProjectileDirectionSampleInput input = {};
+	input.debugMode = false;
+	input.projectileInFov = projectileInFov;
+	input.tileInFriendlySight = tile != 0 && tile->getVisible() > 0;
+	input.voxelRenderable = tileEngine != 0 && tileEngine->isVoxelVisible(voxelPos);
+	input.onTacticalViewport = camera != 0 && camera->isOnScreen(mapTile, false, 0, false);
+	if (!CompanionPerceptionLogCore::shouldAcceptProjectileDirectionSample(input))
+	{
+		return;
+	}
+	save->getCompanionPerceptionLog().noteProjectileDirectionSample(save, mapTile);
+}
+
+} // namespace
 
 /**
  * Sets up a map with the specified size and position.
@@ -805,6 +837,7 @@ void Map::drawTerrain(Surface *surface)
 								_save->getTileEngine()->isVoxelVisible(voxelPos))
 							{
 								_camera->convertVoxelToScreen(voxelPos, &bulletPositionScreen);
+								companionNoteDrawnProjectileVoxel(_save, _save->getTileEngine(), _camera, _projectileInFOV, voxelPos);
 								tmpSurface->blitNShade(surface, bulletPositionScreen.x - 16, bulletPositionScreen.y - 26, 0);
 							}
 
@@ -853,6 +886,7 @@ void Map::drawTerrain(Surface *surface)
 											_camera->convertVoxelToScreen(voxelPos, &bulletPositionScreen);
 											bulletPositionScreen.x -= tmpSurface->getWidth() / 2;
 											bulletPositionScreen.y -= tmpSurface->getHeight() / 2;
+											companionNoteDrawnProjectileVoxel(_save, _save->getTileEngine(), _camera, _projectileInFOV, voxelPos);
 											tmpSurface->blitNShade(surface, bulletPositionScreen.x, bulletPositionScreen.y, 0);
 										}
 									}

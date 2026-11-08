@@ -32,6 +32,7 @@
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Engine/RNG.h"
+#include "../Engine/CompanionPerceptionLog.h"
 #include "BattlescapeState.h"
 #include "../Mod/MapDataSet.h"
 #include "../Mod/Unit.h"
@@ -291,6 +292,10 @@ bool TileEngine::calculateFOV(BattleUnit *unit)
 							{
 								visibleUnit->getTile()->setVisible(+1);
 								visibleUnit->setVisible(true);
+								if (visibleUnit->getOriginalFaction() == FACTION_HOSTILE)
+								{
+									_save->getCompanionPerceptionLog().noteHostileVisibility(_save, visibleUnit, true);
+								}
 							}
 							if ((visibleUnit->getFaction() == FACTION_HOSTILE && unit->getFaction() == FACTION_PLAYER)
 								|| (visibleUnit->getFaction() != FACTION_HOSTILE && unit->getFaction() == FACTION_HOSTILE))
@@ -932,6 +937,10 @@ std::vector<std::pair<BattleUnit *, int> > TileEngine::getSpottingUnits(BattleUn
 					if ((*i)->getFaction() == FACTION_PLAYER)
 					{
 						unit->setVisible(true);
+						if (unit->getOriginalFaction() == FACTION_HOSTILE)
+						{
+							_save->getCompanionPerceptionLog().noteHostileVisibility(_save, unit, true);
+						}
 					}
 					(*i)->addToVisibleUnits(unit);
 					int attackType = determineReactionType(*i, unit);

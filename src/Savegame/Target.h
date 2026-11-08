@@ -66,6 +66,8 @@ public:
 	void setId(int id);
 	/// Gets the target's name.
 	virtual std::string getName(Language *lang) const;
+	/// Label for export/telemetry when Language may be unavailable (e.g. Companion JSON). Never calls lang.
+	std::string getDisplayLabelForExport() const;
 	/// Sets the target's name.
 	void setName(const std::string &newName);
 	/// Gets the target's default name.

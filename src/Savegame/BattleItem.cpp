@@ -324,6 +324,11 @@ bool BattleItem::occupiesSlot(int x, int y, BattleItem *item) const
 {
 	if (item == this)
 		return false;
+	// Nested ammunition (loaded in a weapon) has no inventory slot; it does not occupy a grid cell.
+	if (_inventorySlot == 0)
+	{
+		return false;
+	}
 	if (_inventorySlot->getType() == INV_HAND)
 		return true;
 	if (item == 0)

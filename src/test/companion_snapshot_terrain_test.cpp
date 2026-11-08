@@ -4,7 +4,11 @@
 #include "Engine/CompanionSnapshotTerrain.h"
 #include "Engine/CompanionSnapshotTerrainCapture.h"
 #include "Engine/CompanionSnapshotTerrainPacked.h"
+#include "Engine/CompanionSnapshotTerrainSemantics.h"
+#include "Engine/CompanionSnapshotTerrainSemanticsSparse.h"
+#include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/Tile.h"
+#include "../Battlescape/Position.h"
 #include "../Mod/MapData.h"
 #include "../Mod/MapDataSet.h"
 #include <yaml-cpp/yaml.h>
@@ -17,6 +21,7 @@
 #include <vector>
 
 using namespace OpenXcom;
+using namespace CompanionSnapshotTerrain;
 
 static int g_failures = 0;
 
@@ -317,9 +322,265 @@ static void testPackedWorstCaseRecordSize()
 	delete north;
 }
 
+static void testSemanticUfoDoorAndStructure()
+{
+	MapDataSet ds("UFO1");
+	MapData *floor = makeFloor(&ds, 4, 0);
+	MapData *ufoDoor = new MapData(&ds);
+	ufoDoor->setObjectType(O_OBJECT);
+	ufoDoor->setTUCosts(12, 12, 12);
+	ufoDoor->setFlags(true, false, false, 0, false, false, false, false, false);
+	MapData *ufoWall = makeWall(&ds, O_WESTWALL, 255, true);
+
+	TerrainSemanticsContext ctx;
+	ctx.dataSetRoles.push_back(DATASET_ROLE_UFO);
+
+	expect(static_cast<int>(classifyMapDataPart(ufoDoor, O_OBJECT, DATASET_ROLE_UFO))
+		== static_cast<int>(SEM_UFO_DOOR), "animated UFO door must classify as UFO_DOOR");
+	expect(static_cast<int>(classifyMapDataPart(ufoWall, O_WESTWALL, DATASET_ROLE_UFO))
+		== static_cast<int>(SEM_UFO_STRUCTURE), "impassable UFO wall must classify as UFO_STRUCTURE");
+	expect(static_cast<int>(classifyMapDataPart(floor, O_FLOOR, DATASET_ROLE_UFO))
+		== static_cast<int>(SEM_UFO_INTERIOR), "UFO floor must classify as UFO_INTERIOR");
+
+	Tile tile(Position(1, 1, 0));
+	tile.setMapData(floor, 0, 0, O_FLOOR);
+	tile.setMapData(ufoDoor, 0, 0, O_OBJECT);
+	tile.setMapData(ufoWall, 0, 0, O_WESTWALL);
+	tile.setDiscovered(true, 2);
+	tile.setVisible(+1);
+
+	std::vector<CompanionSnapshotTerrain::TerrainTileExport> records;
+	TerrainCaptureOptions options;
+	options.semanticsContext = &ctx;
+	CompanionSnapshotTerrain::captureTerrainTiles(2, 2, 1, [&](int x, int y, int z) -> Tile * {
+		return (x == 1 && y == 1 && z == 0) ? &tile : 0;
+	}, records, &options);
+	expect(records.size() == 1, "one discovered tile expected");
+	expect(records[0].bodySemantic == static_cast<unsigned char>(SEM_UFO_DOOR), "body semantic exported");
+	expect(records[0].westSemantic == static_cast<unsigned char>(SEM_UFO_STRUCTURE), "west semantic exported");
+
+	const std::vector<unsigned char> semBlob = encodeSemanticsSparseV2Blob(records);
+	expect(semBlob.size() > CompanionSnapshotTerrain::SEMANTICS_SPARSE_V1_HEADER_BYTES,
+		"semantics blob expected for classified tile");
+
+	delete floor;
+	delete ufoDoor;
+	delete ufoWall;
+}
+
+static void testSemanticOffLosStructureExportedWithoutDoorState()
+{
+	MapDataSet ds("UFO1");
+	MapData *floor = makeFloor(&ds, 4, 0);
+	MapData *ufoDoor = new MapData(&ds);
+	ufoDoor->setObjectType(O_OBJECT);
+	ufoDoor->setTUCosts(12, 12, 12);
+	ufoDoor->setFlags(true, false, false, 0, false, false, false, false, false);
+
+	TerrainSemanticsContext ctx;
+	ctx.dataSetRoles.push_back(DATASET_ROLE_UFO);
+
+	Tile tile(Position(1, 1, 0));
+	tile.setMapData(floor, 0, 0, O_FLOOR);
+	tile.setMapData(ufoDoor, 0, 0, O_OBJECT);
+	tile.setDiscovered(true, 2);
+	tile.setVisible(0);
+
+	std::vector<TerrainTileExport> records;
+	TerrainCaptureOptions options;
+	options.semanticsContext = &ctx;
+	captureTerrainTiles(2, 2, 1, [&](int x, int y, int z) -> Tile * {
+		return (x == 1 && y == 1 && z == 0) ? &tile : 0;
+	}, records, &options);
+	expect(records.size() == 1, "one discovered tile expected");
+	expect(records[0].inLos == false, "tile must be off-LOS");
+	expect(records[0].bodySemantic == static_cast<unsigned char>(SEM_UFO_DOOR), "off-LOS structure identity exported");
+	expect(records[0].bodyDoorStateKnown == false, "off-LOS door state must not export");
+
+	const std::vector<unsigned char> semBlob = encodeSemanticsSparseV2Blob(records);
+	expect(semBlob.size() > SEMANTICS_SPARSE_V1_HEADER_BYTES, "off-LOS structure must emit sparse-v2 record");
+	expect(semBlob[4] == 2, "sparse blob must be format version 2");
+
+	delete floor;
+	delete ufoDoor;
+}
+
+static void testSemanticVisibleUfoDoorStateClosedAndOpen()
+{
+	MapDataSet ds("UFO1");
+	MapData *floor = makeFloor(&ds, 4, 0);
+	MapData *ufoDoor = new MapData(&ds);
+	ufoDoor->setObjectType(O_OBJECT);
+	ufoDoor->setTUCosts(12, 12, 12);
+	ufoDoor->setFlags(true, false, false, 0, false, false, false, false, false);
+
+	TerrainSemanticsContext ctx;
+	ctx.dataSetRoles.push_back(DATASET_ROLE_UFO);
+
+	Tile closedTile(Position(1, 1, 0));
+	closedTile.setMapData(floor, 0, 0, O_FLOOR);
+	closedTile.setMapData(ufoDoor, 0, 0, O_OBJECT);
+	closedTile.setDiscovered(true, 2);
+	closedTile.setVisible(+1);
+
+	std::vector<TerrainTileExport> closedRecords;
+	TerrainCaptureOptions options;
+	options.semanticsContext = &ctx;
+	captureTerrainTiles(2, 2, 1, [&](int x, int y, int z) -> Tile * {
+		return (x == 1 && y == 1 && z == 0) ? &closedTile : 0;
+	}, closedRecords, &options);
+	expect(closedRecords[0].bodyDoorStateKnown, "closed UFO door state must export in LOS");
+	expect(!closedRecords[0].bodyDoorOpen, "closed UFO door must report closed");
+
+	Tile openTile(Position(2, 1, 0));
+	openTile.setMapData(floor, 0, 0, O_FLOOR);
+	openTile.setMapData(ufoDoor, 0, 0, O_OBJECT);
+	openTile.setDiscovered(true, 2);
+	openTile.setVisible(+1);
+	openTile.openDoor(O_OBJECT, 0);
+
+	std::vector<TerrainTileExport> openRecords;
+	captureTerrainTiles(3, 2, 1, [&](int x, int y, int z) -> Tile * {
+		return (x == 2 && y == 1 && z == 0) ? &openTile : 0;
+	}, openRecords, &options);
+	expect(openRecords[0].bodyDoorStateKnown, "opening UFO door state must export in LOS");
+	expect(openRecords[0].bodyDoorOpen, "opening UFO door must report open");
+
+	delete floor;
+	delete ufoDoor;
+}
+
+static void testSemanticOrdinaryDoorDistinctFromUfo()
+{
+	MapDataSet ds("URBAN");
+	MapData *floor = makeFloor(&ds, 4, 0);
+	MapData *ordinaryDoor = new MapData(&ds);
+	ordinaryDoor->setObjectType(O_OBJECT);
+	ordinaryDoor->setTUCosts(8, 8, 8);
+	ordinaryDoor->setFlags(false, false, false, 0, false, true, false, false, false);
+
+	TerrainSemanticsContext ctx;
+	ctx.dataSetRoles.push_back(DATASET_ROLE_GROUND);
+
+	Tile tile(Position(1, 1, 0));
+	tile.setMapData(floor, 0, 0, O_FLOOR);
+	tile.setMapData(ordinaryDoor, 0, 0, O_OBJECT);
+	tile.setDiscovered(true, 2);
+	tile.setVisible(+1);
+
+	std::vector<TerrainTileExport> records;
+	TerrainCaptureOptions options;
+	options.semanticsContext = &ctx;
+	captureTerrainTiles(2, 2, 1, [&](int x, int y, int z) -> Tile * {
+		return (x == 1 && y == 1 && z == 0) ? &tile : 0;
+	}, records, &options);
+	expect(records[0].bodySemantic == static_cast<unsigned char>(SEM_ORDINARY_DOOR), "ordinary door category");
+	expect(records[0].bodyDoorStateKnown, "ordinary closed door state exported in LOS");
+	expect(!records[0].bodyDoorOpen, "ordinary door closed");
+
+	delete floor;
+	delete ordinaryDoor;
+}
+
+static void testSemanticImpassableGroundNotUfo()
+{
+	MapDataSet ds("URBAN");
+	MapData *wall = makeWall(&ds, O_WESTWALL, 255, true);
+
+	TerrainSemanticsContext ctx;
+	ctx.dataSetRoles.push_back(DATASET_ROLE_GROUND);
+
+	expect(static_cast<int>(classifyMapDataPart(wall, O_WESTWALL, DATASET_ROLE_GROUND))
+		== static_cast<int>(SEM_ORDINARY_IMPASSABLE), "impassable ground wall must not classify as UFO");
+
+	delete wall;
+}
+
 #ifdef main
 #undef main
 #endif
+static void testFullRevealGeometryCaptureEmitsFullGrid()
+{
+	SavedBattleGame battle;
+	battle.initMap(2, 2, 2);
+	for (int z = 0; z < 2; ++z)
+	{
+		for (int y = 0; y < 2; ++y)
+		{
+			for (int x = 0; x < 2; ++x)
+			{
+				Tile *tile = battle.getTile(Position(x, y, z));
+				if (tile != 0 && x == 0 && y == 0 && z == 0)
+				{
+					tile->setDiscovered(true, 2);
+				}
+			}
+		}
+	}
+	std::vector<TerrainTileExport> discoveredOnly;
+	TerrainCaptureOptions discoveredOpts;
+	captureTerrainTiles(2, 2, 2,
+		[&](int x, int y, int z) -> Tile * { return battle.getTile(Position(x, y, z)); },
+		discoveredOnly,
+		&discoveredOpts);
+	expect(discoveredOnly.size() == 1, "discovered-only capture must omit undiscovered cells");
+
+	std::vector<TerrainTileExport> fullReveal;
+	TerrainCaptureOptions fullOpts;
+	fullOpts.testFullRevealGeometry = true;
+	captureTerrainTiles(2, 2, 2,
+		[&](int x, int y, int z) -> Tile * { return battle.getTile(Position(x, y, z)); },
+		fullReveal,
+		&fullOpts);
+	expect(fullReveal.size() == 8, "test full reveal must emit every map cell");
+	size_t undiscoveredWithSyntheticDisc = 0;
+	for (size_t i = 0; i < fullReveal.size(); ++i)
+	{
+		if (fullReveal[i].disc == 7 && !fullReveal[i].inLos)
+		{
+			++undiscoveredWithSyntheticDisc;
+		}
+	}
+	expect(undiscoveredWithSyntheticDisc >= 6,
+		"synthetic discovery must apply to undiscovered tiles while inLos stays false");
+}
+
+static void testFloorGravLiftMetaDistinctFromObjectBody()
+{
+	MapDataSet ds("test");
+	MapData *gravFloor = makeFloor(&ds, 4, 0);
+	gravFloor->setFlags(false, false, false, 0, true, false, false, false, false);
+	MapData *ufoInterior = new MapData(&ds);
+	ufoInterior->setObjectType(O_OBJECT);
+	ufoInterior->setTUCosts(8, 8, 8);
+	ufoInterior->setTerrainLevel(0);
+
+	Tile tile(Position(0, 0, 0));
+	tile.setMapData(gravFloor, 1, 0, O_FLOOR);
+	tile.setMapData(ufoInterior, 2, 0, O_OBJECT);
+	tile.setDiscovered(true, 2);
+
+	std::vector<TerrainTileExport> records;
+	TerrainCaptureOptions opts;
+	TerrainSemanticsContext ctx;
+	opts.semanticsContext = &ctx;
+	captureTerrainTiles(1, 1, 1, [&](int x, int y, int z) -> Tile * {
+		(void)x; (void)y; (void)z;
+		return &tile;
+	}, records, &opts);
+	expect(records.size() == 1, "one discovered tile");
+	expect(records[0].bodyFloorGravLift, "floor grav lift flag");
+	expect(records[0].bodySemantic != SEM_GRAV_LIFT, "object-first body semantic must not replace floor grav");
+
+	std::vector<unsigned char> sparse = encodeSemanticsSparseV2Blob(records);
+	expect(sparse.size() >= 12 + 6, "sparse v2 blob");
+	const unsigned char META_FLOOR_GRAV_LIFT = 16;
+	expect((sparse[12 + 5] & META_FLOOR_GRAV_LIFT) != 0, "sparse v2 meta floor grav bit on body record");
+
+	delete ufoInterior;
+	delete gravFloor;
+}
+
 int main()
 {
 	testUndiscoveredOmitted();
@@ -330,6 +591,13 @@ int main()
 	testDeterministicOrdering();
 	testPackedNegativeElevationGoldenVector();
 	testPackedWorstCaseRecordSize();
+	testSemanticUfoDoorAndStructure();
+	testSemanticOffLosStructureExportedWithoutDoorState();
+	testSemanticVisibleUfoDoorStateClosedAndOpen();
+	testSemanticOrdinaryDoorDistinctFromUfo();
+	testSemanticImpassableGroundNotUfo();
+	testFullRevealGeometryCaptureEmitsFullGrid();
+	testFloorGravLiftMetaDistinctFromObjectBody();
 
 	if (g_failures != 0)
 	{

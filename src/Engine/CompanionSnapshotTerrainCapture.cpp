@@ -2,6 +2,7 @@
  * Open X-Com Companion — shared terrain capture for verbose and packed-v1 export.
  */
 #include "CompanionSnapshotTerrainCapture.h"
+#include "CompanionSnapshotTerrainSemantics.h"
 #include "../Savegame/Tile.h"
 #include "../Mod/MapData.h"
 
@@ -118,28 +119,109 @@ bool captureWall(const Tile *tile, TilePart part, bool inLos, TerrainWallExport 
 	return true;
 }
 
-void captureTileRecord(const Tile *tile, TerrainTileExport &out)
+bool isDoorCategory(unsigned char category)
+{
+	return category == SEM_UFO_DOOR || category == SEM_ORDINARY_DOOR;
+}
+
+bool captureDoorOpenState(const Tile *tile, TilePart part, bool &doorOpenOut)
+{
+	const MapData *md = tile->getMapData(part);
+	if (md == 0)
+	{
+		return false;
+	}
+	if (md->isUFODoor())
+	{
+		doorOpenOut = tile->isUfoDoorOpen(part);
+		return true;
+	}
+	if (md->isDoor())
+	{
+		doorOpenOut = false;
+		return true;
+	}
+	return false;
+}
+
+void captureTileRecord(const Tile *tile, TerrainTileExport &out, const TerrainSemanticsContext *semCtx,
+	int syntheticDiscMask)
 {
 	out.x = tile->getPosition().x;
 	out.y = tile->getPosition().y;
 	out.z = tile->getPosition().z;
-	out.disc = discoveryMask(tile);
+	const int naturalDisc = discoveryMask(tile);
+	out.disc = syntheticDiscMask >= 0 ? syntheticDiscMask : naturalDisc;
 	out.inLos = tile->getVisible() > 0;
 	out.hasBody = (out.disc & DISC_BODY) != 0;
 	out.hasWestSection = false;
 	out.hasNorthSection = false;
+	out.bodySemantic = SEM_UNKNOWN;
+	out.bodyFloorGravLift = false;
+	out.bodyDoorStateKnown = false;
+	out.bodyDoorOpen = false;
+	out.westSemantic = SEM_UNKNOWN;
+	out.westDoorStateKnown = false;
+	out.westDoorOpen = false;
+	out.northSemantic = SEM_UNKNOWN;
+	out.northDoorStateKnown = false;
+	out.northDoorOpen = false;
 
 	if (out.hasBody)
 	{
 		captureBody(tile, out.inLos, out.body);
+		const MapData *floorMd = tile->getMapData(O_FLOOR);
+		if (floorMd != 0 && floorMd->isGravLift())
+		{
+			out.bodyFloorGravLift = true;
+		}
+		if (semCtx != 0)
+		{
+			out.bodySemantic = static_cast<unsigned char>(classifyTileBody(tile, *semCtx));
+			if (out.inLos && isDoorCategory(out.bodySemantic))
+			{
+				bool open = false;
+				if (captureDoorOpenState(tile, O_OBJECT, open))
+				{
+					out.bodyDoorStateKnown = true;
+					out.bodyDoorOpen = open;
+				}
+			}
+		}
 	}
 	if ((out.disc & DISC_WEST) != 0)
 	{
 		out.hasWestSection = captureWall(tile, O_WESTWALL, out.inLos, out.west);
+		if (out.hasWestSection && semCtx != 0)
+		{
+			out.westSemantic = static_cast<unsigned char>(classifyTileWall(tile, O_WESTWALL, *semCtx));
+			if (out.inLos && isDoorCategory(out.westSemantic))
+			{
+				bool open = false;
+				if (captureDoorOpenState(tile, O_WESTWALL, open))
+				{
+					out.westDoorStateKnown = true;
+					out.westDoorOpen = open;
+				}
+			}
+		}
 	}
 	if ((out.disc & DISC_NORTH) != 0)
 	{
 		out.hasNorthSection = captureWall(tile, O_NORTHWALL, out.inLos, out.north);
+		if (out.hasNorthSection && semCtx != 0)
+		{
+			out.northSemantic = static_cast<unsigned char>(classifyTileWall(tile, O_NORTHWALL, *semCtx));
+			if (out.inLos && isDoorCategory(out.northSemantic))
+			{
+				bool open = false;
+				if (captureDoorOpenState(tile, O_NORTHWALL, open))
+				{
+					out.northDoorStateKnown = true;
+					out.northDoorOpen = open;
+				}
+			}
+		}
 	}
 }
 
@@ -147,9 +229,11 @@ void captureTileRecord(const Tile *tile, TerrainTileExport &out)
 
 void captureTerrainTiles(int mapSizeX, int mapSizeY, int mapSizeZ,
 	const std::function<Tile *(int x, int y, int z)> &getTile,
-	std::vector<TerrainTileExport> &outTiles)
+	std::vector<TerrainTileExport> &outTiles,
+	const TerrainCaptureOptions *options)
 {
 	outTiles.clear();
+	const TerrainSemanticsContext *semCtx = options != 0 ? options->semanticsContext : 0;
 	if (mapSizeX <= 0 || mapSizeY <= 0 || mapSizeZ <= 0)
 	{
 		return;
@@ -173,12 +257,14 @@ void captureTerrainTiles(int mapSizeX, int mapSizeY, int mapSizeZ,
 					continue;
 				}
 				const int disc = discoveryMask(tile);
-				if (disc == 0)
+				const bool testFullReveal = options != 0 && options->testFullRevealGeometry;
+				if (disc == 0 && !testFullReveal)
 				{
 					continue;
 				}
 				TerrainTileExport record;
-				captureTileRecord(tile, record);
+				const int syntheticDisc = (disc == 0 && testFullReveal) ? (DISC_WEST | DISC_NORTH | DISC_BODY) : -1;
+				captureTileRecord(tile, record, semCtx, syntheticDisc);
 				outTiles.push_back(record);
 			}
 		}

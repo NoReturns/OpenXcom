@@ -418,6 +418,8 @@
     <ClCompile Include="Engine\CrossPlatform.cpp" />
     <ClCompile Include="Engine\CompanionEventLogCore.cpp" />
     <ClCompile Include="Engine\CompanionEventLog.cpp" />
+    <ClCompile Include="Engine\CompanionPerceptionLogCore.cpp" />
+    <ClCompile Include="Engine\CompanionPerceptionLog.cpp" />
     <ClCompile Include="Engine\CompanionSnapshot.cpp" />
     <ClCompile Include="Engine\CompanionSnapshotExportCore.cpp" />
     <ClCompile Include="Engine\CompanionSnapshotTerrain.cpp" />
@@ -425,6 +427,8 @@
     <ClCompile Include="Engine\CompanionSnapshotTerrainPacked.cpp" />
     <ClCompile Include="Engine\CompanionBriefingRequest.cpp" />
     <ClCompile Include="Engine\CompanionBriefingRequestCore.cpp" />
+    <ClCompile Include="Engine\CompanionBaseIntelligenceExportCore.cpp" />
+    <ClCompile Include="Engine\CompanionBaseIntelligenceExport.cpp" />
     <ClCompile Include="Engine\CompanionCommandCore.cpp" />
     <ClCompile Include="Engine\CompanionCommandRuntime.cpp" />
     <ClCompile Include="Engine\CompanionCommandRuntimeSupport.cpp" />
@@ -753,9 +757,13 @@
     <ClInclude Include="Engine\CatFile.h" />
     <ClInclude Include="Engine\CrossPlatform.h" />
     <ClInclude Include="Engine\CompanionEventLog.h" />
+    <ClInclude Include="Engine\CompanionPerceptionLog.h" />
+    <ClInclude Include="Engine\CompanionPerceptionLogCore.h" />
     <ClInclude Include="Engine\CompanionSnapshot.h" />
     <ClInclude Include="Engine\CompanionSnapshotTerrain.h" />
     <ClInclude Include="Engine\CompanionBriefingRequest.h" />
+    <ClInclude Include="Engine\CompanionBaseIntelligenceExportCore.h" />
+    <ClInclude Include="Engine\CompanionBaseIntelligenceExport.h" />
     <ClInclude Include="Engine\CompanionSha256.h" />
     <ClInclude Include="Engine\CompanionBriefingTestSupport.h" />
     <ClInclude Include="Engine\DosFont.h" />

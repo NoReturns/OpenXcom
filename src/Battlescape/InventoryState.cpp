@@ -47,6 +47,9 @@
 #include "TileEngine.h"
 #include "../Mod/RuleInterface.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
+#include "../Engine/CompanionBattlescapeOwnershipCore.h"
+#include "../Interface/TextButton.h"
+#include "CompanionSquadOwnershipState.h"
 
 namespace OpenXcom
 {
@@ -77,8 +80,10 @@ bool InventoryState::_warnIfInventoryMutationDenied() const
 }
 
 static const int _templateBtnX = 288;
-static const int _createTemplateBtnY = 90;
-static const int _applyTemplateBtnY  = 113;
+static const int _createTemplateBtnY = 79;
+static const int _applyTemplateBtnY  = 101;
+static const int _companionSquadBtnX = 289;
+static const int _companionSquadBtnY = 124;
 
 /**
  * Initializes all the elements in the Inventory screen.
@@ -122,6 +127,7 @@ InventoryState::InventoryState(bool tu, BattlescapeState *parent) : _tu(tu), _pa
 	_btnRank = new BattlescapeButton(26, 23, 0, 0);
 	_btnCreateTemplate = new BattlescapeButton(32, 22, _templateBtnX, _createTemplateBtnY);
 	_btnApplyTemplate = new BattlescapeButton(32, 22, _templateBtnX, _applyTemplateBtnY);
+	_btnCompanionSquad = new TextButton(32, 12, _companionSquadBtnX, _companionSquadBtnY);
 	_selAmmo = new Surface(RuleInventory::HAND_W * RuleInventory::SLOT_W, RuleInventory::HAND_H * RuleInventory::SLOT_H, 272, 88);
 	_inv = new Inventory(_game, 320, 200, 0, 0, _parent == 0);
 
@@ -151,6 +157,7 @@ InventoryState::InventoryState(bool tu, BattlescapeState *parent) : _tu(tu), _pa
 	add(_btnRank, "rank", "inventory", _bg);
 	add(_btnCreateTemplate, "buttonCreate", "inventory", _bg);
 	add(_btnApplyTemplate, "buttonApply", "inventory", _bg);
+	add(_btnCompanionSquad, "button", "battlescape", _bg);
 	add(_selAmmo);
 	add(_inv);
 
@@ -212,6 +219,12 @@ InventoryState::InventoryState(bool tu, BattlescapeState *parent) : _tu(tu), _pa
 	_btnGround->setTooltip("STR_SCROLL_RIGHT");
 	_btnGround->onMouseIn((ActionHandler)&InventoryState::txtTooltipIn);
 	_btnGround->onMouseOut((ActionHandler)&InventoryState::txtTooltipOut);
+
+	_btnCompanionSquad->setText(tr("STR_COMPANION_SQUAD_PANEL_BTN"));
+	_btnCompanionSquad->setTooltip("STR_COMPANION_SQUAD_OWNERSHIP");
+	_btnCompanionSquad->onMouseClick((ActionHandler)&InventoryState::btnCompanionSquadClick);
+	_btnCompanionSquad->onMouseIn((ActionHandler)&InventoryState::txtTooltipIn);
+	_btnCompanionSquad->onMouseOut((ActionHandler)&InventoryState::txtTooltipOut);
 
 	_btnRank->onMouseClick((ActionHandler)&InventoryState::btnRankClick);
 	_btnRank->setTooltip("STR_UNIT_STATS");
@@ -339,6 +352,7 @@ void InventoryState::init()
 
 	_txtName->setBig();
 	_txtName->setText(unit->getName(_game->getLanguage()));
+	refreshCompanionOwnershipDisplay();
 	_inv->setSelectedUnit(unit);
 	Soldier *s = unit->getGeoscapeSoldier();
 	if (s)
@@ -582,6 +596,58 @@ void InventoryState::btnUnloadClick(Action *)
 void InventoryState::btnGroundClick(Action *)
 {
 	_inv->arrangeGround();
+}
+
+void InventoryState::btnCompanionSquadClick(Action *)
+{
+	if (_parent == 0)
+	{
+		return;
+	}
+	SavedGame *campaign = _battleGame->getGeoscapeSave();
+	if (campaign == 0)
+	{
+		return;
+	}
+	BattlescapeGame *liveGame = _parent->getBattleGame();
+	liveGame->cancelAllActions();
+	_game->pushState(new CompanionSquadOwnershipState(
+		_parent,
+		_battleGame,
+		campaign,
+		liveGame,
+		this));
+}
+
+void InventoryState::refreshCompanionOwnershipDisplay()
+{
+	if (_btnCompanionSquad != 0)
+	{
+		SavedGame *campaign = _game->getSavedGame();
+		_btnCompanionSquad->setVisible(
+			CompanionBattlescapeOwnershipCore::shouldShowCompanionSquadInventoryButton(
+				_parent, campaign, _battleGame->isBeforeGame()));
+	}
+	BattleUnit *unit = _battleGame->getSelectedUnit();
+	if (unit == 0)
+	{
+		return;
+	}
+	SavedGame *campaign = _battleGame->getGeoscapeSave();
+	if (campaign == 0 ||
+	    !CompanionBattlescapeOwnershipCore::isDeployedRosterSoldierUnit(unit, campaign))
+	{
+		_txtName->setColor(
+			CompanionBattlescapeOwnershipCore::defaultBattlescapeSoldierNameColor(_game->getMod()));
+		return;
+	}
+	const CompanionSoldierOwnershipCore::SoldierControlMode mode =
+		CompanionBattlescapeOwnershipCore::effectiveTacticalOwner(
+			_battleGame,
+			unit->getId(),
+			campaign->isLiveRosterSoldier(unit->getId()));
+	_txtName->setColor(CompanionBattlescapeOwnershipCore::soldierNameColorForEffectiveOwner(
+		_game->getMod(), mode));
 }
 
 /**

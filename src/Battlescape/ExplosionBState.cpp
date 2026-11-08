@@ -17,6 +17,7 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "../Engine/CompanionPerceptionLog.h"
 #include "ExplosionBState.h"
 #include "BattlescapeState.h"
 #include "Explosion.h"
@@ -134,6 +135,12 @@ void ExplosionBState::init()
 			else
 				_parent->getMod()->getSoundByDepth(_parent->getDepth(), Mod::LARGE_EXPLOSION)->play();
 
+			if (t != 0)
+			{
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordExplosionObservedOrHeard(
+					_parent->getSave(), t->getPosition(), true);
+			}
+
 			_parent->getMap()->getCamera()->centerOnPosition(t->getPosition(), false);
 		}
 		else
@@ -169,6 +176,17 @@ void ExplosionBState::init()
 		{
 			// bullet hit sound
 			_parent->getMod()->getSoundByDepth(_parent->getDepth(), sound)->play(-1, _parent->getMap()->getSoundAngle(_center / Position(16,16,24)));
+		}
+		if (!_cosmetic && t != 0)
+		{
+			const bool companionRecordsFirearmTileImpact = _item != 0
+				&& _item->getRules()->getBattleType() == BT_FIREARM
+				&& _item->getRules()->getExplosionRadius() == 0;
+			if (!companionRecordsFirearmTileImpact)
+			{
+				_parent->getSave()->getCompanionPerceptionLog().tryRecordImpactObserved(
+					_parent->getSave(), t->getPosition(), sound != -1);
+			}
 		}
 	}
 }

@@ -36,7 +36,24 @@ enum RelayUiPhase
 	RELAY_UI_RETRIEVING,
 	RELAY_UI_COMPLETED,
 	RELAY_UI_NO_NEW_ORDERS,
-	RELAY_UI_RETRIEVE_FAILED
+	RELAY_UI_RETRIEVE_FAILED,
+	RELAY_UI_MANUAL_UPLOAD_REQUIRED,
+	RELAY_UI_DEFERRED,
+	RELAY_UI_UNKNOWN
+};
+
+struct RelayStatusView
+{
+	std::string request_id;
+	std::string action;
+	std::string phase;
+	std::string outcome;
+	std::string error_code;
+	bool terminal;
+	bool parsed;
+	long long updated_at_ms;
+
+	RelayStatusView();
 };
 
 long long companionWallClockMs();
@@ -45,12 +62,16 @@ bool resolveRelayDir(std::string *outDir);
 bool resolveRequestPath(std::string *outPath);
 bool resolveStatusPath(std::string *outPath);
 bool readStatusPhase(const std::string &statusJson, std::string *outPhase, bool *outTerminal);
+bool parseRelayStatusJson(const std::string &statusJson, RelayStatusView *out);
+bool shouldAcceptRelayStatusUpdate(const RelayStatusView &existing, const RelayStatusView &incoming, bool hasExisting);
 RelayUiPhase mapPhaseString(const std::string &phase, const std::string &action);
+RelayUiPhase mapStatusViewToUiPhase(const RelayStatusView &status);
 bool isRelayBusyPhase(RelayUiPhase phase);
 bool tryEnqueueAction(const char *action, std::string *outRequestId, std::string *outError);
 bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 	std::string *outRequestId, std::string *outError);
 void formatStatusLabel(RelayUiPhase phase, std::string *out);
+void formatRelayStatusLabel(const RelayStatusView &status, std::string *out);
 bool relayControlRectHitTest(int absX, int absY, int rectX, int rectY, int rectW, int rectH, bool visible);
 RelayControlHit relayControlHitTarget(int absX, int absY,
 	int sendX, int sendY, int sendW, int sendH, bool sendVisible,

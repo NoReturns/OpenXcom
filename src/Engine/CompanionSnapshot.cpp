@@ -2,30 +2,44 @@
  * Open X-Com Companion — read-only battlescape snapshot export (opt-in).
  */
 #include "CompanionSnapshot.h"
+#include "CompanionSnapshotBuild.h"
 #include "CompanionCommandRuntime.h"
+#include "CompanionRelayPublicationFreshnessCore.h"
 #include "CompanionCommandRuntimeSupport.h"
 #include "CompanionSnapshotExportCore.h"
+#include "CompanionManualV5Export.h"
 #include "CompanionSoldierControlPublishCore.h"
 #include "CompanionBriefingTestSupport.h"
 #include "CompanionSnapshotTerrain.h"
+#include "CompanionSnapshotMissionContext.h"
+#include "CompanionSnapshotUnitState.h"
+#include "CompanionSnapshotGroundItems.h"
+#include "CompanionGroundInventoryCore.h"
 #include "CompanionSha256.h"
 #include "CompanionEventLog.h"
+#include "CompanionPerceptionLog.h"
+#include "CompanionPerceptionLogCore.h"
 #include "../Savegame/Tile.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/Soldier.h"
 #include "../Savegame/SavedGame.h"
+#include "../Battlescape/BattlescapeState.h"
+#include "../Engine/Game.h"
+#include "../Mod/Mod.h"
 #include "../Battlescape/BattlescapeGame.h"
 #include "../Mod/RuleInventory.h"
 #include "../Mod/RuleItem.h"
 #include "CrossPlatform.h"
 #include "Logger.h"
 #include <yaml-cpp/yaml.h>
+#include <chrono>
 #include <cstdlib>
 #include <string>
 #include <algorithm>
 #include <vector>
+#include <cmath>
 
 namespace OpenXcom
 {
@@ -36,6 +50,7 @@ namespace
 const int SCHEMA_VERSION_V4 = 4;
 const int SCHEMA_VERSION_V5 = 5;
 const size_t MAX_INVENTORY_ENTRIES = 24;
+const size_t MAX_GROUND_INVENTORY_ENTRIES_PER_UNIT = 16;
 
 #ifdef _WIN32
 const char kControlPathSep = '\\';
@@ -50,6 +65,21 @@ std::string joinControlPath(const std::string &dir, const char *name)
 		return std::string(name);
 	}
 	return dir + kControlPathSep + name;
+}
+
+Mod *modFromBattle(SavedBattleGame *battle)
+{
+	if (battle == 0)
+	{
+		return 0;
+	}
+	BattlescapeState *state = battle->getBattleState();
+	if (state != 0 && state->getGame() != 0)
+	{
+		return state->getGame()->getMod();
+	}
+	// Unit/integration tests (and some headless fixtures) use SavedBattleGame::setTestMod only.
+	return battle->getTestMod();
 }
 
 bool isPublishableLivePlayerSoldier(const BattleUnit *unit, const SavedGame *campaign)
@@ -132,17 +162,18 @@ bool tryPublishSoldierControlBesideSnapshot(
 	return true;
 }
 
-bool shouldIncludeUnit(const BattleUnit *unit)
+SavedGame *campaignFromBattle(SavedBattleGame *battle)
 {
-	if (unit == 0 || unit->isOut())
+	if (battle == 0)
 	{
-		return false;
+		return 0;
 	}
-	if (unit->getFaction() == FACTION_PLAYER)
+	BattlescapeState *state = battle->getBattleState();
+	if (state == 0 || state->getGame() == 0)
 	{
-		return true;
+		return 0;
 	}
-	return unit->getVisible();
+	return state->getGame()->getSavedGame();
 }
 
 bool exportFriendlyTacticalDetails(const BattleUnit *unit)
@@ -198,15 +229,28 @@ void appendFirearmAmmoState(YAML::Node &entry, BattleItem *item)
 	}
 
 	BattleItem *ammo = item->getAmmoItem();
-	if (ammo == 0 || ammo->getAmmoQuantity() == 0)
+	if (ammo == 0)
+	{
+		// Distinguish "no magazine inserted" from "magazine present but dry".
+		entry["noMagazineInserted"] = true;
+		return;
+	}
+
+	if (ammo->getAmmoQuantity() == 0)
 	{
 		entry["empty"] = true;
+		YAML::Node loaded;
+		loaded["ammoType"] = ammo->getRules()->getType();
+		loaded["rounds"] = 0;
+		loaded["battleItemId"] = ammo->getId();
+		entry["loaded"] = loaded;
 		return;
 	}
 
 	YAML::Node loaded;
 	loaded["ammoType"] = ammo->getRules()->getType();
 	loaded["rounds"] = ammo->getAmmoQuantity();
+	loaded["battleItemId"] = ammo->getId();
 	entry["loaded"] = loaded;
 }
 
@@ -219,33 +263,139 @@ void appendGrenadeState(YAML::Node &entry, BattleItem *item)
 	const BattleType bt = item->getRules()->getBattleType();
 	if (bt == BT_GRENADE || bt == BT_PROXIMITYGRENADE)
 	{
-		entry["primed"] = item->getFuseTimer() >= 0;
+		entry["explosiveKind"] = bt == BT_PROXIMITYGRENADE ? "proximity" : "timed";
+		const int fuse = item->getFuseTimer();
+		entry["primed"] = fuse >= 0;
+		if (fuse >= 0)
+		{
+			entry["fuseTimer"] = fuse;
+		}
 	}
 }
 
-YAML::Node buildEquipmentItemNode(BattleItem *item)
+const char *inventorySlotTypeName(InventoryType t)
+{
+	switch (t)
+	{
+	case INV_HAND: return "hand";
+	case INV_GROUND: return "ground";
+	default: return "slot";
+	}
+}
+
+/// Export nested ammunition instance for a firearm without duplicating that magazine in inventory[].
+void appendNestedLoadedMagazine(YAML::Node &entry, BattleItem *weapon)
+{
+	if (weapon == 0 || !isFirearmWithChamberedAmmo(weapon))
+	{
+		return;
+	}
+	BattleItem *ammo = weapon->getAmmoItem();
+	if (ammo == 0)
+	{
+		return;
+	}
+	YAML::Node nested;
+	nested["battleItemId"] = ammo->getId();
+	nested["ammoType"] = ammo->getRules()->getType();
+	nested["rounds"] = ammo->getAmmoQuantity();
+	entry["nestedAmmo"] = nested;
+}
+
+void appendMedikitConsumables(YAML::Node &entry, BattleItem *item)
+{
+	if (item == 0 || item->getRules()->getBattleType() != BT_MEDIKIT)
+	{
+		return;
+	}
+	entry["medikitCharges"] = YAML::Node(YAML::NodeType::Map);
+	entry["medikitCharges"]["heal"] = item->getHealQuantity();
+	entry["medikitCharges"]["painKiller"] = item->getPainKillerQuantity();
+	entry["medikitCharges"]["stimulant"] = item->getStimulantQuantity();
+}
+
+void appendItemPlacement(YAML::Node &entry, BattleItem *item, const char *handSlotId)
+{
+	if (item == 0 || item->getSlot() == 0)
+	{
+		return;
+	}
+	RuleInventory *slot = item->getSlot();
+	entry["inventorySlotType"] = inventorySlotTypeName(slot->getType());
+	if (handSlotId != 0)
+	{
+		entry["slot"] = std::string(handSlotId);
+		if (std::string(handSlotId) == "STR_RIGHT_HAND")
+		{
+			entry["hand"] = "right";
+		}
+		else if (std::string(handSlotId) == "STR_LEFT_HAND")
+		{
+			entry["hand"] = "left";
+		}
+	}
+	else
+	{
+		entry["slot"] = slot->getId();
+	}
+	if (slot->getType() == INV_SLOT)
+	{
+		entry["inventoryX"] = item->getSlotX();
+		entry["inventoryY"] = item->getSlotY();
+	}
+}
+
+YAML::Node buildEquipmentItemNode(BattleItem *item, BattleUnit *unit, const char *handSlotId)
 {
 	YAML::Node entry;
+	entry["battleItemId"] = item->getId();
 	entry["itemType"] = item->getRules()->getType();
 	entry["battleType"] = static_cast<int>(item->getRules()->getBattleType());
+	appendItemPlacement(entry, item, handSlotId);
+	appendNestedLoadedMagazine(entry, item);
 	appendFirearmAmmoState(entry, item);
 	appendGrenadeState(entry, item);
+	appendMedikitConsumables(entry, item);
+	(void)unit;
 	return entry;
 }
 
-YAML::Node buildHandSlotNode(BattleItem *item)
+YAML::Node buildHandSlotNode(BattleItem *item, BattleUnit *unit, const char *handSlotId)
 {
 	if (item == 0)
 	{
 		return nullNode();
 	}
-	return buildEquipmentItemNode(item);
+	return buildEquipmentItemNode(item, unit, handSlotId);
+}
+
+bool isItemContiguousInNestedWeaponMagazine(BattleUnit *unit, BattleItem *item)
+{
+	if (unit == 0 || item == 0 || !item->isAmmo())
+	{
+		return false;
+	}
+	for (std::vector<BattleItem*>::iterator i = unit->getInventory()->begin();
+	     i != unit->getInventory()->end(); ++i)
+	{
+		BattleItem *w = *i;
+		if (w == 0 || w->getRules()->getBattleType() != BT_FIREARM || !w->needsAmmo())
+		{
+			continue;
+		}
+		BattleItem *loaded = w->getAmmoItem();
+		if (loaded != 0 && loaded->getId() == item->getId())
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void appendInventoryEntries(YAML::Node &inventory, BattleUnit *unit)
 {
 	size_t count = 0;
-	for (std::vector<BattleItem*>::const_iterator i = unit->getInventory()->begin();
+	for (std::vector<BattleItem*>::iterator i = unit->getInventory()->begin();
 		i != unit->getInventory()->end() && count < MAX_INVENTORY_ENTRIES; ++i)
 	{
 		BattleItem *item = *i;
@@ -257,31 +407,149 @@ void appendInventoryEntries(YAML::Node &inventory, BattleUnit *unit)
 		{
 			continue;
 		}
+		if (isItemContiguousInNestedWeaponMagazine(unit, item))
+		{
+			continue;
+		}
 
 		YAML::Node entry;
+		entry["battleItemId"] = item->getId();
 		entry["slot"] = item->getSlot()->getId();
+		entry["inventorySlotType"] = inventorySlotTypeName(item->getSlot()->getType());
+		if (item->getSlot()->getType() == INV_SLOT)
+		{
+			entry["inventoryX"] = item->getSlotX();
+			entry["inventoryY"] = item->getSlotY();
+		}
 		entry["itemType"] = item->getRules()->getType();
 		entry["battleType"] = static_cast<int>(item->getRules()->getBattleType());
+		appendNestedLoadedMagazine(entry, item);
 		appendFirearmAmmoState(entry, item);
 		appendGrenadeState(entry, item);
+		appendMedikitConsumables(entry, item);
 		inventory.push_back(entry);
 		++count;
 	}
 }
 
-void appendFriendlyEquipment(YAML::Node &entry, BattleUnit *unit)
+void appendCarriedWeightEncumbrance(YAML::Node &entry, BattleUnit *unit)
+{
+	if (unit == 0)
+	{
+		return;
+	}
+	const int carried = unit->getCarriedWeight(0);
+	entry["carriedWeight"] = carried;
+	UnitStats *stats = unit->getBaseStats();
+	if (stats != 0)
+	{
+		entry["strength"] = stats->strength;
+		if (carried > 0)
+		{
+			entry["encumbranceRatio"] = static_cast<double>(stats->strength) / static_cast<double>(carried);
+		}
+	}
+}
+
+void appendActorGroundInventory(YAML::Node &entry, SavedBattleGame *battle, SavedGame *campaign, BattleUnit *unit)
+{
+	if (battle == 0 || unit == 0)
+	{
+		return;
+	}
+	Mod *mod = modFromBattle(battle);
+	if (mod == 0)
+	{
+		return;
+	}
+	Tile *tile = unit->getTile();
+	if (tile == 0 || tile->isVoid() || !tile->isDiscovered(2))
+	{
+		return;
+	}
+	RuleInventory *groundRule = mod->getInventory("STR_GROUND", true);
+	if (groundRule == 0)
+	{
+		return;
+	}
+	// Export uses each item's engine grid coordinates on STR_GROUND (set by gameplay / drop placement).
+	// Do not re-run ground rearrangement here: it duplicates Inventory::arrangeGround cost paths and test
+	// fixtures may place minimal tile sets without full battlescape inventory context.
+
+	std::vector<BattleItem*> groundItems;
+	for (std::vector<BattleItem*>::const_iterator i = tile->getInventory()->begin();
+	     i != tile->getInventory()->end(); ++i)
+	{
+		BattleItem *item = *i;
+		if (item == 0 || item->getSlot() == 0 || item->getSlot()->getType() != INV_GROUND)
+		{
+			continue;
+		}
+		if (item->isAmmo() && item->getSlot() == 0)
+		{
+			continue;
+		}
+		groundItems.push_back(item);
+	}
+	std::sort(groundItems.begin(), groundItems.end(), [](BattleItem *a, BattleItem *b) {
+		if (a->getSlotY() != b->getSlotY())
+		{
+			return a->getSlotY() < b->getSlotY();
+		}
+		if (a->getSlotX() != b->getSlotX())
+		{
+			return a->getSlotX() < b->getSlotX();
+		}
+		return a->getId() < b->getId();
+	});
+
+	YAML::Node groundSeq = YAML::Node(YAML::NodeType::Sequence);
+	size_t exported = 0;
+	for (std::vector<BattleItem*>::const_iterator i = groundItems.begin();
+	     i != groundItems.end() && exported < MAX_GROUND_INVENTORY_ENTRIES_PER_UNIT; ++i)
+	{
+		BattleItem *item = *i;
+		if (item->getRules() == 0)
+		{
+			continue;
+		}
+		YAML::Node row;
+		row["battleItemId"] = item->getId();
+		row["itemType"] = item->getRules()->getType();
+		row["battleType"] = static_cast<int>(item->getRules()->getBattleType());
+		row["slot"] = std::string("STR_GROUND");
+		row["inventorySlotType"] = std::string("ground");
+		row["inventoryX"] = item->getSlotX();
+		row["inventoryY"] = item->getSlotY();
+		appendNestedLoadedMagazine(row, item);
+		appendFirearmAmmoState(row, item);
+		appendGrenadeState(row, item);
+		appendMedikitConsumables(row, item);
+		(void)campaign;
+		groundSeq.push_back(row);
+		++exported;
+	}
+	if (!groundSeq.IsNull() && groundSeq.size() > 0U)
+	{
+		entry["groundInventory"] = groundSeq;
+	}
+}
+
+void appendFriendlyEquipment(YAML::Node &entry, SavedBattleGame *battle, SavedGame *campaign, BattleUnit *unit)
 {
 	entry["kneeled"] = CompanionCommandRuntimeSupport::exportKneeledSnapshotField(unit->isKneeled());
 	entry["activeHand"] = unit->getActiveHand();
 
 	YAML::Node hands;
-	hands["right"] = buildHandSlotNode(unit->getItem("STR_RIGHT_HAND"));
-	hands["left"] = buildHandSlotNode(unit->getItem("STR_LEFT_HAND"));
+	hands["right"] = buildHandSlotNode(unit->getItem("STR_RIGHT_HAND"), unit, "STR_RIGHT_HAND");
+	hands["left"] = buildHandSlotNode(unit->getItem("STR_LEFT_HAND"), unit, "STR_LEFT_HAND");
 	entry["hands"] = hands;
 
 	YAML::Node inventory = YAML::Node(YAML::NodeType::Sequence);
 	appendInventoryEntries(inventory, unit);
 	entry["inventory"] = inventory;
+	appendCarriedWeightEncumbrance(entry, unit);
+	appendActorGroundInventory(entry, battle, campaign, unit);
 }
 
 bool companionEnvironmentUsable(SavedBattleGame *battle, BattleItem *weapon)
@@ -411,7 +679,7 @@ void appendFriendlyActionCosts(YAML::Node &entry, SavedBattleGame *battle, Battl
 	entry["actionCosts"] = costs;
 }
 
-void appendUnit(YAML::Node &units, SavedBattleGame *battle, BattleUnit *unit)
+void appendUnit(YAML::Node &units, SavedBattleGame *battle, SavedGame *campaign, BattleUnit *unit)
 {
 	YAML::Node entry;
 	entry["id"] = unit->getId();
@@ -424,8 +692,18 @@ void appendUnit(YAML::Node &units, SavedBattleGame *battle, BattleUnit *unit)
 		entry["name"] = friendlySoldierDisplayName(unit);
 		entry["health"] = unit->getHealth();
 		entry["timeUnits"] = unit->getTimeUnits();
-		appendFriendlyEquipment(entry, unit);
-		appendFriendlyActionCosts(entry, battle, unit);
+		appendFriendlyEquipment(entry, battle, campaign, unit);
+		if (!unit->isOut())
+		{
+			appendFriendlyActionCosts(entry, battle, unit);
+		}
+		CompanionSnapshotUnitState::appendFacing(entry, unit);
+		CompanionSnapshotUnitState::appendFriendlyCondition(entry, unit);
+		CompanionSnapshotUnitState::appendFriendlyReadiness(entry, unit, campaign);
+	}
+	else
+	{
+		CompanionSnapshotUnitState::appendVisibleHostileObservations(entry, unit);
 	}
 
 	units.push_back(entry);
@@ -477,7 +755,150 @@ void appendEventLog(YAML::Node &root, const CompanionEventLog &log)
 	root["eventLog"] = eventLog;
 }
 
-YAML::Node buildSnapshot(SavedBattleGame *battle, int schemaVersion, bool includeTerrain)
+static BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId)
+{
+	if (battle == 0 || unitId < 0)
+	{
+		return 0;
+	}
+	for (std::vector<BattleUnit*>::iterator i = battle->getUnits()->begin(); i != battle->getUnits()->end(); ++i)
+	{
+		if ((*i)->getId() == unitId)
+		{
+			return *i;
+		}
+	}
+	return 0;
+}
+
+static bool isFriendlyPlayerControlledUnit(const BattleUnit *unit)
+{
+	return unit != 0 && unit->getFaction() == FACTION_PLAYER && unit->getOriginalFaction() == FACTION_PLAYER;
+}
+
+static bool shouldExportObserverUnitId(
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	const CompanionPerceptionEvent &event)
+{
+	if (!CompanionPerceptionLogCore::shouldExportObserverAttribution(event.positionKnown, event.hasObserverUnitId))
+	{
+		return false;
+	}
+	BattleUnit *observer = findBattleUnitById(battle, event.observerUnitId);
+	if (!isFriendlyPlayerControlledUnit(observer))
+	{
+		return false;
+	}
+	return CompanionSnapshotUnitState::shouldIncludeUnitInSnapshot(observer, campaign);
+}
+
+static std::string resolvePerceptionLogSessionId(const CompanionPerceptionLog &log, SavedBattleGame *battle)
+{
+	const std::string &perceptionSessionId = log.getSessionId();
+	if (!perceptionSessionId.empty())
+	{
+		return perceptionSessionId;
+	}
+	if (battle != 0)
+	{
+		const std::string &eventSessionId = battle->getCompanionEventLog().getSessionId();
+		if (!eventSessionId.empty())
+		{
+			return eventSessionId;
+		}
+	}
+	return perceptionSessionId;
+}
+
+void appendPerceptionLog(YAML::Node &root, const CompanionPerceptionLog &log, SavedBattleGame *battle, SavedGame *campaign)
+{
+	YAML::Node perceptionLog;
+	perceptionLog["sessionId"] = resolvePerceptionLogSessionId(log, battle);
+	perceptionLog["oldestSeq"] = log.getOldestSeq();
+	perceptionLog["latestSeq"] = log.getLatestSeq();
+	perceptionLog["droppedCount"] = log.getDroppedCount();
+
+	YAML::Node events(YAML::NodeType::Sequence);
+	for (std::vector<CompanionPerceptionEvent>::const_iterator i = log.getEvents().begin();
+	     i != log.getEvents().end(); ++i)
+	{
+		YAML::Node ev;
+		ev["seq"] = i->seq;
+		ev["type"] = i->type;
+		ev["turn"] = i->turn;
+		ev["perceptionChannel"] = i->perceptionChannel;
+		ev["confidence"] = i->confidence;
+		ev["positionKnown"] = i->positionKnown;
+		if (i->positionKnown)
+		{
+			ev["position"] = i->position;
+		}
+		if (shouldExportObserverUnitId(battle, campaign, *i))
+		{
+			ev["observerUnitId"] = i->observerUnitId;
+		}
+		const bool psychEvent = CompanionPerceptionLogCore::isPsychologicalPerceptionEventType(i->type.c_str());
+		const bool combatCasualtyEvent = CompanionPerceptionLogCore::isCombatCasualtyPerceptionEventType(i->type.c_str());
+		const bool exportSubject =
+			i->hasSubjectUnitId && i->type != "door_sound_heard" && i->type != "projectile_direction_observed"
+			&& i->type != "hostile_casualty_tile_observed";
+		if (exportSubject)
+		{
+			ev["subjectUnitId"] = i->subjectUnitId;
+		}
+		if ((psychEvent || combatCasualtyEvent) && !i->subjectName.empty())
+		{
+			ev["subjectName"] = i->subjectName;
+		}
+		if (!i->compassDirection.empty())
+		{
+			ev["compassDirection"] = i->compassDirection;
+		}
+		if (!i->travelDirection.empty())
+		{
+			ev["travelDirection"] = i->travelDirection;
+		}
+		if (!i->incomingBearing.empty())
+		{
+			ev["incomingBearing"] = i->incomingBearing;
+		}
+		events.push_back(ev);
+	}
+	perceptionLog["events"] = events;
+
+	YAML::Node rosterCasualtySummary;
+	rosterCasualtySummary["schemaVersion"] = 1;
+	YAML::Node ledgerEntries(YAML::NodeType::Sequence);
+	for (std::map<int, RosterCasualtyLedgerEntry>::const_iterator i = log.getRosterCasualtyLedger().begin();
+	     i != log.getRosterCasualtyLedger().end()
+	     && ledgerEntries.size() < CompanionPerceptionLogCore::MAX_ROSTER_CASUALTY_LEDGER_ENTRIES;
+	     ++i)
+	{
+		YAML::Node row;
+		row["subjectUnitId"] = i->second.subjectUnitId;
+		row["episodeSerial"] = i->second.episodeSerial;
+		row["status"] = i->second.status;
+		row["turn"] = i->second.turn;
+		row["positionKnown"] = i->second.positionKnown;
+		if (i->second.positionKnown)
+		{
+			row["position"] = i->second.position;
+		}
+		if (!i->second.subjectName.empty())
+		{
+			row["subjectName"] = i->second.subjectName;
+		}
+		ledgerEntries.push_back(row);
+	}
+	rosterCasualtySummary["entries"] = ledgerEntries;
+	perceptionLog["rosterCasualtySummary"] = rosterCasualtySummary;
+
+	root["perceptionLog"] = perceptionLog;
+}
+
+YAML::Node buildSnapshotImpl(SavedBattleGame *battle, SavedGame *campaign, int schemaVersion, bool includeTerrain,
+	bool testFullRevealGeometry)
 {
 	YAML::Node root;
 	root["schemaVersion"] = schemaVersion;
@@ -492,33 +913,63 @@ YAML::Node buildSnapshot(SavedBattleGame *battle, int schemaVersion, bool includ
 	map["depth"] = battle->getMapSizeZ();
 	root["map"] = map;
 
+	Mod *mod = modFromBattle(battle);
+	CompanionSnapshotMissionContext::appendMissionContext(root, battle, mod);
+
 	if (includeTerrain)
 	{
 		const int mapW = battle->getMapSizeX();
 		const int mapH = battle->getMapSizeY();
 		const int mapD = battle->getMapSizeZ();
-		CompanionSnapshotTerrain::appendTerrain(root, mapW, mapH, mapD,
+		CompanionSnapshotTerrain::appendTerrain(root, mapW, mapH, mapD, battle, mod,
 			[battle](int x, int y, int z) -> Tile * {
 				return battle->getTile(Position(x, y, z));
-			});
+			},
+			testFullRevealGeometry);
 	}
 
 	YAML::Node units = YAML::Node(YAML::NodeType::Sequence);
 	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin(); i != battle->getUnits()->end(); ++i)
 	{
 		BattleUnit *unit = *i;
-		if (!shouldIncludeUnit(unit))
+		if (!CompanionSnapshotUnitState::shouldIncludeUnitInSnapshot(unit, campaign))
 		{
 			continue;
 		}
-		appendUnit(units, battle, unit);
+		appendUnit(units, battle, campaign, unit);
 	}
 	root["units"] = units;
 	appendEventLog(root, battle->getCompanionEventLog());
+	appendPerceptionLog(root, battle->getCompanionPerceptionLog(), battle, campaign);
+	CompanionSnapshotGroundItems::appendGroundItems(root, battle, campaign);
 	return root;
 }
 
 } // namespace
+
+YAML::Node CompanionSnapshotBuild::buildSnapshot(
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	int schemaVersion,
+	bool includeTerrain,
+	bool testFullRevealGeometry)
+{
+	if (battle == 0)
+	{
+		return YAML::Node();
+	}
+	SavedGame *resolvedCampaign = campaign;
+	if (resolvedCampaign == 0)
+	{
+		resolvedCampaign = campaignFromBattle(battle);
+	}
+	return buildSnapshotImpl(battle, resolvedCampaign, schemaVersion, includeTerrain, testFullRevealGeometry);
+}
+
+std::string CompanionSnapshotBuild::serializeSnapshotYaml(const YAML::Node &root)
+{
+	return CompanionSnapshotExportCore::serializeSnapshotYaml(root);
+}
 
 bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256)
 {
@@ -543,10 +994,12 @@ bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnaps
 		return false;
 	}
 
-	const YAML::Node schemaV5 = buildSnapshot(battle, SCHEMA_VERSION_V5, true);
+	SavedGame *campaign = battle->getGeoscapeSave();
+	const YAML::Node schemaV5 = CompanionSnapshotBuild::buildSnapshot(battle, campaign, SCHEMA_VERSION_V5, true);
+	const std::string v5YamlUtf8 = CompanionSnapshotExportCore::serializeSnapshotYaml(schemaV5);
 	const CompanionSnapshotExportCore::ResolvedSnapshot resolved =
-		CompanionSnapshotExportCore::resolveSnapshotForSizeCap(schemaV5, [&battle]() {
-			return buildSnapshot(battle, SCHEMA_VERSION_V4, false);
+		CompanionSnapshotExportCore::resolveSnapshotForSizeCap(schemaV5, [&battle, campaign]() {
+			return CompanionSnapshotBuild::buildSnapshot(battle, campaign, SCHEMA_VERSION_V4, false);
 		});
 
 	if (!resolved.ok)
@@ -564,22 +1017,20 @@ bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnaps
 			<< resolved.v4FallbackBytes << " bytes)";
 	}
 
+	std::string exportDigest;
 	if (outSnapshotSha256 != 0)
 	{
 		if (!CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, outSnapshotSha256))
 		{
 			return false;
 		}
-		CompanionCommandRuntime::noteSnapshotExportSha256(*outSnapshotSha256);
-		CompanionCommandRuntime::noteSnapshotExportStateVersion(battle->getCompanionEventLog().getLatestSeq());
+		exportDigest = *outSnapshotSha256;
 	}
 	else
 	{
-		std::string digest;
-		if (CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, &digest))
+		if (!CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, &exportDigest))
 		{
-			CompanionCommandRuntime::noteSnapshotExportSha256(digest);
-			CompanionCommandRuntime::noteSnapshotExportStateVersion(battle->getCompanionEventLog().getLatestSeq());
+			return false;
 		}
 	}
 
@@ -587,6 +1038,15 @@ bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnaps
 	{
 		return false;
 	}
+
+	CompanionCommandRuntime::noteSnapshotExportSha256(exportDigest);
+	const int exportSeq = battle->getCompanionEventLog().getLatestSeq();
+	CompanionCommandRuntime::noteSnapshotExportStateVersion(exportSeq);
+	CompanionRelayPublicationFreshnessCore::noteSnapshotExportBinding(
+		exportSeq,
+		exportDigest,
+		battle->getCompanionEventLog().getSessionId(),
+		battle->getTurn());
 
 	std::string archiveDigest;
 	if (outSnapshotSha256 != 0 && !outSnapshotSha256->empty())
@@ -598,8 +1058,45 @@ bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnaps
 		CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, &archiveDigest);
 	}
 
-	SavedGame *campaign = battle->getGeoscapeSave();
 	const std::string snapshotDir = CompanionBriefingTestSupport::parentDirectoryOfSnapshotPath(path);
+	const long long exportedAtMs = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::system_clock::now().time_since_epoch()).count());
+	const std::string sessionId = battle->getCompanionEventLog().getSessionId();
+	if (resolved.terrainOmittedDueToSize)
+	{
+		CompanionManualV5Export::ManualV5ExportInput manualInput = {};
+		manualInput.snapshotDir = snapshotDir;
+		manualInput.sessionId = sessionId;
+		manualInput.turn = battle->getTurn();
+		manualInput.v5YamlUtf8 = v5YamlUtf8;
+		manualInput.automaticYamlUtf8 = resolved.yamlUtf8;
+		manualInput.v5AttemptedBytes = resolved.v5AttemptedBytes;
+		manualInput.v4FallbackBytes = resolved.v4FallbackBytes;
+		manualInput.exportedAtMs = exportedAtMs;
+		if (outSnapshotSha256 != 0 && !outSnapshotSha256->empty())
+		{
+			manualInput.automaticSnapshotSha256 = *outSnapshotSha256;
+		}
+		else
+		{
+			std::string automaticDigest;
+			if (CompanionSha256::digestHexLowerUtf8(resolved.yamlUtf8, &automaticDigest))
+			{
+				manualInput.automaticSnapshotSha256 = automaticDigest;
+			}
+		}
+		const CompanionManualV5Export::ManualV5ExportResult manualOutcome =
+			CompanionManualV5Export::tryWriteManualV5OversizeExport(manualInput);
+		if (!manualOutcome.artifactWritten)
+		{
+			Log(LOG_WARNING) << "Companion manual v5 export failed after v4 fallback: "
+			                 << manualOutcome.diagnostic;
+		}
+	}
+	else if (resolved.schemaVersion == 5)
+	{
+		CompanionManualV5Export::clearEngineManualUploadNoticeForSession(snapshotDir, sessionId, exportedAtMs);
+	}
 	if (!tryPublishSoldierControlBesideSnapshot(battle, campaign, snapshotDir))
 	{
 		Log(LOG_WARNING) << "Companion soldier control: publication failed (snapshot export succeeded)";

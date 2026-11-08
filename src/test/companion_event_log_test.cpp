@@ -64,6 +64,9 @@ static void testGameplayRngUntouched()
 	reloadLog.beginSession();
 	const uint64_t afterReloadSimulation = RNG::getSeed();
 	expect(afterSecondBegin == afterReloadSimulation, "battle reload companion session must not change gameplay RNG");
+	expect(!log.getSessionId().empty(), "companion session id must be set");
+	expect(log.getSessionId() != reloadLog.getSessionId(),
+		"battle save reload must assign a new companion session id");
 }
 
 static void testEligibility()

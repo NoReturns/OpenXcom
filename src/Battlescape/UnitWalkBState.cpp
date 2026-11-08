@@ -17,6 +17,8 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "../Engine/CompanionPerceptionLog.h"
+#include "../Engine/CompanionWalkStopTokens.h"
 #include "UnitWalkBState.h"
 #include "MeleeAttackBState.h"
 #include "TileEngine.h"
@@ -121,6 +123,10 @@ void UnitWalkBState::think()
 		else if (!_falling)
 		{
 			_unit->lookAt(_unit->getDestination(), (_unit->getTurretType() != -1));	// turn to undiscovered unit
+			if (_action.playerOrdered && _action.result.empty())
+			{
+				_action.result = CompanionWalkStopTokens::PATH_BLOCKED;
+			}
 			_pf->abortPath();
 		}
 
@@ -203,6 +209,10 @@ void UnitWalkBState::think()
 
 			if (_parent->checkForProximityGrenades(_unit))
 			{
+				if (_action.playerOrdered && _action.result.empty())
+				{
+					_action.result = CompanionWalkStopTokens::PROXIMITY_GRENADE;
+				}
 				_parent->popState();
 				return;
 			}
@@ -210,6 +220,10 @@ void UnitWalkBState::think()
 			{
 				_unit->setCache(0);
 				_parent->getMap()->cacheUnit(_unit);
+				if (_action.playerOrdered && _action.result.empty())
+				{
+					_action.result = CompanionWalkStopTokens::HOSTILE_SPOTTED;
+				}
 				_pf->abortPath();
 				_parent->popState();
 				return;
@@ -222,6 +236,10 @@ void UnitWalkBState::think()
 					// unit got fired upon - stop walking
 					_unit->setCache(0);
 					_parent->getMap()->cacheUnit(_unit);
+					if (_action.playerOrdered && _action.result.empty())
+					{
+						_action.result = CompanionWalkStopTokens::REACTION_FIRE;
+					}
 					_pf->abortPath();
 					_parent->popState();
 					return;
@@ -358,10 +376,12 @@ void UnitWalkBState::think()
 				if (door == 0)
 				{
 					_parent->getMod()->getSoundByDepth(_parent->getDepth(), Mod::DOOR_OPEN)->play(-1, _parent->getMap()->getSoundAngle(_unit->getPosition())); // normal door
+					_parent->getSave()->getCompanionPerceptionLog().tryRecordDoorSoundHeard(_parent->getSave(), _unit->getPosition());
 				}
 				if (door == 1)
 				{
 					_parent->getMod()->getSoundByDepth(_parent->getDepth(), Mod::SLIDING_DOOR_OPEN)->play(-1, _parent->getMap()->getSoundAngle(_unit->getPosition())); // ufo door
+					_parent->getSave()->getCompanionPerceptionLog().tryRecordDoorSoundHeard(_parent->getSave(), _unit->getPosition());
 					return; // don't start walking yet, wait for the ufo door to open
 				}
 			}
@@ -384,6 +404,10 @@ void UnitWalkBState::think()
 						>= 28)))  // 4+ voxels poking into the tile above, we don't kick people in the head here at XCom.
 					{
 						_action.TU = 0;
+						if (_action.playerOrdered && _action.result.empty())
+						{
+							_action.result = CompanionWalkStopTokens::PATH_BLOCKED;
+						}
 						_pf->abortPath();
 						_unit->setCache(0);
 						_parent->getMap()->cacheUnit(_unit);
@@ -460,6 +484,10 @@ void UnitWalkBState::think()
 			}
 			if (Options::traceAI) { Log(LOG_INFO) << "Egads! A turn reveals new units! I must pause!"; }
 			_unit->setHiding(false); // not hidden, are we...
+			if (_action.playerOrdered && _action.result.empty())
+			{
+				_action.result = CompanionWalkStopTokens::HOSTILE_SPOTTED;
+			}
 			_pf->abortPath();
 			_unit->abortTurn(); //revert to a standing state.
 			_unit->setCache(0);

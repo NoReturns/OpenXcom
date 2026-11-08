@@ -22,6 +22,7 @@
 #include "SavedBattleGame.h"
 #include "SavedGame.h"
 #include "../Engine/CompanionTacticalOwnershipCore.h"
+#include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionCampaignIdentityCore.h"
 #include "Tile.h"
 #include "Node.h"
@@ -51,7 +52,7 @@ namespace OpenXcom
  */
 SavedBattleGame::SavedBattleGame() : _battleState(0), _mapsize_x(0), _mapsize_y(0), _mapsize_z(0), _selectedUnit(0), _lastSelectedUnit(0), _pathfinding(0), _tileEngine(0), _globalShade(0),
 	_side(FACTION_PLAYER), _turn(1), _debugMode(false), _aborted(false), _itemId(0), _objectiveType(-1), _objectivesDestroyed(0), _objectivesNeeded(0), _unitsFalling(false), _cheating(false),
-	_tuReserved(BA_NONE), _kneelReserved(false), _depth(0), _ambience(-1), _ambientVolume(0.5), _turnLimit(0), _cheatTurn(20), _chronoTrigger(FORCE_LOSE), _beforeGame(true)
+	_tuReserved(BA_NONE), _kneelReserved(false), _depth(0), _ambience(-1), _ambientVolume(0.5), _turnLimit(0), _cheatTurn(20), _chronoTrigger(FORCE_LOSE), _beforeGame(true), _testMod(0), _geoscapeSaveHint(0)
 {
 	_tileSearch.resize(11*11);
 	for (int i = 0; i < 121; ++i)
@@ -349,6 +350,14 @@ void SavedBattleGame::load(const YAML::Node &node, Mod *mod, SavedGame* savedGam
 	CompanionTacticalOwnershipCore::loadFromBattleSaveNode(
 		node, &_companionTacticalBattleId, &_companionTacticalAiSoldierIds);
 	_companionEventLog.beginSession();
+	const std::string &companionSessionId = _companionEventLog.getSessionId();
+	_companionPerceptionLog.beginSession(companionSessionId);
+	if (savedGame != 0)
+	{
+		setGeoscapeSaveHint(savedGame);
+	}
+	_companionPerceptionLog.seedRosterCasualtyLedgerFromLoadedBattle(this);
+	_companionGroundItemMemory.beginSession(companionSessionId);
 }
 
 /**
@@ -916,6 +925,7 @@ void SavedBattleGame::endTurn()
 		}
 		if ((*i)->getFaction() != FACTION_PLAYER)
 		{
+			_companionPerceptionLog.recordHostileLastSeenBeforeTurnReset(this, *i);
 			(*i)->setVisible(false);
 		}
 	}
@@ -964,7 +974,26 @@ BattlescapeState *SavedBattleGame::getBattleState()
  */
 BattlescapeGame *SavedBattleGame::getBattleGame()
 {
+	if (_battleState == 0)
+	{
+		return 0;
+	}
 	return _battleState->getBattleGame();
+}
+
+void SavedBattleGame::setTestMod(Mod *mod)
+{
+	_testMod = mod;
+}
+
+Mod *SavedBattleGame::getTestMod() const
+{
+	return _testMod;
+}
+
+void SavedBattleGame::setGeoscapeSaveHint(SavedGame *save)
+{
+	_geoscapeSaveHint = save;
 }
 
 /**
@@ -974,6 +1003,10 @@ BattlescapeGame *SavedBattleGame::getBattleGame()
 void SavedBattleGame::setBattleState(BattlescapeState *bs)
 {
 	_battleState = bs;
+	if (_battleState != 0)
+	{
+		_geoscapeSaveHint = 0;
+	}
 }
 
 /**
@@ -1558,6 +1591,7 @@ void SavedBattleGame::reviveUnconsciousUnits()
 					getTileEngine()->calculateFOV((*i));
 					getTileEngine()->calculateUnitLighting();
 					removeUnconsciousBodyItem((*i));
+					getCompanionPerceptionLog().tryRecordSoldierRecovered(this, (*i));
 				}
 			}
 		}
@@ -1949,7 +1983,11 @@ void SavedBattleGame::calculateModuleMap()
  */
 SavedGame *SavedBattleGame::getGeoscapeSave()
 {
-	return _battleState->getGame()->getSavedGame();
+	if (_battleState != 0 && _battleState->getGame() != 0)
+	{
+		return _battleState->getGame()->getSavedGame();
+	}
+	return _geoscapeSaveHint;
 }
 
 /**
