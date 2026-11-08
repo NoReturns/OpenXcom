@@ -380,6 +380,20 @@ static void testWalkCompletionDetection()
 	expect(evaluateWalkTerminalStatus(input) == CMD_COMPLETED, "reached destination completes");
 }
 
+static void testWalkCompletionCrossLevelZ()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(10, 5, 1);
+	input.startPos = Position(10, 5, 0);
+	input.currentPos = Position(10, 5, 1);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	expect(evaluateWalkTerminalStatus(input) == CMD_COMPLETED, "cross-level destination completes when z matches");
+	input.currentPos = Position(10, 5, 0);
+	expect(evaluateWalkTerminalStatus(input) == CMD_FAILED, "same x,y wrong z without progress is FAILED not COMPLETED");
+}
+
 static void testWalkInterruptionDetection()
 {
 	WalkCompletionInput input = {};
@@ -1971,6 +1985,7 @@ int main()
 	testParseMoveCommandDestinationNotConfusedWithOtherObjects();
 	testParseMoveCommandInvalidCommandIdRejected();
 	testWalkCompletionDetection();
+	testWalkCompletionCrossLevelZ();
 	testWalkInterruptionDetection();
 	testHumanOverrideDuringWalk();
 	testWalkStopDiagnosticsTurnAndSpot();
