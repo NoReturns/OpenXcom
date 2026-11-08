@@ -73,6 +73,23 @@ struct AlienFixture
 	}
 };
 
+struct CyberdiscFixture
+{
+	Unit rules;
+	Armor armor;
+	BattleUnit *unit;
+	CyberdiscFixture(int id, bool visible, int direction, bool kneeled, const Position &pos)
+		: rules("STR_CYBERDISC_TERRORIST"), armor("STR_SECTOID_ARMOR"), unit(0)
+	{
+		StatAdjustment adjustment;
+		unit = new BattleUnit(&rules, FACTION_HOSTILE, id, &armor, &adjustment, 0);
+		unit->setVisible(visible);
+		unit->kneel(kneeled);
+		unit->setDirection(direction);
+		unit->setPosition(pos);
+	}
+};
+
 /// Owns heap bases/battles so SavedGame::~SavedGame never deletes static fixture memory.
 struct TacticalFixture
 {
@@ -81,6 +98,7 @@ struct TacticalFixture
 	SavedBattleGame *battle;
 	std::vector<SoldierFixture *> soldierBundles;
 	std::vector<AlienFixture *> alienBundles;
+	std::vector<CyberdiscFixture *> cyberdiscBundles;
 
 	TacticalFixture()
 		: base(new Base(&fixtureMod())),
@@ -101,6 +119,11 @@ struct TacticalFixture
 			delete *i;
 		}
 		alienBundles.clear();
+		for (std::vector<CyberdiscFixture *>::iterator i = cyberdiscBundles.begin(); i != cyberdiscBundles.end(); ++i)
+		{
+			delete *i;
+		}
+		cyberdiscBundles.clear();
 		base->getSoldiers()->clear();
 		game.getBases()->clear();
 		delete base;
@@ -561,14 +584,44 @@ static void testRosterCasualtyLedgerSeededForDeadAfterKillSoldier()
 static void testVisibleHostileObservationOnly()
 {
 	TacticalFixture fixture;
-	fixture.addAlienUnit(1000000, true, 6, true);
+	BattleUnit *alien = fixture.addAlienUnit(1000000, true, 6, true);
+	const Position pos = Position(2, 2, 0);
+	placeUnitOnDiscoveredTile(fixture, alien, pos);
 
 	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], 1000000);
 	expect(entry.IsDefined(), "visible alien exported");
-	expect(!entry["name"], "no alien name");
+	expect(!entry["name"], "no alien name field");
+	expect(entry["observedUnitType"].IsDefined(), "observed unit type from engine rules");
+	expect(entry["observedUnitType"].as<std::string>() == "STR_SECTOID", "sectoid mod type id");
 	expect(!entry["condition"], "no alien condition");
 	expect(entry["kneeled"].as<bool>(), "kneeled observation");
 	expect(entry["facing"].IsDefined(), "visible hostile facing allowed");
+}
+
+static void testVisibleHostileExportsObservedUnitTypeWhenSpotted()
+{
+	TacticalFixture fixture;
+	BattleUnit *alien = fixture.addAlienUnit(1000000, true, 6, true);
+	placeUnitOnDiscoveredTile(fixture, alien, Position(2, 2, 0));
+
+	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], 1000000);
+	expect(entry["observedUnitType"].IsDefined(), "spotted hostile exports observedUnitType");
+	expect(entry["observedUnitType"].as<std::string>() == "STR_SECTOID", "sectoid mod type id");
+}
+
+static void testVisibleCyberdiscUsesUnitTypeNotRace()
+{
+	TacticalFixture fixture;
+	CyberdiscFixture *bundle = new CyberdiscFixture(1000007, true, 4, false, Position(2, 2, 0));
+	fixture.cyberdiscBundles.push_back(bundle);
+	fixture.battle->getUnits()->push_back(bundle->unit);
+	placeUnitOnDiscoveredTile(fixture, bundle->unit, Position(2, 2, 0));
+
+	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], 1000007);
+	expect(entry.IsDefined(), "cyberdisc visible shell exported");
+	expect(entry["observedUnitType"].IsDefined(), "cyberdisc type exported under LOS");
+	expect(entry["observedUnitType"].as<std::string>() == "STR_CYBERDISC_TERRORIST",
+		"cyberdisc exports mod unit type not race");
 }
 
 static void testHiddenHostileOmitted()
@@ -585,11 +638,13 @@ static void testMindControlledRosterSoldierNoFriendlyLeak()
 	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(2, 1, 0), 0);
 	unit->convertToFaction(FACTION_HOSTILE);
 	unit->setVisible(true);
+	placeUnitOnDiscoveredTile(fixture, unit, Position(2, 1, 0));
 
 	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], 3);
 	expect(entry.IsDefined(), "MC soldier visible shell");
-	expect(!entry["name"], "no friendly name while hostile-controlled");
+	expect(entry["name"].IsDefined(), "MC roster name preserved under current LOS");
 	expect(!entry["condition"], "no friendly condition leak");
+	expect(!entry["observedUnitType"], "MC roster soldier is not a hostile unit type");
 	expect(entry["facing"].IsDefined(), "visible MC hostile-minimal shell includes facing");
 }
 
@@ -1190,6 +1245,8 @@ int main()
 	SNAPSHOT_TEST_STEP(testRosterCasualtyLedgerSeededAfterBattleLoad);
 	SNAPSHOT_TEST_STEP(testRosterCasualtyLedgerSeededForDeadAfterKillSoldier);
 	SNAPSHOT_TEST_STEP(testVisibleHostileObservationOnly);
+	SNAPSHOT_TEST_STEP(testVisibleHostileExportsObservedUnitTypeWhenSpotted);
+	SNAPSHOT_TEST_STEP(testVisibleCyberdiscUsesUnitTypeNotRace);
 	SNAPSHOT_TEST_STEP(testHiddenHostileOmitted);
 	SNAPSHOT_TEST_STEP(testMindControlledRosterSoldierNoFriendlyLeak);
 	SNAPSHOT_TEST_STEP(testHiddenMindControlledRosterSoldierOmitted);

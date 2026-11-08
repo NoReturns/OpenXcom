@@ -11,6 +11,8 @@ namespace OpenXcom
 
 class BattleUnit;
 class SavedGame;
+class SavedBattleGame;
+class Language;
 
 class CompanionSnapshotUnitState
 {
@@ -38,6 +40,14 @@ public:
 
 	/// Player-visible posture/orientation for visible non-friendly units only.
 	static void appendVisibleHostileObservations(YAML::Node &entry, const BattleUnit *unit);
+
+	/// Fair-play unit type / MC roster name (current LOS); does not export friendly tactical detail.
+	static void appendUnitObservationIdentity(
+		YAML::Node &entry,
+		SavedBattleGame *battle,
+		const BattleUnit *unit,
+		const SavedGame *campaign,
+		Language *lang);
 };
 
 } // namespace OpenXcom

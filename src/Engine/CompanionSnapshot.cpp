@@ -13,6 +13,9 @@
 #include "CompanionSnapshotTerrain.h"
 #include "CompanionSnapshotMissionContext.h"
 #include "CompanionSnapshotUnitState.h"
+#include "../Battlescape/BattlescapeState.h"
+#include "../Engine/Game.h"
+#include "../Engine/Language.h"
 #include "CompanionSnapshotGroundItems.h"
 #include "CompanionGroundInventoryCore.h"
 #include "CompanionSha256.h"
@@ -25,8 +28,6 @@
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/Soldier.h"
 #include "../Savegame/SavedGame.h"
-#include "../Battlescape/BattlescapeState.h"
-#include "../Engine/Game.h"
 #include "../Mod/Mod.h"
 #include "../Battlescape/BattlescapeGame.h"
 #include "../Mod/RuleInventory.h"
@@ -174,6 +175,20 @@ SavedGame *campaignFromBattle(SavedBattleGame *battle)
 		return 0;
 	}
 	return state->getGame()->getSavedGame();
+}
+
+Language *languageFromBattle(SavedBattleGame *battle)
+{
+	if (battle == 0)
+	{
+		return 0;
+	}
+	BattlescapeState *state = battle->getBattleState();
+	if (state == 0 || state->getGame() == 0)
+	{
+		return 0;
+	}
+	return state->getGame()->getLanguage();
 }
 
 bool exportFriendlyTacticalDetails(const BattleUnit *unit)
@@ -704,6 +719,8 @@ void appendUnit(YAML::Node &units, SavedBattleGame *battle, SavedGame *campaign,
 	else
 	{
 		CompanionSnapshotUnitState::appendVisibleHostileObservations(entry, unit);
+		CompanionSnapshotUnitState::appendUnitObservationIdentity(
+			entry, battle, unit, campaign, languageFromBattle(battle));
 	}
 
 	units.push_back(entry);

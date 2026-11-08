@@ -3,6 +3,7 @@
  */
 #include "Engine/CompanionSnapshotUnitStateCore.h"
 #include "../Savegame/BattleUnit.h"
+#include <cstring>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -63,6 +64,47 @@ static void testReadinessStatusStrings()
 	expect(std::string(CompanionSnapshotUnitStateCore::movementTypeId(MT_FLY)) == "fly", "fly movement");
 }
 
+static void testUnitObservationFairPlayPolicy()
+{
+	UnitObservationPolicyInput hostIdentified = {};
+	hostIdentified.unitVisible = true;
+	hostIdentified.tileCurrentlySeen = true;
+	hostIdentified.originalFaction = FACTION_HOSTILE;
+	hostIdentified.faction = FACTION_HOSTILE;
+	hostIdentified.engineUnitType = std::string("STR_SECTOID_SOLDIER");
+	expect(CompanionSnapshotUnitStateCore::shouldExportHostileObservedUnitType(hostIdentified),
+		"identified hostile with LOS exports type");
+
+	UnitObservationPolicyInput hostNotVisible = hostIdentified;
+	hostNotVisible.unitVisible = false;
+	expect(!CompanionSnapshotUnitStateCore::shouldExportHostileObservedUnitType(hostNotVisible),
+		"engine-not-visible hostile omits type");
+
+	UnitObservationPolicyInput cyberdisc = hostIdentified;
+	cyberdisc.engineUnitType = std::string("STR_CYBERDISC_TERRORIST");
+	expect(CompanionSnapshotUnitStateCore::shouldExportHostileObservedUnitType(cyberdisc),
+		"cyberdisc uses unit mod type");
+
+	UnitObservationPolicyInput mcRoster = {};
+	mcRoster.unitVisible = true;
+	mcRoster.tileCurrentlySeen = true;
+	mcRoster.originalFaction = FACTION_PLAYER;
+	mcRoster.faction = FACTION_HOSTILE;
+	mcRoster.rosterSoldierIdentity = true;
+	mcRoster.engineUnitType = std::string("SOLDIER");
+	expect(CompanionSnapshotUnitStateCore::shouldExportMindControlledRosterName(mcRoster),
+		"MC roster name when visible and LOS");
+	expect(!CompanionSnapshotUnitStateCore::shouldExportHostileObservedUnitType(mcRoster),
+		"MC roster is not hostile type export");
+
+	UnitObservationPolicyInput neutral = hostIdentified;
+	neutral.originalFaction = FACTION_NEUTRAL;
+	neutral.faction = FACTION_NEUTRAL;
+	neutral.engineUnitType = std::string("STR_CIVILIAN");
+	expect(!CompanionSnapshotUnitStateCore::shouldExportHostileObservedUnitType(neutral),
+		"neutral civilian has no hostile unit type");
+}
+
 #ifdef main
 #undef main
 #endif
@@ -72,6 +114,7 @@ int main()
 	testInvalidDirectionVectorZero();
 	testCardinalLabels();
 	testReadinessStatusStrings();
+	testUnitObservationFairPlayPolicy();
 
 	if (g_failures != 0)
 	{

@@ -2,9 +2,53 @@
  * Open X-Com Companion — pure facing/status helpers (M1-WP2).
  */
 #include "CompanionSnapshotUnitStateCore.h"
+#include <cstring>
 
 namespace OpenXcom
 {
+
+namespace
+{
+
+bool isSoldierEngineType(const std::string &engineUnitType)
+{
+	return engineUnitType == "SOLDIER";
+}
+
+} // namespace
+
+bool CompanionSnapshotUnitStateCore::isMindControlledRosterObservation(const UnitObservationPolicyInput &input)
+{
+	return input.rosterSoldierIdentity
+	    && input.originalFaction == FACTION_PLAYER
+	    && input.faction != FACTION_PLAYER;
+}
+
+bool CompanionSnapshotUnitStateCore::shouldExportHostileObservedUnitType(const UnitObservationPolicyInput &input)
+{
+	if (!input.unitVisible)
+	{
+		return false;
+	}
+	if (input.engineUnitType.empty() || isSoldierEngineType(input.engineUnitType))
+	{
+		return false;
+	}
+	if (isMindControlledRosterObservation(input))
+	{
+		return false;
+	}
+	if (input.originalFaction == FACTION_NEUTRAL && input.faction == FACTION_NEUTRAL)
+	{
+		return false;
+	}
+	return input.originalFaction == FACTION_HOSTILE;
+}
+
+bool CompanionSnapshotUnitStateCore::shouldExportMindControlledRosterName(const UnitObservationPolicyInput &input)
+{
+	return isMindControlledRosterObservation(input) && input.unitVisible;
+}
 
 void CompanionSnapshotUnitStateCore::directionToMapVector(int direction, int *outDx, int *outDy)
 {

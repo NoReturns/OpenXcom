@@ -177,7 +177,7 @@ bool pointInButton(int absX, int absY, int rectX, int rectY, int rectW, int rect
 }
 
 bool writeTerminalFailureStatus(const std::string &statusPath, const std::string &requestId,
-	const char *action, const char *message, long long updatedAtMs)
+	const char *action, const char *message, long long updatedAtMs, const char *errorCode)
 {
 	std::ostringstream ss;
 	ss << "{\n"
@@ -185,8 +185,12 @@ bool writeTerminalFailureStatus(const std::string &statusPath, const std::string
 	   << "  \"action\": \"" << action << "\",\n"
 	   << "  \"phase\": \"failed\",\n"
 	   << "  \"message\": \"" << message << "\",\n"
-	   << "  \"updated_at_ms\": " << updatedAtMs << ",\n"
-	   << "  \"terminal\": true\n"
+	   << "  \"updated_at_ms\": " << updatedAtMs << ",\n";
+	if (errorCode != 0 && errorCode[0] != '\0')
+	{
+		ss << "  \"error_code\": \"" << errorCode << "\",\n";
+	}
+	ss << "  \"terminal\": true\n"
 	   << "}\n";
 	return writeTextAtomically(statusPath, ss.str());
 }
@@ -424,6 +428,71 @@ bool parseRelayStatusJson(const std::string &statusJson, RelayStatusView *out)
 	return true;
 }
 
+bool isTerminalRetrievePhase(const std::string &phase)
+{
+	return phase == "completed" || phase == "failed";
+}
+
+bool isStickyTerminalRetrieveOutcome(const RelayStatusView &existing)
+{
+	if (existing.action != "retrieve" || !existing.terminal)
+	{
+		return false;
+	}
+	if (!existing.last_command_id.empty() && !existing.last_command_status.empty())
+	{
+		return true;
+	}
+	return isTerminalRetrievePhase(existing.phase);
+}
+
+bool incomingRetrievePollWouldEraseTerminalOutcome(const RelayStatusView &existing, const RelayStatusView &incoming)
+{
+	if (incoming.action != "retrieve")
+	{
+		return false;
+	}
+	if (!isStickyTerminalRetrieveOutcome(existing))
+	{
+		return false;
+	}
+	if (incoming.phase == "no_new_orders")
+	{
+		return true;
+	}
+	if (incoming.phase == "retrieving" && !incoming.terminal)
+	{
+		return true;
+	}
+	return false;
+}
+
+bool isEngineRelayOfflineFailure(const RelayStatusView &incoming)
+{
+	return incoming.action == "retrieve"
+	    && incoming.phase == "failed"
+	    && incoming.last_command_id.empty()
+	    && (incoming.error_code.empty() || incoming.error_code == "RELAY_OFFLINE");
+}
+
+bool incomingRelayOfflineFailureWouldEraseStickyCompleted(const RelayStatusView &existing,
+	const RelayStatusView &incoming)
+{
+	if (existing.action != "retrieve" || existing.phase != "completed" || !existing.terminal)
+	{
+		return false;
+	}
+	if (!isStickyTerminalRetrieveOutcome(existing))
+	{
+		return false;
+	}
+	if (!isEngineRelayOfflineFailure(incoming))
+	{
+		return false;
+	}
+	return incoming.request_id != existing.request_id;
+}
+
 bool shouldAcceptRelayStatusUpdate(const RelayStatusView &existing, const RelayStatusView &incoming, bool hasExisting)
 {
 	if (!incoming.parsed)
@@ -433,6 +502,14 @@ bool shouldAcceptRelayStatusUpdate(const RelayStatusView &existing, const RelayS
 	if (!hasExisting || !existing.parsed)
 	{
 		return true;
+	}
+	if (incomingRetrievePollWouldEraseTerminalOutcome(existing, incoming))
+	{
+		return false;
+	}
+	if (incomingRelayOfflineFailureWouldEraseStickyCompleted(existing, incoming))
+	{
+		return false;
 	}
 	if (!incoming.request_id.empty() && !existing.request_id.empty()
 	    && incoming.request_id == existing.request_id)
@@ -810,9 +887,22 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 		{
 			if (status.error_code == "RETRIEVAL_ERROR"
 			    || status.error_code == "NETWORK_FAILED"
-			    || status.error_code == "RATE_LIMIT")
+			    || status.error_code == "RATE_LIMIT"
+			    || status.error_code == "RELAY_OFFLINE")
 			{
 				*out = "Retrieve error";
+				return;
+			}
+			if (status.last_command_status == "FAILED"
+			    || status.last_command_status == "REJECTED"
+			    || status.last_command_status == "INTERRUPTED")
+			{
+				*out = "Order failed";
+				return;
+			}
+			if (status.last_command_status == "COMPLETED")
+			{
+				*out = "Order done; relay incomplete";
 				return;
 			}
 			if (status.error_code == "RETRIEVE_INCOMPLETE")
@@ -820,11 +910,8 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 				*out = "Retrieve incomplete";
 				return;
 			}
-			if (!status.last_command_status.empty() && status.last_command_status != "REJECTED")
-			{
-				*out = "Order failed";
-				return;
-			}
+			*out = "Retrieve failed";
+			return;
 		}
 		if (isValidationErrorCode(status.error_code))
 		{
@@ -833,10 +920,6 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 		else if (isAuthErrorCode(status.error_code))
 		{
 			*out = "Failed: AUTH";
-		}
-		else if (status.action == "retrieve")
-		{
-			*out = "Retrieve failed";
 		}
 		else
 		{
@@ -977,7 +1060,7 @@ bool reconcilePendingOnDemandRelay(long long wallNowMs)
 			    && currentBriefingId != briefingRequestId)
 			{
 				writeTerminalFailureStatus(statusPath, requestId, action.c_str(),
-					"Briefing superseded; retry SEND.", wallNowMs);
+					"Briefing superseded; retry SEND.", wallNowMs, 0);
 				removePendingRequestFile(requestPath);
 				return true;
 			}
@@ -996,8 +1079,22 @@ bool reconcilePendingOnDemandRelay(long long wallNowMs)
 	}
 	if (!isDaemonLocallyServing(relayDir, wallNowMs))
 	{
+		std::string statusJson;
+		if (action == "retrieve" && readTextFile(statusPath, &statusJson))
+		{
+			RelayStatusView current;
+			if (parseRelayStatusJson(statusJson, &current)
+			    && current.action == "retrieve"
+			    && current.terminal
+			    && current.phase == "completed"
+			    && current.request_id == requestId)
+			{
+				removePendingRequestFile(requestPath);
+				return true;
+			}
+		}
 		writeTerminalFailureStatus(statusPath, requestId, action.c_str(),
-			"Relay offline; start companion launcher.", wallNowMs);
+			"Relay offline; start companion launcher.", wallNowMs, "RELAY_OFFLINE");
 		removePendingRequestFile(requestPath);
 		return true;
 	}

@@ -284,6 +284,49 @@ static void testRelayStatusLabels()
 		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
 		"\"error_code\":\"RETRIEVE_INCOMPLETE\"}") == "Retrieve incomplete",
 		"retrieve incomplete");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RETRIEVE_INCOMPLETE\",\"last_command_status\":\"COMPLETED\"}")
+	    == "Order done; relay incomplete",
+		"completed command with incomplete relay");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RELAY_OFFLINE\"}") == "Retrieve error",
+		"relay offline is retrieval failure not command failure");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"last_command_status\":\"COMPLETED\"}") == "Order done; relay incomplete",
+		"completed execution without relay completion");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"last_command_status\":\"FAILED\"}") == "Order failed",
+		"retrieve command failed");
+}
+
+static void testRelayStickyRetrieveStatusAcceptance()
+{
+	RelayStatusView completedCmd;
+	parseRelayStatusJson(
+		"{\"request_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"action\":\"retrieve\","
+		"\"phase\":\"completed\",\"terminal\":true,\"last_command_id\":\"cccccccccccccccccccccccccccccccc\","
+		"\"last_command_status\":\"COMPLETED\",\"updated_at_ms\":5000}",
+		&completedCmd);
+	RelayStatusView emptyPoll;
+	parseRelayStatusJson(
+		"{\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"action\":\"retrieve\","
+		"\"phase\":\"no_new_orders\",\"terminal\":true,\"updated_at_ms\":6000}",
+		&emptyPoll);
+	expect(!shouldAcceptRelayStatusUpdate(completedCmd, emptyPoll, true),
+		"no_new_orders must not erase sticky completed retrieve");
+
+	RelayStatusView offlineFailure;
+	parseRelayStatusJson(
+		"{\"request_id\":\"dddddddddddddddddddddddddddddddd\",\"action\":\"retrieve\","
+		"\"phase\":\"failed\",\"terminal\":true,\"error_code\":\"RELAY_OFFLINE\","
+		"\"updated_at_ms\":7000}",
+		&offlineFailure);
+	expect(!shouldAcceptRelayStatusUpdate(completedCmd, offlineFailure, true),
+		"unrelated relay offline failure must not erase completed retrieve");
 }
 
 static void testLegacyStatusJsonWithoutOptionalFields()
@@ -487,6 +530,48 @@ static void testReconcileOfflineRelay(const std::string &root)
 	expect(reconcilePendingOnDemandRelay(4000), "offline relay terminates pending request");
 	std::ifstream pendingCheck(requestPath.c_str());
 	expect(!pendingCheck.good(), "offline pending request removed");
+}
+
+static void testReconcileStalePendingAfterCompletedRetrieve(const std::string &root)
+{
+	const std::string snapshotPath = root + "/tactical-stale-pending.yaml";
+	writeFile(snapshotPath, "tactical: {}\n");
+#ifdef _WIN32
+	_putenv_s("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str());
+#else
+	setenv("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str(), 1);
+#endif
+	const std::string requestPath = root + "/companion-on-demand-request.json";
+	const std::string statusPath = root + "/companion-on-demand-status.json";
+	const char *requestId = "ffffffffffffffffffffffffffffffff";
+	writeFile(statusPath,
+		"{\n"
+		"  \"request_id\": \"ffffffffffffffffffffffffffffffff\",\n"
+		"  \"action\": \"retrieve\",\n"
+		"  \"phase\": \"completed\",\n"
+		"  \"terminal\": true,\n"
+		"  \"last_command_id\": \"cccccccccccccccccccccccccccccccc\",\n"
+		"  \"last_command_status\": \"COMPLETED\",\n"
+		"  \"updated_at_ms\": 2000\n"
+		"}\n");
+	writeFile(requestPath,
+		"{\n"
+		"  \"request_id\": \"ffffffffffffffffffffffffffffffff\",\n"
+		"  \"action\": \"retrieve\",\n"
+		"  \"status\": \"pending\",\n"
+		"  \"created_at_ms\": 1000\n"
+		"}\n");
+	expect(reconcilePendingOnDemandRelay(4000), "stale pending after completed retrieve is cleared");
+	std::ifstream pendingCheck(requestPath.c_str());
+	expect(!pendingCheck.good(), "stale pending request removed without failure overwrite");
+	std::ifstream statusIn(statusPath.c_str());
+	std::ostringstream ss;
+	ss << statusIn.rdbuf();
+	RelayStatusView kept;
+	parseRelayStatusJson(ss.str(), &kept);
+	expect(kept.phase == "completed", "completed retrieve status preserved");
+	expect(labelFromStatusJson(ss.str()) == "Order completed", "status label still Order completed");
+	(void)requestId;
 }
 
 static const long long kEpochMs = 1793814448770LL;
@@ -1126,6 +1211,7 @@ int main()
 	testCompletedMarkerAllowsRetrieveAfterReload(root);
 	testStatusPhaseMapping();
 	testRelayStatusLabels();
+	testRelayStickyRetrieveStatusAcceptance();
 	testLegacyStatusJsonWithoutOptionalFields();
 	testRelayStatusStaleAndPersistence();
 	testCompactBarLayoutDimensions();
@@ -1133,6 +1219,7 @@ int main()
 	testRelayHitTargetUsesCompactBounds(root);
 	testReconcileSupersededBriefing(root);
 	testReconcileOfflineRelay(root);
+	testReconcileStalePendingAfterCompletedRetrieve(root);
 	testReconcileStaleHealthOffline(root);
 	testJsonInt64ExtractionUsedByRelayPath();
 	testReconcileFreshHealthRealisticEpoch(root);

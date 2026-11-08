@@ -6,6 +6,9 @@
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/Soldier.h"
 #include "../Savegame/SavedGame.h"
+#include "../Savegame/SavedBattleGame.h"
+#include "../Savegame/Tile.h"
+#include "../Engine/Language.h"
 #include "../Mod/MapData.h"
 
 namespace OpenXcom
@@ -273,6 +276,69 @@ void CompanionSnapshotUnitState::appendVisibleHostileObservations(YAML::Node &en
 	}
 	entry["kneeled"] = unit->isKneeled();
 	appendFacing(entry, unit);
+}
+
+bool tileCurrentlySeenByPlayer(SavedBattleGame *battle, const Position &pos)
+{
+	if (battle == 0)
+	{
+		return false;
+	}
+	Tile *tile = battle->getTile(pos);
+	return tile != 0 && tile->getVisible() > 0;
+}
+
+UnitObservationPolicyInput buildUnitObservationPolicyInput(
+	const BattleUnit *unit,
+	SavedBattleGame *battle,
+	const SavedGame *campaign)
+{
+	UnitObservationPolicyInput policy = {};
+	if (unit == 0)
+	{
+		return policy;
+	}
+	policy.unitVisible = unit->getVisible();
+	policy.tileCurrentlySeen = tileCurrentlySeenByPlayer(battle, unit->getPosition());
+	policy.originalFaction = unit->getOriginalFaction();
+	policy.faction = unit->getFaction();
+	policy.rosterSoldierIdentity = isLiveRosterSoldierUnitIdentity(unit, campaign);
+	policy.engineUnitType = unit->getType();
+	return policy;
+}
+
+void CompanionSnapshotUnitState::appendUnitObservationIdentity(
+	YAML::Node &entry,
+	SavedBattleGame *battle,
+	const BattleUnit *unit,
+	const SavedGame *campaign,
+	Language *lang)
+{
+	if (unit == 0)
+	{
+		return;
+	}
+	const UnitObservationPolicyInput policy = buildUnitObservationPolicyInput(unit, battle, campaign);
+	if (CompanionSnapshotUnitStateCore::shouldExportMindControlledRosterName(policy))
+	{
+		Soldier *soldier = unit->getGeoscapeSoldier();
+		if (soldier != 0)
+		{
+			entry["name"] = soldier->getName(true);
+		}
+	}
+	if (CompanionSnapshotUnitStateCore::shouldExportHostileObservedUnitType(policy))
+	{
+		entry["observedUnitType"] = unit->getType();
+		if (lang != 0)
+		{
+			const std::string label = unit->getName(lang, false);
+			if (!label.empty())
+			{
+				entry["displayLabel"] = label;
+			}
+		}
+	}
 }
 
 } // namespace OpenXcom
