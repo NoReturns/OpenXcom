@@ -45,6 +45,10 @@ void appendItemNode(YAML::Node &items, const GroundItemObservationItem &item)
 	{
 		entry["concealedOnTile"] = true;
 	}
+	if (item.hasResearchUsable)
+	{
+		entry["researchUsable"] = item.researchUsable;
+	}
 	items.push_back(entry);
 }
 

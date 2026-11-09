@@ -52,6 +52,7 @@ static void testVisibleWeaponIdentifiedWhenResearched()
 	rifle.battleType = BT_FIREARM;
 	rifle.weight = 30;
 	rifle.researched = true;
+	rifle.commandResearchUsable = true;
 	input.items.push_back(rifle);
 	GroundTileObservationPlan plan = planTileObservation(input);
 	expect(plan.exportTile, "visible ground weapon should export");
@@ -71,6 +72,7 @@ static void testUnresearchedAlienHidesItemType()
 	alien.battleType = BT_FIREARM;
 	alien.weight = 20;
 	alien.researched = false;
+	alien.commandResearchUsable = false;
 	input.items.push_back(alien);
 	GroundTileObservationPlan plan = planTileObservation(input);
 	expect(!plan.items[0].hasItemType, "unresearched item must not expose itemType");
@@ -88,12 +90,14 @@ static void testMultipleItemsMarksSecondaryConcealed()
 	rifle.battleType = BT_FIREARM;
 	rifle.weight = 30;
 	rifle.researched = true;
+	rifle.commandResearchUsable = true;
 	GroundItemRulesView clip;
 	clip.itemType = "STR_RIFLE_CLIP";
 	clip.battleType = BT_AMMO;
 	clip.weight = 3;
 	clip.ammoQuantity = 25;
 	clip.researched = true;
+	clip.commandResearchUsable = true;
 	input.items.push_back(clip);
 	input.items.push_back(rifle);
 	GroundTileObservationPlan plan = planTileObservation(input);
@@ -115,6 +119,54 @@ static void testMultipleItemsMarksSecondaryConcealed()
 	expect(sawPrimaryType, "heaviest item should remain identifiable");
 }
 
+static void testPrimaryUnresearchedExportsResearchUsableFalse()
+{
+	GroundTileObservationInput input = {};
+	input.bodyDiscovered = true;
+	input.inLineOfSight = true;
+	input.hasGroundItems = true;
+	GroundItemRulesView alien;
+	alien.itemType = "STR_ALIEN_RIFLE";
+	alien.battleType = BT_FIREARM;
+	alien.weight = 20;
+	alien.researched = false;
+	alien.commandResearchUsable = false;
+	input.items.push_back(alien);
+	GroundTileObservationPlan plan = planTileObservation(input);
+	expect(plan.items[0].hasResearchUsable && plan.items[0].researchUsable == false,
+		"unresearched primary exports researchUsable false");
+}
+
+static void testConcealedStackOmitsResearchUsable()
+{
+	GroundTileObservationInput input = {};
+	input.bodyDiscovered = true;
+	input.inLineOfSight = true;
+	input.hasGroundItems = true;
+	GroundItemRulesView rifle;
+	rifle.itemType = "STR_RIFLE";
+	rifle.battleType = BT_FIREARM;
+	rifle.weight = 30;
+	rifle.researched = true;
+	rifle.commandResearchUsable = true;
+	GroundItemRulesView clip;
+	clip.itemType = "STR_RIFLE_CLIP";
+	clip.battleType = BT_AMMO;
+	clip.weight = 3;
+	clip.researched = true;
+	clip.commandResearchUsable = true;
+	input.items.push_back(clip);
+	input.items.push_back(rifle);
+	GroundTileObservationPlan plan = planTileObservation(input);
+	for (size_t i = 0; i < plan.items.size(); ++i)
+	{
+		if (plan.items[i].concealedOnTile)
+		{
+			expect(!plan.items[i].hasResearchUsable, "concealed stack row must omit researchUsable");
+		}
+	}
+}
+
 static void testPrimedGrenadeWithoutFuseTimer()
 {
 	GroundTileObservationInput input = {};
@@ -126,6 +178,7 @@ static void testPrimedGrenadeWithoutFuseTimer()
 	grenade.battleType = BT_GRENADE;
 	grenade.weight = 5;
 	grenade.researched = true;
+	grenade.commandResearchUsable = true;
 	grenade.primedGrenade = true;
 	input.items.push_back(grenade);
 	GroundTileObservationPlan plan = planTileObservation(input);
@@ -139,6 +192,8 @@ int main()
 	testVisibleWeaponIdentifiedWhenResearched();
 	testUnresearchedAlienHidesItemType();
 	testMultipleItemsMarksSecondaryConcealed();
+	testPrimaryUnresearchedExportsResearchUsableFalse();
+	testConcealedStackOmitsResearchUsable();
 	testPrimedGrenadeWithoutFuseTimer();
 	if (g_failures != 0)
 	{

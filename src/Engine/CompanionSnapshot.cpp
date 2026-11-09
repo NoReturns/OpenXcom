@@ -18,6 +18,7 @@
 #include "../Engine/Language.h"
 #include "CompanionSnapshotGroundItems.h"
 #include "CompanionGroundInventoryCore.h"
+#include "CompanionItemResearchEligibilityCore.h"
 #include "CompanionSha256.h"
 #include "CompanionEventLog.h"
 #include "CompanionPerceptionLog.h"
@@ -236,7 +237,7 @@ bool isFirearmWithChamberedAmmo(BattleItem *item)
 	return item->getRules()->getBattleType() == BT_FIREARM && item->needsAmmo();
 }
 
-void appendFirearmAmmoState(YAML::Node &entry, BattleItem *item)
+void appendFirearmAmmoState(YAML::Node &entry, BattleItem *item, SavedGame *campaign)
 {
 	if (!isFirearmWithChamberedAmmo(item))
 	{
@@ -258,6 +259,7 @@ void appendFirearmAmmoState(YAML::Node &entry, BattleItem *item)
 		loaded["ammoType"] = ammo->getRules()->getType();
 		loaded["rounds"] = 0;
 		loaded["battleItemId"] = ammo->getId();
+		loaded["researchUsable"] = companionItemResearchUsable(campaign, ammo->getRules());
 		entry["loaded"] = loaded;
 		return;
 	}
@@ -266,6 +268,7 @@ void appendFirearmAmmoState(YAML::Node &entry, BattleItem *item)
 	loaded["ammoType"] = ammo->getRules()->getType();
 	loaded["rounds"] = ammo->getAmmoQuantity();
 	loaded["battleItemId"] = ammo->getId();
+	loaded["researchUsable"] = companionItemResearchUsable(campaign, ammo->getRules());
 	entry["loaded"] = loaded;
 }
 
@@ -299,7 +302,7 @@ const char *inventorySlotTypeName(InventoryType t)
 }
 
 /// Export nested ammunition instance for a firearm without duplicating that magazine in inventory[].
-void appendNestedLoadedMagazine(YAML::Node &entry, BattleItem *weapon)
+void appendNestedLoadedMagazine(YAML::Node &entry, BattleItem *weapon, SavedGame *campaign)
 {
 	if (weapon == 0 || !isFirearmWithChamberedAmmo(weapon))
 	{
@@ -314,6 +317,7 @@ void appendNestedLoadedMagazine(YAML::Node &entry, BattleItem *weapon)
 	nested["battleItemId"] = ammo->getId();
 	nested["ammoType"] = ammo->getRules()->getType();
 	nested["rounds"] = ammo->getAmmoQuantity();
+	nested["researchUsable"] = companionItemResearchUsable(campaign, ammo->getRules());
 	entry["nestedAmmo"] = nested;
 }
 
@@ -360,28 +364,29 @@ void appendItemPlacement(YAML::Node &entry, BattleItem *item, const char *handSl
 	}
 }
 
-YAML::Node buildEquipmentItemNode(BattleItem *item, BattleUnit *unit, const char *handSlotId)
+YAML::Node buildEquipmentItemNode(BattleItem *item, BattleUnit *unit, SavedGame *campaign, const char *handSlotId)
 {
 	YAML::Node entry;
 	entry["battleItemId"] = item->getId();
 	entry["itemType"] = item->getRules()->getType();
 	entry["battleType"] = static_cast<int>(item->getRules()->getBattleType());
+	entry["researchUsable"] = companionItemResearchUsable(campaign, item->getRules());
 	appendItemPlacement(entry, item, handSlotId);
-	appendNestedLoadedMagazine(entry, item);
-	appendFirearmAmmoState(entry, item);
+	appendNestedLoadedMagazine(entry, item, campaign);
+	appendFirearmAmmoState(entry, item, campaign);
 	appendGrenadeState(entry, item);
 	appendMedikitConsumables(entry, item);
 	(void)unit;
 	return entry;
 }
 
-YAML::Node buildHandSlotNode(BattleItem *item, BattleUnit *unit, const char *handSlotId)
+YAML::Node buildHandSlotNode(BattleItem *item, BattleUnit *unit, SavedGame *campaign, const char *handSlotId)
 {
 	if (item == 0)
 	{
 		return nullNode();
 	}
-	return buildEquipmentItemNode(item, unit, handSlotId);
+	return buildEquipmentItemNode(item, unit, campaign, handSlotId);
 }
 
 bool isItemContiguousInNestedWeaponMagazine(BattleUnit *unit, BattleItem *item)
@@ -407,7 +412,7 @@ bool isItemContiguousInNestedWeaponMagazine(BattleUnit *unit, BattleItem *item)
 	return false;
 }
 
-void appendInventoryEntries(YAML::Node &inventory, BattleUnit *unit)
+void appendInventoryEntries(YAML::Node &inventory, BattleUnit *unit, SavedGame *campaign)
 {
 	size_t count = 0;
 	for (std::vector<BattleItem*>::iterator i = unit->getInventory()->begin();
@@ -438,8 +443,9 @@ void appendInventoryEntries(YAML::Node &inventory, BattleUnit *unit)
 		}
 		entry["itemType"] = item->getRules()->getType();
 		entry["battleType"] = static_cast<int>(item->getRules()->getBattleType());
-		appendNestedLoadedMagazine(entry, item);
-		appendFirearmAmmoState(entry, item);
+		entry["researchUsable"] = companionItemResearchUsable(campaign, item->getRules());
+		appendNestedLoadedMagazine(entry, item, campaign);
+		appendFirearmAmmoState(entry, item, campaign);
 		appendGrenadeState(entry, item);
 		appendMedikitConsumables(entry, item);
 		inventory.push_back(entry);
@@ -536,11 +542,11 @@ void appendActorGroundInventory(YAML::Node &entry, SavedBattleGame *battle, Save
 		row["inventorySlotType"] = std::string("ground");
 		row["inventoryX"] = item->getSlotX();
 		row["inventoryY"] = item->getSlotY();
-		appendNestedLoadedMagazine(row, item);
-		appendFirearmAmmoState(row, item);
+		appendNestedLoadedMagazine(row, item, campaign);
+		appendFirearmAmmoState(row, item, campaign);
 		appendGrenadeState(row, item);
 		appendMedikitConsumables(row, item);
-		(void)campaign;
+		row["researchUsable"] = companionItemResearchUsable(campaign, item->getRules());
 		groundSeq.push_back(row);
 		++exported;
 	}
@@ -556,12 +562,12 @@ void appendFriendlyEquipment(YAML::Node &entry, SavedBattleGame *battle, SavedGa
 	entry["activeHand"] = unit->getActiveHand();
 
 	YAML::Node hands;
-	hands["right"] = buildHandSlotNode(unit->getItem("STR_RIGHT_HAND"), unit, "STR_RIGHT_HAND");
-	hands["left"] = buildHandSlotNode(unit->getItem("STR_LEFT_HAND"), unit, "STR_LEFT_HAND");
+	hands["right"] = buildHandSlotNode(unit->getItem("STR_RIGHT_HAND"), unit, campaign, "STR_RIGHT_HAND");
+	hands["left"] = buildHandSlotNode(unit->getItem("STR_LEFT_HAND"), unit, campaign, "STR_LEFT_HAND");
 	entry["hands"] = hands;
 
 	YAML::Node inventory = YAML::Node(YAML::NodeType::Sequence);
-	appendInventoryEntries(inventory, unit);
+	appendInventoryEntries(inventory, unit, campaign);
 	entry["inventory"] = inventory;
 	appendCarriedWeightEncumbrance(entry, unit);
 	appendActorGroundInventory(entry, battle, campaign, unit);

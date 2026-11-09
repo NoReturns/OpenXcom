@@ -111,6 +111,7 @@ set ( engine_src
   Engine/CompanionUniformShootingSpreadCore.cpp
 	Engine/CompanionPerceptionLog.cpp
 	Engine/CompanionGroundItemObservationCore.cpp
+	Engine/CompanionItemResearchEligibilityCore.cpp
 	Engine/CompanionGroundItemMemory.cpp
 	Engine/CompanionSnapshotGroundItems.cpp
 	Engine/CompanionGroundInventoryCore.cpp

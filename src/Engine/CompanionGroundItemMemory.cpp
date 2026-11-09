@@ -2,6 +2,7 @@
  * Open X-Com Companion — session ground-item memory (M1-WP9).
  */
 #include "CompanionGroundItemMemory.h"
+#include "CompanionItemResearchEligibilityCore.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/Tile.h"
@@ -39,6 +40,7 @@ GroundItemRulesView viewFromBattleItem(BattleItem *item, SavedGame *campaign)
 	view.weight = rules->getWeight();
 	view.ammoQuantity = item->getAmmoQuantity();
 	view.researched = isItemResearched(campaign, rules);
+	view.commandResearchUsable = companionItemResearchUsable(campaign, rules);
 	const BattleType bt = rules->getBattleType();
 	view.primedGrenade = (bt == BT_GRENADE || bt == BT_PROXIMITYGRENADE) && item->getFuseTimer() >= 0;
 	return view;

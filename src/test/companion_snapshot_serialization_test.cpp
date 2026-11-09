@@ -19,6 +19,8 @@
 #include "../Savegame/Tile.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionCommandCasualtySettlement.h"
+#include "../Engine/CompanionItemResearchEligibilityCore.h"
+#include "../Mod/RuleResearch.h"
 #include <yaml-cpp/yaml.h>
 #include <cmath>
 #include <cstdlib>
@@ -797,6 +799,9 @@ static void testWp8InventoryObservationIdentityAndPlacement()
 	expect(rh["nestedAmmo"]["ammoType"].as<std::string>() == "STR_WP8_CLIP", "nested ammo type");
 	expect(rh["loaded"]["battleItemId"].as<int>() == clipLoaded->getId(), "loaded block ammo id");
 	expect(rh["loaded"]["rounds"].as<int>() == 20, "loaded rounds");
+	expect(rh["researchUsable"].as<bool>() == true, "carried weapon empty requirements usable");
+	expect(rh["nestedAmmo"]["researchUsable"].as<bool>() == true, "nested magazine empty requirements usable");
+	expect(rh["loaded"]["researchUsable"].as<bool>() == true, "loaded block researchUsable");
 
 	expect(entry["inventory"].size() == 2U, "two non-nested inventory rows");
 	YAML::Node rowBelt, rowPack;
@@ -817,6 +822,8 @@ static void testWp8InventoryObservationIdentityAndPlacement()
 	expect(rowPack["inventoryX"].as<int>() == 2 && rowPack["inventoryY"].as<int>() == 1, "backpack grid");
 	expect(rowBelt["battleItemId"].as<int>() != rowPack["battleItemId"].as<int>(), "distinct spare clip ids");
 	expect(rowBelt["battleItemId"].as<int>() != clipLoaded->getId(), "spare differs from loaded magazine");
+	expect(rowBelt["researchUsable"].as<bool>() == true, "spare belt clip researchUsable");
+	expect(rowPack["researchUsable"].as<bool>() == true, "spare backpack clip researchUsable");
 
 	const YAML::Node yaml1 = buildParsedSnapshot(fixture);
 	const YAML::Node yaml2 = buildParsedSnapshot(fixture);
@@ -1197,6 +1204,308 @@ static void testHostileDeathPerceptionOmitsWhenTileNotInSight()
  * WP8B2: Companion RELOAD/UNLOAD used RuleItem::clipSize on the firearm; vanilla UFO rifles use clipSize 0
  * on the weapon and put capacity on STR_RIFLE_CLIP. Magazine eligibility must follow needsAmmo + compatibleAmmo.
  */
+static RuleItem *scavengingAlienWeaponRules()
+{
+	static RuleItem *rules = 0;
+	if (rules != 0)
+	{
+		return rules;
+	}
+	RuleResearch *gate = new RuleResearch("STR_SCAVENGE_ALIEN_GATE");
+	YAML::Node rn;
+	rn["name"] = "STR_SCAVENGE_ALIEN_GATE";
+	gate->load(rn, 0);
+	fixtureMod().registerTestResearchRule(gate);
+	rules = new RuleItem("STR_SCAVENGE_ALIEN_WEAPON");
+	YAML::Node inode;
+	inode["battleType"] = static_cast<int>(BT_FIREARM);
+	inode["clipSize"] = -1;
+	inode["requires"] = YAML::Load("[STR_SCAVENGE_ALIEN_GATE]");
+	rules->load(inode, &fixtureMod(), 0);
+	return rules;
+}
+
+static void testGroundInventoryResearchUsableUnresearchedAlienWeapon()
+{
+	RuleInventory *ground = snapshotTestGroundInventoryRule();
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(40);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 0);
+	placeUnitOnDiscoveredTile(fixture, unit, Position(1, 1, 0));
+	Tile *tile = unit->getTile();
+	if (tile == 0)
+	{
+		return;
+	}
+	BattleItem *weapon = new BattleItem(scavengingAlienWeaponRules(), fixture.battle->getCurrentItemId());
+	weapon->setSlotX(0);
+	weapon->setSlotY(0);
+	tile->addItem(weapon, ground);
+	registerBattleItem(fixture.battle, weapon);
+
+	const YAML::Node entry = findUnitByIdDirect(fixture, 40, 4);
+	expect(entry["groundInventory"][0]["researchUsable"].as<bool>() == false,
+		"unresearched alien ground weapon researchUsable false");
+	const bool helperUsable = companionItemResearchUsable(&fixture.game, scavengingAlienWeaponRules());
+	expect(!helperUsable, "helper agrees unresearched");
+
+	expect(!helperUsable, "PICKUP-aligned helper false when unresearched");
+
+	adoptGroundItemForBattleCleanup(fixture.battle, tile, weapon);
+}
+
+static void testGroundInventoryResearchUsableResearchedAlienWeapon()
+{
+	RuleInventory *ground = snapshotTestGroundInventoryRule();
+	TacticalFixture fixture;
+	fixture.game.addFinishedResearchSimple(fixtureMod().getResearch("STR_SCAVENGE_ALIEN_GATE", true));
+	Soldier *soldier = fixture.addRosterSoldier(41);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 0);
+	placeUnitOnDiscoveredTile(fixture, unit, Position(1, 1, 0));
+	Tile *tile = unit->getTile();
+	if (tile == 0)
+	{
+		return;
+	}
+	BattleItem *weapon = new BattleItem(scavengingAlienWeaponRules(), fixture.battle->getCurrentItemId());
+	weapon->setSlotX(0);
+	weapon->setSlotY(0);
+	tile->addItem(weapon, ground);
+	registerBattleItem(fixture.battle, weapon);
+
+	const YAML::Node entry = findUnitByIdDirect(fixture, 41, 4);
+	expect(entry["groundInventory"][0]["researchUsable"].as<bool>() == true,
+		"researched alien ground weapon researchUsable true");
+
+	adoptGroundItemForBattleCleanup(fixture.battle, tile, weapon);
+}
+
+static void testGroundItemsObservationExportsResearchUsableWhenIdentified()
+{
+	TacticalFixture fixture;
+	MapDataSet ds("scavenge_ground_items");
+	MapData *floor = new MapData(&ds);
+	floor->setObjectType(O_FLOOR);
+	floor->setTUCosts(4, 4, 4);
+	Tile *tile = fixture.battle->getTile(Position(1, 1, 0));
+	tile->setMapData(floor, 1, 0, O_FLOOR);
+	tile->setDiscovered(true, 2);
+	tile->setVisible(+1);
+	RuleInventory ground("STR_GROUND");
+	fixture.game.addFinishedResearchSimple(fixtureMod().getResearch("STR_SCAVENGE_ALIEN_GATE", true));
+	BattleItem *weapon = new BattleItem(scavengingAlienWeaponRules(), fixture.battle->getCurrentItemId());
+	tile->addItem(weapon, &ground);
+	registerBattleItem(fixture.battle, weapon);
+
+	const YAML::Node root = buildParsedSnapshot(fixture);
+	const YAML::Node observations = root["groundItems"]["observations"];
+	expect(observations.size() == 1, "groundItems observation present");
+	expect(observations[0]["items"][0]["itemType"].as<std::string>() == "STR_SCAVENGE_ALIEN_WEAPON",
+		"researched weapon itemType visible");
+	expect(observations[0]["items"][0]["researchUsable"].as<bool>() == true,
+		"groundItems researchUsable true when identified");
+
+	adoptGroundItemForBattleCleanup(fixture.battle, tile, weapon);
+}
+
+static void testCompanionItemResearchUsableMultipleRequirements()
+{
+	Mod &mod = fixtureMod();
+	RuleResearch *r1 = new RuleResearch("STR_SCAVENGE_REQ_A");
+	RuleResearch *r2 = new RuleResearch("STR_SCAVENGE_REQ_B");
+	YAML::Node n1, n2;
+	n1["name"] = "STR_SCAVENGE_REQ_A";
+	n2["name"] = "STR_SCAVENGE_REQ_B";
+	r1->load(n1, 0);
+	r2->load(n2, 0);
+	mod.registerTestResearchRule(r1);
+	mod.registerTestResearchRule(r2);
+	RuleItem rules("STR_SCAVENGE_MULTI_REQ_ITEM");
+	YAML::Node inode;
+	inode["battleType"] = static_cast<int>(BT_FIREARM);
+	inode["clipSize"] = -1;
+	inode["requires"] = YAML::Load("[STR_SCAVENGE_REQ_A, STR_SCAVENGE_REQ_B]");
+	rules.load(inode, &mod, 0);
+	SavedGame save;
+	expect(!companionItemResearchUsable(&save, &rules), "none researched");
+	save.addFinishedResearchSimple(mod.getResearch("STR_SCAVENGE_REQ_A", true));
+	expect(!companionItemResearchUsable(&save, &rules), "one of two researched");
+	save.addFinishedResearchSimple(mod.getResearch("STR_SCAVENGE_REQ_B", true));
+	expect(companionItemResearchUsable(&save, &rules), "all researched");
+}
+
+static void testCompanionItemResearchUsableNoCampaignOrEmptyReqs()
+{
+	RuleItem emptyReqs("STR_SCAVENGE_NO_REQ");
+	YAML::Node node;
+	node["battleType"] = static_cast<int>(BT_FIREARM);
+	node["clipSize"] = -1;
+	emptyReqs.load(node, &fixtureMod(), 0);
+	SavedGame save;
+	expect(companionItemResearchUsable(&save, &emptyReqs), "empty requirements usable");
+	expect(!companionItemResearchUsable(0, &emptyReqs), "missing campaign not usable");
+}
+
+static RuleItem *scavengingGatedCarriedClipRules()
+{
+	static RuleItem *rules = 0;
+	if (rules != 0)
+	{
+		return rules;
+	}
+	RuleResearch *gate = new RuleResearch("STR_SCAVENGE_CARRIED_CLIP_GATE");
+	YAML::Node rn;
+	rn["name"] = "STR_SCAVENGE_CARRIED_CLIP_GATE";
+	gate->load(rn, 0);
+	fixtureMod().registerTestResearchRule(gate);
+	rules = new RuleItem("STR_SCAVENGE_CARRIED_GATED_CLIP");
+	YAML::Node inode;
+	inode["battleType"] = static_cast<int>(BT_AMMO);
+	inode["clipSize"] = 20;
+	inode["requires"] = YAML::Load("[STR_SCAVENGE_CARRIED_CLIP_GATE]");
+	rules->load(inode, &fixtureMod(), 0);
+	return rules;
+}
+
+static RuleItem *scavengingGatedCarriedWeaponRules()
+{
+	static RuleItem *rules = 0;
+	if (rules != 0)
+	{
+		return rules;
+	}
+	RuleResearch *gate = new RuleResearch("STR_SCAVENGE_CARRIED_WEAPON_GATE");
+	YAML::Node rn;
+	rn["name"] = "STR_SCAVENGE_CARRIED_WEAPON_GATE";
+	gate->load(rn, 0);
+	fixtureMod().registerTestResearchRule(gate);
+	rules = new RuleItem("STR_SCAVENGE_CARRIED_GATED_WEAPON");
+	YAML::Node inode;
+	inode["battleType"] = static_cast<int>(BT_FIREARM);
+	inode["clipSize"] = 20;
+	inode["compatibleAmmo"] = YAML::Load("[STR_SCAVENGE_CARRIED_GATED_CLIP]");
+	inode["requires"] = YAML::Load("[STR_SCAVENGE_CARRIED_WEAPON_GATE]");
+	rules->load(inode, &fixtureMod(), 0);
+	return rules;
+}
+
+static void testCarriedEquipmentResearchUsableSplitWeaponAmmoGates()
+{
+	Wp8TestRules &R = wp8Rules();
+	RuleItem *weaponRules = scavengingGatedCarriedWeaponRules();
+	RuleItem *clipRules = scavengingGatedCarriedClipRules();
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(60);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 0);
+	BattleItem *rifle = new BattleItem(weaponRules, fixture.battle->getCurrentItemId());
+	BattleItem *loadedClip = new BattleItem(clipRules, fixture.battle->getCurrentItemId());
+	BattleItem *spareClip = new BattleItem(clipRules, fixture.battle->getCurrentItemId());
+	expect(rifle->setAmmoItem(loadedClip) == 0, "gated rifle accepts gated clip");
+	rifle->setSlot(&R.rightHand);
+	rifle->setSlotX(0);
+	rifle->setSlotY(0);
+	unit->getInventory()->push_back(rifle);
+	registerBattleItem(fixture.battle, rifle);
+	registerBattleItem(fixture.battle, loadedClip);
+	placeEquippedItem(fixture.battle, unit, spareClip, &R.belt, 0, 0);
+
+	const YAML::Node none = findUnitById(buildParsedSnapshot(fixture)["units"], 60);
+	const YAML::Node rhNone = none["hands"]["right"];
+	expect(rhNone["researchUsable"].as<bool>() == false, "unresearched carried weapon");
+	expect(rhNone["nestedAmmo"]["researchUsable"].as<bool>() == false, "unresearched nested magazine");
+	expect(rhNone["loaded"]["researchUsable"].as<bool>() == false, "unresearched loaded magazine");
+	expect(none["inventory"][0]["researchUsable"].as<bool>() == false, "unresearched spare magazine");
+
+	fixture.game.addFinishedResearchSimple(fixtureMod().getResearch("STR_SCAVENGE_CARRIED_WEAPON_GATE", true));
+	const YAML::Node weaponOnly = findUnitById(buildParsedSnapshot(fixture)["units"], 60);
+	const YAML::Node rhWeapon = weaponOnly["hands"]["right"];
+	expect(rhWeapon["researchUsable"].as<bool>() == true, "researched carried weapon");
+	expect(rhWeapon["nestedAmmo"]["researchUsable"].as<bool>() == false, "nested still unresearched clip");
+	expect(weaponOnly["inventory"][0]["researchUsable"].as<bool>() == false, "spare still unresearched");
+
+	fixture.game.addFinishedResearchSimple(fixtureMod().getResearch("STR_SCAVENGE_CARRIED_CLIP_GATE", true));
+	const YAML::Node both = findUnitById(buildParsedSnapshot(fixture)["units"], 60);
+	const YAML::Node rhBoth = both["hands"]["right"];
+	expect(rhBoth["researchUsable"].as<bool>() == true, "both gates weapon usable");
+	expect(rhBoth["nestedAmmo"]["researchUsable"].as<bool>() == true, "both gates nested usable");
+	expect(rhBoth["loaded"]["researchUsable"].as<bool>() == true, "both gates loaded usable");
+	expect(both["inventory"][0]["researchUsable"].as<bool>() == true, "both gates spare usable");
+}
+
+static void testCarriedEquipmentResearchUsableNullCampaignFailClosed()
+{
+	Wp8TestRules &R = wp8Rules();
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(61);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 0);
+	BattleItem *rifle = new BattleItem(&R.rifle, fixture.battle->getCurrentItemId());
+	BattleItem *clip = new BattleItem(&R.clip, fixture.battle->getCurrentItemId());
+	expect(rifle->setAmmoItem(clip) == 0, "rifle load");
+	rifle->setSlot(&R.rightHand);
+	rifle->setSlotX(0);
+	rifle->setSlotY(0);
+	unit->getInventory()->push_back(rifle);
+	registerBattleItem(fixture.battle, rifle);
+	registerBattleItem(fixture.battle, clip);
+	placeEquippedItem(fixture.battle, unit, new BattleItem(&R.clip, fixture.battle->getCurrentItemId()), &R.belt, 0, 0);
+
+	const YAML::Node root = CompanionSnapshotBuild::buildSnapshot(fixture.battle, 0, 4, false);
+	const YAML::Node entry = findUnitById(root["units"], 61);
+	expect(entry["hands"]["right"]["researchUsable"].as<bool>() == false, "null campaign hand fail closed");
+	expect(entry["hands"]["right"]["nestedAmmo"]["researchUsable"].as<bool>() == false, "null campaign nested fail closed");
+	expect(entry["inventory"][0]["researchUsable"].as<bool>() == false, "null campaign inventory fail closed");
+}
+
+static void testGroundInventoryNestedMagazineResearchUsable()
+{
+	RuleInventory *ground = snapshotTestGroundInventoryRule();
+	TacticalFixture fixture;
+	fixture.game.addFinishedResearchSimple(fixtureMod().getResearch("STR_SCAVENGE_CARRIED_WEAPON_GATE", true));
+	Soldier *soldier = fixture.addRosterSoldier(62);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 0);
+	placeUnitOnDiscoveredTile(fixture, unit, Position(1, 1, 0));
+	Tile *tile = unit->getTile();
+	BattleItem *weapon = new BattleItem(scavengingGatedCarriedWeaponRules(), fixture.battle->getCurrentItemId());
+	BattleItem *clip = new BattleItem(scavengingGatedCarriedClipRules(), fixture.battle->getCurrentItemId());
+	expect(weapon->setAmmoItem(clip) == 0, "ground gated weapon load");
+	weapon->setSlotX(0);
+	weapon->setSlotY(0);
+	tile->addItem(weapon, ground);
+	registerBattleItem(fixture.battle, weapon);
+	registerBattleItem(fixture.battle, clip);
+
+	const YAML::Node entry = findUnitByIdDirect(fixture, 62, 4);
+	expect(entry["groundInventory"][0]["researchUsable"].as<bool>() == true, "ground weapon researched");
+	expect(entry["groundInventory"][0]["nestedAmmo"]["researchUsable"].as<bool>() == false, "ground nested clip unresearched");
+
+	adoptGroundItemForBattleCleanup(fixture.battle, tile, weapon);
+}
+
+static void testGroundItemsUnresearchedExportsResearchUsableFalseWithoutItemType()
+{
+	TacticalFixture fixture;
+	MapDataSet ds("scavenge_ground_unres");
+	MapData *floor = new MapData(&ds);
+	floor->setObjectType(O_FLOOR);
+	floor->setTUCosts(4, 4, 4);
+	Tile *tile = fixture.battle->getTile(Position(2, 1, 0));
+	tile->setMapData(floor, 1, 0, O_FLOOR);
+	tile->setDiscovered(true, 2);
+	tile->setVisible(+1);
+	RuleInventory ground("STR_GROUND");
+	BattleItem *weapon = new BattleItem(scavengingAlienWeaponRules(), fixture.battle->getCurrentItemId());
+	tile->addItem(weapon, &ground);
+	registerBattleItem(fixture.battle, weapon);
+
+	const YAML::Node root = buildParsedSnapshot(fixture);
+	const YAML::Node item = root["groundItems"]["observations"][0]["items"][0];
+	expect(!item["itemType"], "unresearched ground item omits itemType");
+	expect(item["itemCategory"].as<std::string>() == "unidentified_firearm", "unidentified category");
+	expect(item["researchUsable"].as<bool>() == false, "researchUsable false without leaking tree");
+
+	adoptGroundItemForBattleCleanup(fixture.battle, tile, weapon);
+}
+
 static void testWp8VanillaRifleMagazineEligibilityRegression()
 {
 	RuleItem rifleRules("STR_TEST_VANILLA_RIFLE");
@@ -1268,6 +1577,15 @@ int main()
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionWhenTileInFriendlySight);
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionOmitsWhenTileNotInSight);
 	SNAPSHOT_TEST_STEP(testWp8VanillaRifleMagazineEligibilityRegression);
+	SNAPSHOT_TEST_STEP(testGroundInventoryResearchUsableUnresearchedAlienWeapon);
+	SNAPSHOT_TEST_STEP(testGroundInventoryResearchUsableResearchedAlienWeapon);
+	SNAPSHOT_TEST_STEP(testGroundItemsObservationExportsResearchUsableWhenIdentified);
+	SNAPSHOT_TEST_STEP(testGroundItemsUnresearchedExportsResearchUsableFalseWithoutItemType);
+	SNAPSHOT_TEST_STEP(testCompanionItemResearchUsableMultipleRequirements);
+	SNAPSHOT_TEST_STEP(testCompanionItemResearchUsableNoCampaignOrEmptyReqs);
+	SNAPSHOT_TEST_STEP(testCarriedEquipmentResearchUsableSplitWeaponAmmoGates);
+	SNAPSHOT_TEST_STEP(testCarriedEquipmentResearchUsableNullCampaignFailClosed);
+	SNAPSHOT_TEST_STEP(testGroundInventoryNestedMagazineResearchUsable);
 
 	if (g_failures != 0)
 	{

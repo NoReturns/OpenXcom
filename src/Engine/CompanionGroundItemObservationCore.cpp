@@ -42,6 +42,8 @@ GroundItemObservationItem buildItemObservation(const GroundItemRulesView &view, 
 	out.hasItemType = false;
 	out.hasQuantity = false;
 	out.hasPrimed = false;
+	out.hasResearchUsable = false;
+	out.researchUsable = false;
 	if (primaryOnTile)
 	{
 		out.itemCategory = view.researched
@@ -69,6 +71,11 @@ GroundItemObservationItem buildItemObservation(const GroundItemRulesView &view, 
 			out.hasPrimed = true;
 			out.primed = true;
 		}
+	}
+	if (primaryOnTile)
+	{
+		out.hasResearchUsable = true;
+		out.researchUsable = view.commandResearchUsable;
 	}
 	return out;
 }

@@ -26,6 +26,7 @@ struct GroundItemRulesView
 	int weight;
 	int ammoQuantity;
 	bool researched;
+	bool commandResearchUsable;
 	bool primedGrenade;
 };
 
@@ -40,6 +41,8 @@ struct GroundItemObservationItem
 	bool hasPrimed;
 	bool primed;
 	bool concealedOnTile;
+	bool hasResearchUsable;
+	bool researchUsable;
 };
 
 struct GroundTileObservationInput
