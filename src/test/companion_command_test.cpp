@@ -1430,6 +1430,26 @@ static void testParsePrimeCommandJson()
 	expect(parsed.valid && parsed.fuseTimer == 3, "fuse timer parsed");
 }
 
+static void testParsePrimeCommandJsonFuseZero()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"prime-fuse0\",\n"
+		"  \"command_type\": \"PRIME\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"fuse_timer\": 0,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	PrimeCommandParsed parsed = {};
+	expect(parsePrimeCommandJson(json, &parsed), "prime fuse 0 parse must succeed");
+	expect(parsed.valid && parsed.fuseTimer == 0, "fuse timer 0 is truthy-preserved");
+}
+
 static void testParseThrowCommandJson()
 {
 	const std::string json =
@@ -1950,6 +1970,7 @@ static void testThrowTerminalLifecycle()
 
 static void testPrimeFuseTimerBattleTypeRules()
 {
+	expect(isValidPrimeFuseTimerForBattleType(0, BT_GRENADE), "timed grenade fuse 0 ok");
 	expect(isValidPrimeFuseTimerForBattleType(3, BT_GRENADE), "timed grenade fuse 3 ok");
 	expect(!isValidPrimeFuseTimerForBattleType(24, BT_GRENADE), "timed grenade fuse 24 invalid");
 	expect(isValidPrimeFuseTimerForBattleType(0, BT_PROXIMITYGRENADE), "proximity fuse 0 ok");
@@ -2049,6 +2070,7 @@ int main()
 	testPrimeAlreadyPrimedRejected();
 	testPrimeInvalidFuseRejected();
 	testParsePrimeCommandJson();
+	testParsePrimeCommandJsonFuseZero();
 	testParseThrowCommandJson();
 	testReloadAuthorizedAccepted();
 	testReloadNoCampaignResearchRejected();
