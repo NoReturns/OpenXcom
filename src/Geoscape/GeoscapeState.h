@@ -18,6 +18,7 @@
  * along with OpenXcom.  If not, see <http:///www.gnu.org/licenses/>.
  */
 #include "../Engine/State.h"
+#include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include <list>
 
 namespace OpenXcom
@@ -54,6 +55,7 @@ private:
 	bool _pause, _zoomInEffectDone, _zoomOutEffectDone;
 	Text *_txtDebug;
 	Text *_txtGithubQuota;
+	CompanionOnDemandRelayOverlay::Ui _companionRelayUi;
 	std::list<State*> _popups;
 	std::list<DogfightState*> _dogfights, _dogfightsToBeStarted;
 	size_t _minimizedDogfights;
@@ -156,6 +158,7 @@ private:
 	/// Process each individual mission script command.
 	bool processCommand(RuleMissionScript *command);
 	bool buttonsDisabled();
+	void btnCompanionSendClick(Action *action);
 };
 
 }

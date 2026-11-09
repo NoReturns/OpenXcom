@@ -113,7 +113,6 @@ BasescapeState::BasescapeState(Base *base, Globe *globe) : _base(base), _globe(g
 	add(_txtGithubQuota);
 	CompanionOnDemandRelayOverlay::createUi(this, &_companionRelayUi, "basescape");
 	_companionRelayUi.btnSend->onMouseClick((ActionHandler)&BasescapeState::btnCompanionSendClick);
-	_companionRelayUi.btnRetrieve->onMouseClick((ActionHandler)&BasescapeState::btnCompanionRetrieveClick);
 
 	centerAllSurfaces();
 
@@ -550,12 +549,8 @@ void BasescapeState::edtBaseChange(Action *)
 
 void BasescapeState::btnCompanionSendClick(Action *)
 {
-	CompanionOnDemandRelayOverlay::onStrategicSendPressed();
-}
-
-void BasescapeState::btnCompanionRetrieveClick(Action *)
-{
-	CompanionOnDemandRelayOverlay::onRetrievePressed();
+	CompanionOnDemandRelayOverlay::onStrategicSendPressed(
+		_game->getSavedGame(), _game->getMod());
 }
 
 void BasescapeState::handle(Action *action)

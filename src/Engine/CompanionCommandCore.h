@@ -132,6 +132,7 @@ struct SnapShotValidationInput : TacticalCommandBindingValidationInput
 	bool weaponHasAmmo;
 	bool weaponUsable;
 	bool insufficientTuForFireMode;
+	bool visibleUnitTargetDefinitelyBlocked;
 };
 
 struct SnapShotCompletionInput

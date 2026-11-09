@@ -1400,6 +1400,12 @@ static MoveValidationResult validateDirectedFireCommand(
 		result.publicReason = insufficientTuReason;
 		return result;
 	}
+	if (input.visibleUnitTargetDefinitelyBlocked)
+	{
+		result.rejectCode = "NO_LINE_OF_FIRE";
+		result.publicReason = "No line of fire to visible target.";
+		return result;
+	}
 	result.accepted = true;
 	return result;
 }

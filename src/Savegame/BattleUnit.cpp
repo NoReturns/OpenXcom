@@ -1571,6 +1571,16 @@ int BattleUnit::getAccuracyModifier(BattleItem *item)
 }
 
 /**
+ * Firing stat for the inventory accuracy readout.
+ * Uses the same health/fatal-wound modifier as combat, without weapon-specific arm wounds.
+ * @return Displayed firing accuracy (0–100 scale).
+ */
+int BattleUnit::getInventoryDisplayedFiringAccuracy()
+{
+	return getBaseStats()->firing * getAccuracyModifier() / 100;
+}
+
+/**
  * Calculate throwing accuracy.
  * @return throwing Accuracy
  */

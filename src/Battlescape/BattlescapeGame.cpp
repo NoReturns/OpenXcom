@@ -57,6 +57,7 @@
 #include "../Engine/Logger.h"
 #include "../Engine/CompanionSnapshot.h"
 #include "../Engine/CompanionCommandRuntime.h"
+#include "../Engine/CompanionWalkStopTokens.h"
 #include "../Engine/CompanionRelayPublicationFreshnessCore.h"
 #include "../Engine/CompanionCommandRuntimeSupport.h"
 #include "../Engine/CompanionCommandCore.h"
@@ -1124,8 +1125,17 @@ void BattlescapeGame::popState()
 	if (action.actor && !action.result.empty() && action.actor->getFaction() == FACTION_PLAYER
 		&& _playerPanicHandled && (_save->getSide() == FACTION_PLAYER || _debugPlay))
 	{
-		_parentState->warning(action.result);
-		actionFailed = true;
+		const bool companionWalkStopToken = action.type == BA_WALK
+		    && CompanionWalkStopTokens::isWalkStopActionResult(action.result);
+		if (!companionWalkStopToken && _parentState != 0)
+		{
+			_parentState->warning(action.result);
+			actionFailed = true;
+		}
+		else if (!companionWalkStopToken)
+		{
+			actionFailed = true;
+		}
 	}
 	// M1 blue SEND: skip mutation when actionFailed (non-empty action.result warning). The engine may
 	// still have applied partial deltas (e.g. walk abort with 1 TU / facing) similar to Companion MOVE
@@ -1296,7 +1306,10 @@ bool BattlescapeGame::noActionsPending(BattleUnit *bu)
  */
 void BattlescapeGame::setStateInterval(Uint32 interval)
 {
-	_parentState->setStateInterval(interval);
+	if (_parentState != 0)
+	{
+		_parentState->setStateInterval(interval);
+	}
 }
 
 
@@ -1617,6 +1630,16 @@ void BattlescapeGame::cancelAllActions()
 BattleAction *BattlescapeGame::getCurrentAction()
 {
 	return &_currentAction;
+}
+
+bool BattlescapeGame::getRearmostQueuedBattleAction(BattleAction *out) const
+{
+	if (out == 0 || _states.empty())
+	{
+		return false;
+	}
+	*out = _states.back()->getAction();
+	return true;
 }
 
 /**
@@ -2606,7 +2629,10 @@ bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, s
 	}
 	cancelCurrentAction();
 	_save->setSelectedUnit(unit);
-	_parentState->updateSoldierInfo();
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+	}
 	_currentAction = BattleAction();
 	_currentAction.actor = unit;
 	_currentAction.target = dest;
@@ -2621,8 +2647,15 @@ bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, s
 		cancelCurrentAction();
 		return false;
 	}
-	getMap()->setCursorType(CT_NONE);
-	_parentState->getGame()->getCursor()->setVisible(false);
+	if (_parentState != 0)
+	{
+		getMap()->setCursorType(CT_NONE);
+		if (_parentState->getGame() != 0)
+		{
+			_parentState->getGame()->getCursor()->setVisible(false);
+		}
+	}
+	_currentAction.playerOrdered = true;
 	statePushBack(new UnitWalkBState(this, _currentAction));
 	return true;
 }

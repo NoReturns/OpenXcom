@@ -38,6 +38,7 @@
 #include "AIModule.h"
 #include "Camera.h"
 #include "Explosion.h"
+#include "BattlescapeGame.h"
 #include "BattlescapeState.h"
 #include "../Savegame/BattleUnitStatistics.h"
 #include "../fmath.h"
@@ -716,6 +717,70 @@ void ProjectileFlyBState::cancel()
  * @param target Tile to throw to.
  * @return True when the range is valid.
  */
+bool ProjectileFlyBState::companionPreflightVisibleUnitTargetBlocked(
+	const BattleAction &action,
+	SavedBattleGame *save,
+	BattlescapeGame *game,
+	const Position &origin)
+{
+	if (save == 0 || action.actor == 0 || action.weapon == 0)
+	{
+		return false;
+	}
+	if (game == 0 || !game->getPanicHandled())
+	{
+		return false;
+	}
+	if (action.weapon->getRules()->getArcingShot())
+	{
+		return false;
+	}
+	switch (action.type)
+	{
+	case BA_SNAPSHOT:
+	case BA_AIMEDSHOT:
+	case BA_AUTOSHOT:
+		break;
+	default:
+		return false;
+	}
+	if (action.type == BA_LAUNCH)
+	{
+		return false;
+	}
+	if (Options::forceFire && (SDL_GetModState() & KMOD_CTRL) != 0 && save->getSide() == FACTION_PLAYER)
+	{
+		return false;
+	}
+	Tile *targetTile = save->getTile(action.target);
+	if (targetTile == 0)
+	{
+		return false;
+	}
+	BattleUnit *targetUnit = targetTile->getUnit();
+	if (targetUnit == 0)
+	{
+		return false;
+	}
+	BattleUnit *actor = action.actor;
+	if (actor->getFaction() == FACTION_PLAYER && !targetUnit->getVisible())
+	{
+		return false;
+	}
+	if (origin == action.target || targetUnit == actor)
+	{
+		return false;
+	}
+	BattleAction mutableAction = action;
+	Position originVoxel = save->getTileEngine()->getOriginVoxel(mutableAction, save->getTile(origin));
+	Position targetVoxel;
+	if (!save->getTileEngine()->canTargetUnit(&originVoxel, targetTile, &targetVoxel, actor, false))
+	{
+		return true;
+	}
+	return false;
+}
+
 bool ProjectileFlyBState::validThrowRange(BattleAction *action, Position origin, Tile *target)
 {
 	// note that all coordinates and thus also distances below are in number of tiles (not in voxels).

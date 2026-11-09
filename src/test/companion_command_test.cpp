@@ -498,6 +498,79 @@ static void testWalkStopDiagnosticsCompletedOmitsReason()
 	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(
 		evaluateWalkTerminalStatus(input), input);
 	expect(diag.movementStopReason.empty(), "completed move has no movement_stop_reason");
+	expect(evaluateWalkTerminalStatus(input) == CMD_COMPLETED, "completed at destination");
+}
+
+static void testWalkStopDiagnosticsPathBlocked()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(2, 1, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	input.actionResult = CompanionWalkStopTokens::PATH_BLOCKED;
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(
+		evaluateWalkTerminalStatus(input), input);
+	expect(diag.movementStopReason == "path_blocked", "path_blocked token maps");
+}
+
+static void testWalkStopDiagnosticsProximityGrenade()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(2, 1, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	input.actionResult = CompanionWalkStopTokens::PROXIMITY_GRENADE;
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(
+		evaluateWalkTerminalStatus(input), input);
+	expect(diag.movementStopReason == "proximity_grenade", "proximity_grenade token maps");
+}
+
+static void testWalkStopDiagnosticsActorIncapacitated()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(2, 1, 0);
+	input.battleBusy = false;
+	input.actorAlive = false;
+	input.actorStillAiControlled = true;
+	const CommandLifecycleStatus terminal = evaluateWalkTerminalStatus(input);
+	expect(terminal == CMD_FAILED, "dead actor fails");
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(terminal, input);
+	expect(diag.movementStopReason == "actor_incapacitated", "incapacitated maps");
+}
+
+static void testWalkStopTokenClassifier()
+{
+	expect(CompanionWalkStopTokens::isWalkStopActionResult(CompanionWalkStopTokens::HOSTILE_SPOTTED),
+		"hostile spotted is walk stop token");
+	expect(CompanionWalkStopTokens::isWalkStopActionResult(CompanionWalkStopTokens::REACTION_FIRE),
+		"reaction fire is walk stop token");
+	expect(!CompanionWalkStopTokens::isWalkStopActionResult("STR_NOT_ENOUGH_TIME_UNITS"),
+		"TU string is not companion internal walk stop token");
+}
+
+static void testWalkStopSingleRecordedCauseHostilePrecedence()
+{
+	WalkCompletionInput input = {};
+	input.requestedDest = Position(5, 5, 0);
+	input.startPos = Position(1, 1, 0);
+	input.currentPos = Position(2, 1, 0);
+	input.battleBusy = false;
+	input.actorAlive = true;
+	input.actorStillAiControlled = true;
+	input.actionResult = CompanionWalkStopTokens::HOSTILE_SPOTTED;
+	const WalkStopDiagnostics diag = resolveWalkStopDiagnostics(
+		evaluateWalkTerminalStatus(input), input);
+	expect(diag.movementStopReason == "hostile_spotted", "diagnostics record one engine token");
+	expect(diag.movementStopReason != "reaction_fire",
+		"reaction_fire not co-reported when hostile_spotted token alone");
 }
 
 static const char *SAMPLE_MOVE_COMMAND =
@@ -1147,6 +1220,7 @@ static SnapShotValidationInput validSnapInput()
 	input.weaponHasAmmo = true;
 	input.weaponUsable = true;
 	input.insufficientTuForFireMode = false;
+	input.visibleUnitTargetDefinitelyBlocked = false;
 	return input;
 }
 
@@ -1193,6 +1267,31 @@ static void testSnapShotHumanActorRejected()
 	input.actorAiControlled = false;
 	const MoveValidationResult result = validateSnapShotCommand(input);
 	expect(!result.accepted && result.rejectCode == "NOT_AI_CONTROLLED", "human-controlled snap rejected");
+}
+
+static void testDirectedFireVisibleUnitBlockedRejected()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.visibleUnitTargetDefinitelyBlocked = true;
+	const MoveValidationResult snap = validateSnapShotCommand(input);
+	expect(!snap.accepted && snap.rejectCode == "NO_LINE_OF_FIRE", "snap blocked by visible unit voxel preflight");
+	SnapShotValidationInput autoInput = validSnapInput();
+	autoInput.visibleUnitTargetDefinitelyBlocked = true;
+	const MoveValidationResult autoShot = validateAutoShotCommand(autoInput);
+	expect(!autoShot.accepted && autoShot.rejectCode == "NO_LINE_OF_FIRE", "auto blocked by preflight");
+	SnapShotValidationInput aimInput = validSnapInput();
+	aimInput.visibleUnitTargetDefinitelyBlocked = true;
+	const MoveValidationResult aimed = validateAimedShotCommand(aimInput);
+	expect(!aimed.accepted && aimed.rejectCode == "NO_LINE_OF_FIRE", "aimed blocked by preflight");
+}
+
+static void testDirectedFireVisibleUnitBlockedFlagFalseAccepted()
+{
+	SnapShotValidationInput input = validSnapInput();
+	input.visibleUnitTargetDefinitelyBlocked = false;
+	expect(validateSnapShotCommand(input).accepted, "preflight clear keeps snap accepted");
+	expect(validateAutoShotCommand(input).accepted, "preflight clear keeps auto accepted");
+	expect(validateAimedShotCommand(input).accepted, "preflight clear keeps aimed accepted");
 }
 
 static void testParseSnapShotCommandJson()
@@ -1691,6 +1790,33 @@ static InventoryMoveValidationInput validInventoryMoveInput()
 	return input;
 }
 
+/**
+ * P2-UI-REFRESH-02 reachability: companion inbox polling only runs from
+ * BattlescapeGame::think() (player turn) and popState. Game::think() invokes only
+ * the top state; InventoryState does not delegate to BattlescapeState, so while
+ * inventory is open the companion command tick does not run. btnInventoryClick also
+ * calls cancelAllActions() and requires allowButtons() (!isBusy()), blocking overlap
+ * with in-flight MOVE/FIRE battle states.
+ */
+static void testP2UiRefreshCompanionPollBlockedWhenBattleBusy()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	expect(!shouldRunCompanionCommandTickDuringThink(true, false, false, true, true, false),
+		"P2: think-path inbox poll disabled when battle animation states active");
+
+	ReloadValidationInput reload = validReloadInput();
+	reload.battleBusy = true;
+	const MoveValidationResult reloadBusy = validateReloadCommand(reload);
+	expect(!reloadBusy.accepted && reloadBusy.rejectCode == "BATTLE_BUSY",
+		"P2: RELOAD preflight rejected while battle busy");
+
+	InventoryMoveValidationInput inv = validInventoryMoveInput();
+	inv.battleBusy = true;
+	const MoveValidationResult invBusy = validateInventoryMoveCommand(inv);
+	expect(!invBusy.accepted && invBusy.rejectCode == "BATTLE_BUSY",
+		"P2: INVENTORY_MOVE preflight rejected while battle busy");
+}
+
 static void testInventoryMoveAuthorizedAccepted()
 {
 	expect(validateInventoryMoveCommand(validInventoryMoveInput()).accepted, "authorized inventory move accepted");
@@ -2014,6 +2140,11 @@ int main()
 	testWalkStopDiagnosticsInsufficientTu();
 	testWalkStopDiagnosticsReactionFire();
 	testWalkStopDiagnosticsCompletedOmitsReason();
+	testWalkStopDiagnosticsPathBlocked();
+	testWalkStopDiagnosticsProximityGrenade();
+	testWalkStopDiagnosticsActorIncapacitated();
+	testWalkStopTokenClassifier();
+	testWalkStopSingleRecordedCauseHostilePrecedence();
 	testWalkHostileSpotZeroTileInterruptedClassification();
 	testStandAuthorizedAccepted();
 	testStandAlreadyStandingRejected();
@@ -2059,6 +2190,8 @@ int main()
 	testSnapShotInsufficientTuRejected();
 	testSnapShotUnsupportedWeaponRejected();
 	testSnapShotHumanActorRejected();
+	testDirectedFireVisibleUnitBlockedRejected();
+	testDirectedFireVisibleUnitBlockedFlagFalseAccepted();
 	testParseSnapShotCommandJson();
 	testSnapShotTerminalLifecycle();
 	testAutoShotAuthorizedAccepted();
@@ -2076,6 +2209,7 @@ int main()
 	testReloadNoCampaignResearchRejected();
 	testReloadWeaponAlreadyLoadedRejected();
 	testParseReloadCommandJson();
+	testP2UiRefreshCompanionPollBlockedWhenBattleBusy();
 	testUnloadAuthorizedAccepted();
 	testUnloadNoMagazineRejected();
 	testUnloadMagazineIdentityMismatchRejected();

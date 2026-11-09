@@ -7,7 +7,9 @@
 #include "CompanionOnDemandRelayLayout.h"
 #include "CompanionManualUploadHudCore.h"
 #include "CompanionRelayPublicationFreshnessCore.h"
+#include "../Mod/Mod.h"
 #include "../Savegame/SavedBattleGame.h"
+#include "../Savegame/SavedGame.h"
 #include "CompanionBriefingTestSupport.h"
 #include <cstdlib>
 #include "../Engine/Action.h"
@@ -71,6 +73,7 @@ std::string g_lastStatusLabel;
 std::string g_lastManualNoticeLabel;
 bool g_showStatusOverlay = true;
 bool g_hasAutoRetrieveUi = false;
+bool g_hideRetrieveUi = false;
 
 void applyAutoRetrieveLayout(Ui *ui, const CompactBarLayout &layout)
 {
@@ -360,7 +363,9 @@ void createUi(State *parent, Ui *out, const char *interfaceId)
 	out->btnAutoIntervalLess = 0;
 	out->btnAutoIntervalMore = 0;
 	out->txtAutoInterval = 0;
-	g_hasAutoRetrieveUi = interfaceId != 0 && std::string(interfaceId) == "battlescape";
+	const std::string iface = interfaceId != 0 ? std::string(interfaceId) : std::string();
+	g_hasAutoRetrieveUi = iface == "battlescape";
+	g_hideRetrieveUi = iface == "basescape" || iface == "geoscape";
 	if (g_hasAutoRetrieveUi)
 	{
 		out->btnAutoRetrieve = new TextButton(AUTO_RETRIEVE_TOGGLE_WIDTH, COMPACT_BUTTON_HEIGHT, 0, 0);
@@ -394,6 +399,11 @@ void layoutForBaseViewport(Ui *ui, int viewportX, int viewportY, int viewportWid
 		return;
 	}
 	applyCompactBarLayout(ui, layout);
+}
+
+void layoutForGeoscapeGlobe(Ui *ui, int globeX, int globeY, int globeWidth)
+{
+	layoutForBaseViewport(ui, globeX, globeY, globeWidth);
 }
 
 void layoutForBattlescapeTop(Ui *ui, int screenWidth, int screenHeight)
@@ -434,7 +444,7 @@ void setControlsVisible(Ui *ui, bool visible)
 	}
 	if (ui->btnRetrieve != 0)
 	{
-		ui->btnRetrieve->setVisible(visible);
+		ui->btnRetrieve->setVisible(visible && !g_hideRetrieveUi);
 	}
 	if (ui->txtStatus != 0)
 	{
@@ -591,12 +601,37 @@ bool onAutoRetrieveIntervalMorePressed()
 	return true;
 }
 
-bool onStrategicSendPressed()
+bool onStrategicSendPressed(SavedGame *save, Mod *mod)
 {
-	std::string requestId;
-	std::string error;
-	if (!tryEnqueueSend("strategic", 0, &requestId, &error))
+	if (save == 0 || mod == 0)
 	{
+		CompanionOnDemandRelayCore::reportTerminalSendFailure(
+			"Strategic send unavailable.", "STRATEGIC_SEND_UNAVAILABLE");
+		return false;
+	}
+	CompanionOnDemandRelayCore::StrategicSendEnqueueContext enqueueCtx = {};
+	enqueueCtx.save = save;
+	enqueueCtx.mod = mod;
+	std::string enqueuedId;
+	std::string error;
+	if (!tryEnqueueSend("strategic", 0, &enqueuedId, &error, 0, &enqueueCtx))
+	{
+		if (error == "strategic_marker_write_failed")
+		{
+			CompanionOnDemandRelayCore::reportTerminalSendFailure(
+				"Strategic send marker write failed.", "STRATEGIC_MARKER_FAILED");
+		}
+		else if (error == "strategic_export_failed" || error == "strategic_export_missing"
+			|| error == "strategic_digest_failed")
+		{
+			CompanionOnDemandRelayCore::reportTerminalSendFailure(
+				"Base intelligence export failed.", "STRATEGIC_EXPORT_FAILED");
+		}
+		else if (error == "snapshot_not_configured")
+		{
+			CompanionOnDemandRelayCore::reportTerminalSendFailure(
+				"Companion snapshot path not configured.", "SNAPSHOT_NOT_CONFIGURED");
+		}
 		return false;
 	}
 	g_cachedPhase = RELAY_UI_SENDING;

@@ -120,6 +120,7 @@ set ( engine_src
 	Engine/CompanionGithubQuotaHudOverlay.cpp
 	Engine/CompanionAutoRetrieveCore.cpp
 	Engine/CompanionOnDemandRelayCore.cpp
+	Engine/CompanionStrategicSendEnqueueSupport.cpp
 	Engine/CompanionOnDemandRelayLayout.cpp
 	Engine/CompanionOnDemandRelayOverlay.cpp
 	Engine/CompanionRelayPublicationFreshnessCore.cpp
@@ -681,6 +682,40 @@ if ( OPENXCOM_BUILD_COMPANION_INVENTORY_MOVE_ENGINE_TEST )
   add_test ( NAME companion_inventory_move_engine_test COMMAND companion_inventory_move_engine_test )
 endif ()
 
+option ( OPENXCOM_BUILD_COMPANION_DIRECTED_FIRE_PREFLIGHT_TEST "Build companion directed-fire preflight regression test (P1-FIRE-LANE-03)" ON )
+if ( OPENXCOM_BUILD_COMPANION_DIRECTED_FIRE_PREFLIGHT_TEST )
+  add_executable ( companion_directed_fire_preflight_test
+    test/companion_directed_fire_preflight_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_directed_fire_preflight_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_directed_fire_preflight_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_directed_fire_preflight_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_directed_fire_preflight_test )
+  else ()
+    target_link_libraries ( companion_directed_fire_preflight_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_directed_fire_preflight_test COMMAND companion_directed_fire_preflight_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_MOVE_PLAYER_ORDERED_ENGINE_TEST "Build companion MOVE playerOrdered regression test (P1-MOVE-INTERRUPT-02A)" ON )
+if ( OPENXCOM_BUILD_COMPANION_MOVE_PLAYER_ORDERED_ENGINE_TEST )
+  add_executable ( companion_move_player_ordered_engine_test
+    test/companion_move_player_ordered_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_move_player_ordered_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_move_player_ordered_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_move_player_ordered_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_move_player_ordered_engine_test )
+  else ()
+    target_link_libraries ( companion_move_player_ordered_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_move_player_ordered_engine_test COMMAND companion_move_player_ordered_engine_test )
+endif ()
+
 option ( OPENXCOM_BUILD_COMPANION_PICKUP_DROP_ENGINE_TEST "Build companion PICKUP/DROP engine integration test (WP8B4V)" ON )
 if ( OPENXCOM_BUILD_COMPANION_PICKUP_DROP_ENGINE_TEST )
   add_executable ( companion_pickup_drop_engine_test
@@ -739,12 +774,14 @@ if ( OPENXCOM_BUILD_COMPANION_ON_DEMAND_RELAY_TESTS )
     test/companion_on_demand_relay_test.cpp
     Engine/CompanionAutoRetrieveCore.cpp
     Engine/CompanionOnDemandRelayCore.cpp
+    Engine/CompanionStrategicSendEnqueueSupport.cpp
     Engine/CompanionOnDemandRelayLayout.cpp
     Engine/CompanionRelayPublicationFreshnessCore.cpp
     Engine/CompanionBriefingRequestCore.cpp
     Engine/CompanionSha256.cpp
     Engine/CompanionJsonLite.cpp
   )
+  target_compile_definitions ( companion_on_demand_relay_test PRIVATE COMPANION_RELAY_TEST_STUB_STRATEGIC_EXPORT )
   target_include_directories ( companion_on_demand_relay_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
   if ( WIN32 )
     set_target_properties ( companion_on_demand_relay_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )

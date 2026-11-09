@@ -1489,6 +1489,24 @@ void fillSnapShotValidationInput(
 	const int fireTu = actor != 0 && weapon != 0 ? actor->getActionTUs(actionType, weapon) : 0;
 	input->insufficientTuForFireMode = actor == 0 || weapon == 0 || fireTu <= 0 ||
 		!game->checkReservedTU(actor, fireTu, true);
+	input->visibleUnitTargetDefinitelyBlocked = false;
+	if (actor != 0 && weapon != 0 && battle != 0 && game != 0)
+	{
+		const Position target(parsed.targetX, parsed.targetY, parsed.targetZ);
+		if (target.x >= 0 && target.y >= 0 && target.z >= 0 &&
+		    target.x < battle->getMapSizeX() && target.y < battle->getMapSizeY() && target.z < battle->getMapSizeZ())
+		{
+			BattleAction probe = {};
+			probe.type = actionType;
+			probe.actor = actor;
+			probe.weapon = weapon;
+			probe.target = target;
+			probe.autoShotCounter = 0;
+			input->visibleUnitTargetDefinitelyBlocked =
+				ProjectileFlyBState::companionPreflightVisibleUnitTargetBlocked(
+					probe, battle, game, actor->getPosition());
+		}
+	}
 }
 
 static bool companionHandGrenadeSupportsPrime(BattleItem *weapon)

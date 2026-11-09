@@ -256,6 +256,8 @@ public:
 	int getFiringAccuracy(BattleActionType actionType, BattleItem *item);
 	/// Calculate accuracy modifier.
 	int getAccuracyModifier(BattleItem *item = 0);
+	/// Firing value shown in the battlescape inventory panel (matches modifier without a held weapon).
+	int getInventoryDisplayedFiringAccuracy();
 	/// Calculate throwing accuracy.
 	double getThrowingAccuracy();
 	/// Set armor value.

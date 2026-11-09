@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #ifdef _WIN32
@@ -226,6 +227,50 @@ bool writeTacticalSendMarkerFile(const std::string &requestDir, const std::strin
 	     << "}\n";
 	const std::string markerPath = requestDir + pathSep + "companion-tactical-send-marker.json";
 	return writeTextAtomically(markerPath, json.str());
+}
+
+bool writeStrategicSendMarkerFile(const std::string &requestDir, const std::string &onDemandRequestId,
+	const std::string &contentSha256, const std::string &campaignId, long long exportedAtMs)
+{
+	if (requestDir.empty() || onDemandRequestId.empty() || campaignId.empty()
+	    || !CompanionSha256::isValidHexDigest(contentSha256))
+	{
+		return false;
+	}
+#ifdef _WIN32
+	const char pathSep = '\\';
+#else
+	const char pathSep = '/';
+#endif
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"on_demand_request_id\": \"" << onDemandRequestId << "\",\n"
+	     << "  \"content_sha256\": \"" << contentSha256 << "\",\n"
+	     << "  \"campaign_id\": \"" << campaignId << "\",\n"
+	     << "  \"exported_at_ms\": " << exportedAtMs << "\n"
+	     << "}\n";
+	const std::string markerPath = requestDir + pathSep + "companion-strategic-send-marker.json";
+	return writeTextAtomically(markerPath, json.str());
+}
+
+void removeStrategicSendMarkerFile(const std::string &requestDir)
+{
+	if (requestDir.empty())
+	{
+		return;
+	}
+#ifdef _WIN32
+	const char pathSep = '\\';
+#else
+	const char pathSep = '/';
+#endif
+	const std::string markerPath = requestDir + pathSep + "companion-strategic-send-marker.json";
+#ifdef _WIN32
+	DeleteFileA(markerPath.c_str());
+#else
+	std::remove(markerPath.c_str());
+#endif
 }
 
 } // namespace CompanionBriefingTestSupport

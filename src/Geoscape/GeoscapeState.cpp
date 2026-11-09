@@ -39,6 +39,7 @@
 #include "../Engine/CompanionGithubQuotaHudCore.h"
 #include "../Engine/CompanionRulesReferenceExport.h"
 #include "../Engine/CompanionBaseIntelligenceExport.h"
+#include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/Base.h"
 #include "../Savegame/BaseFacility.h"
@@ -213,6 +214,8 @@ GeoscapeState::GeoscapeState() : _pause(false), _zoomInEffectDone(false), _zoomO
 	add(_sideBottom, "button", "geoscape");
 
 	add(_txtFunds, "text", "geoscape");
+	CompanionOnDemandRelayOverlay::createUi(this, &_companionRelayUi, "geoscape");
+	_companionRelayUi.btnSend->onMouseClick((ActionHandler)&GeoscapeState::btnCompanionSendClick);
 	add(_txtHour, "text", "geoscape");
 	add(_txtHourSep, "text", "geoscape");
 	add(_txtMin, "text", "geoscape");
@@ -433,6 +436,10 @@ void GeoscapeState::blit()
  */
 void GeoscapeState::handle(Action *action)
 {
+	if (CompanionOnDemandRelayOverlay::tryConsumeRelayMouseAction(this, action, &_companionRelayUi))
+	{
+		return;
+	}
 	if (_dogfights.size() == _minimizedDogfights)
 	{
 		State::handle(action);
@@ -517,6 +524,11 @@ void GeoscapeState::handle(Action *action)
 void GeoscapeState::init()
 {
 	State::init();
+	CompanionOnDemandRelayOverlay::layoutForGeoscapeGlobe(
+		&_companionRelayUi,
+		_globe->getX(),
+		_globe->getY(),
+		_globe->getWidth());
 	CompanionGithubQuotaHudOverlay::layoutHudText(_txtGithubQuota, Options::baseYGeoscape, 4);
 	timeDisplay();
 
@@ -571,6 +583,7 @@ void GeoscapeState::think()
 	State::think();
 
 	CompanionGithubQuotaHudOverlay::tick(_txtGithubQuota);
+	CompanionOnDemandRelayOverlay::tick(&_companionRelayUi);
 
 	_zoomInEffectTimer->think(this, 0);
 	_zoomOutEffectTimer->think(this, 0);
@@ -2761,6 +2774,12 @@ void GeoscapeState::resize(int &dX, int &dY)
 bool GeoscapeState::buttonsDisabled()
 {
 	return _zoomInEffectTimer->isRunning() || _zoomOutEffectTimer->isRunning();
+}
+
+void GeoscapeState::btnCompanionSendClick(Action *)
+{
+	CompanionOnDemandRelayOverlay::onStrategicSendPressed(
+		_game->getSavedGame(), _game->getMod());
 }
 
 }

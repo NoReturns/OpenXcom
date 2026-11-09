@@ -27,6 +27,7 @@ class BattlescapeGame;
 class BattleUnit;
 class BattleItem;
 class Tile;
+class SavedBattleGame;
 
 /**
  * A projectile state.
@@ -56,6 +57,9 @@ public:
 	void think();
 	/// Validates the throwing range.
 	static bool validThrowRange(BattleAction *action, Position origin, Tile *target);
+	/// Companion pre-accept: true when stock init would assign the invalid unit-target voxel (visible hostile only).
+	static bool companionPreflightVisibleUnitTargetBlocked(
+		const BattleAction &action, SavedBattleGame *save, BattlescapeGame *game, const Position &origin);
 	/// Calculates the maximum throwing range.
 	static int getMaxThrowDistance(int weight, int strength, int level);
 	/// Set the origin voxel, used for the blaster launcher.

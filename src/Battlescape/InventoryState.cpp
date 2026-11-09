@@ -427,7 +427,7 @@ void InventoryState::updateStats()
 		_txtWeight->setSecondaryColor(_game->getMod()->getInterface("inventory")->getElement("weight")->color);
 	}
 
-	_txtFAcc->setText(tr("STR_ACCURACY_SHORT").arg((int)(unit->getBaseStats()->firing * unit->getHealth()) / unit->getBaseStats()->health));
+	_txtFAcc->setText(tr("STR_ACCURACY_SHORT").arg(unit->getInventoryDisplayedFiringAccuracy()));
 
 	_txtReact->setText(tr("STR_REACTIONS_SHORT").arg(unit->getBaseStats()->reactions));
 

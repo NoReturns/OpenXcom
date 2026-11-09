@@ -144,6 +144,8 @@ public:
 	BattleAction *getCurrentAction();
 	/// Determines whether there is an action currently going on.
 	bool isBusy() const;
+	/// Returns a copy of the rearmost queued battle state's action (regression / diagnostics).
+	bool getRearmostQueuedBattleAction(BattleAction *out) const;
 	/// Activates primary action (left click).
 	void primaryAction(Position pos);
 	/// Activates secondary action (right click).

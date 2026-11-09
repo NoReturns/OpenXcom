@@ -80,9 +80,8 @@ public:
 	void btnTransferClick(Action *action);
 	/// Handler for clicking the Geoscape button.
 	void btnGeoscapeClick(Action *action);
-	/// Companion send/retrieve relay controls (M1-25E).
+	/// Companion strategic send relay control (M1-25E).
 	void btnCompanionSendClick(Action *action);
-	void btnCompanionRetrieveClick(Action *action);
 	/// Consumes relay control clicks before other surfaces (M1-25E3).
 	void handle(Action *action);
 	/// Handler for clicking the base view.

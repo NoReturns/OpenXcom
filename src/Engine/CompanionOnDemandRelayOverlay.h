@@ -5,6 +5,8 @@
 namespace OpenXcom
 {
 
+class Mod;
+class SavedGame;
 class SavedBattleGame;
 class Action;
 class Text;
@@ -30,6 +32,7 @@ void createUi(State *parent, Ui *out, const char *interfaceId);
 void enterBattlescapeSession();
 void leaveBattlescapeSession();
 void layoutForBaseViewport(Ui *ui, int viewportX, int viewportY, int viewportWidth);
+void layoutForGeoscapeGlobe(Ui *ui, int globeX, int globeY, int globeWidth);
 void layoutForBattlescapeTop(Ui *ui, int screenWidth, int screenHeight);
 void tick(Ui *ui);
 void tickBattlescape(Ui *ui, SavedBattleGame *battle = 0);
@@ -38,7 +41,7 @@ bool onRetrievePressed();
 bool onAutoRetrieveTogglePressed();
 bool onAutoRetrieveIntervalLessPressed();
 bool onAutoRetrieveIntervalMorePressed();
-bool onStrategicSendPressed();
+bool onStrategicSendPressed(SavedGame *save, Mod *mod);
 bool absPointHitsVisibleRelayControl(const Ui *ui, int absX, int absY);
 bool tryConsumeRelayMouseAction(State *state, Action *action, Ui *ui);
 

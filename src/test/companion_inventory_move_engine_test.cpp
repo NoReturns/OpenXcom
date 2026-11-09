@@ -14,7 +14,9 @@
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/Soldier.h"
 #include "../Savegame/SavedGame.h"
+#include <yaml-cpp/yaml.h>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 #ifdef main
@@ -794,6 +796,64 @@ static void testThrowNonGrenadeInHandRejected()
 	expect(unit->getItem("STR_RIGHT_HAND") == clip, "clip remains in hand");
 }
 
+static BattleUnit *makeSoldierUnitForAccuracyTests(Mod &mod, int rosterId)
+{
+	RuleSoldier rs("STR_T13_SOLDIER");
+	Armor ar("STR_JUMPSUIT");
+	Soldier soldier(&rs, &ar, rosterId);
+	BattleUnit *unit = new BattleUnit(&soldier, 0);
+	unit->setPosition(Position(1, 1, 0));
+	unit->getBaseStats()->firing = 80;
+	unit->getBaseStats()->health = 100;
+	return unit;
+}
+
+static void applyInventoryAccuracyFixture(BattleUnit *unit, int health, int headFatalWounds)
+{
+	if (unit == 0)
+	{
+		return;
+	}
+	std::ostringstream yaml;
+	yaml << "status: 0\nstunlevel: 0\nhealth: " << health
+	     << "\ntu: 50\nenergy: 50\nmorale: 100\narmor: [0,0,0,0,0]\nfatalWounds: ["
+	     << headFatalWounds << ",0,0,0,0,0]\n";
+	unit->load(YAML::Load(yaml.str()));
+}
+
+static int legacyHealthOnlyInventoryFiringDisplay(BattleUnit *unit)
+{
+	return unit->getBaseStats()->firing * unit->getHealth() / unit->getBaseStats()->health;
+}
+
+/** T13 — inventory firing display must match getAccuracyModifier() (no weapon argument). */
+static void testInventoryFiringAccuracyDisplayParity()
+{
+	Mod mod;
+	BattleUnit *unit = makeSoldierUnitForAccuracyTests(mod, 9101);
+	applyInventoryAccuracyFixture(unit, 100, 0);
+	expect(unit->getInventoryDisplayedFiringAccuracy() == 80,
+		"healthy zero wounds: 80 firing * 100% modifier");
+	expect(unit->getInventoryDisplayedFiringAccuracy() == legacyHealthOnlyInventoryFiringDisplay(unit),
+		"healthy soldier matches legacy formula");
+
+	applyInventoryAccuracyFixture(unit, 50, 2);
+	const int expectedLow = 80 * unit->getAccuracyModifier() / 100;
+	expect(unit->getInventoryDisplayedFiringAccuracy() == expectedLow,
+		"reduced health + head wounds uses modifier not health-only");
+	expect(unit->getInventoryDisplayedFiringAccuracy() != legacyHealthOnlyInventoryFiringDisplay(unit),
+		"regression guard: low health + wounds must not use legacy health-only display");
+
+	applyInventoryAccuracyFixture(unit, 100, 2);
+	const int expectedWounded = 80 * unit->getAccuracyModifier() / 100;
+	expect(unit->getInventoryDisplayedFiringAccuracy() == expectedWounded,
+		"full health + head wounds penalized");
+	expect(unit->getInventoryDisplayedFiringAccuracy() != legacyHealthOnlyInventoryFiringDisplay(unit),
+		"regression guard: full health + wounds must not use legacy health-only display");
+
+	delete unit;
+}
+
 /** WP8D — THROW with null weapon pointer (actor/item association enforced only by caller). */
 static void testThrowNullWeaponRejected()
 {
@@ -880,5 +940,6 @@ int main()
 	testThrowNonGrenadeInHandRejected();
 	testThrowNullWeaponRejected();
 	testThrowUnprimedGrenadePassesPrecheckToOobReject();
+	testInventoryFiringAccuracyDisplayParity();
 	return g_failures != 0 ? 1 : 0;
 }

@@ -2,7 +2,9 @@
  * Open X-Com Companion — on-demand send/retrieve relay queue (M1-25E).
  */
 #include "CompanionOnDemandRelayCore.h"
+#include "CompanionAutoRetrieveCore.h"
 #include "CompanionBriefingTestSupport.h"
+#include "CompanionStrategicSendEnqueueSupport.h"
 #include "CompanionJsonLite.h"
 #include <chrono>
 #include <cstdio>
@@ -624,11 +626,37 @@ bool tryEnqueueAction(const char *action, std::string *outRequestId, std::string
 		}
 		return false;
 	}
+	if (!CompanionAutoRetrieveCore::isBattlescapeActive())
+	{
+		if (outError != 0)
+		{
+			*outError = "retrieve_not_available";
+		}
+		return false;
+	}
 	return tryEnqueueSend("retrieve", 0, outRequestId, outError);
 }
 
+bool reportTerminalSendFailure(const char *message, const char *errorCode)
+{
+	if (message == 0 || message[0] == '\0')
+	{
+		return false;
+	}
+	std::string statusPath;
+	if (!resolveStatusPath(&statusPath))
+	{
+		return false;
+	}
+	const std::string requestId = CompanionBriefingTestSupport::makeRequestId();
+	const long long nowMs = companionWallClockMs();
+	return writeTerminalFailureStatus(statusPath, requestId, "send", message, nowMs, errorCode);
+}
+
 bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
-	std::string *outRequestId, std::string *outError)
+	std::string *outRequestId, std::string *outError,
+	const std::string *predeterminedRequestId,
+	const StrategicSendEnqueueContext *strategicEnqueue)
 {
 	const char *action = "send";
 	if (sendScope == 0 || sendScope[0] == '\0')
@@ -642,6 +670,14 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 	const std::string scope(sendScope);
 	if (scope == "retrieve")
 	{
+		if (!CompanionAutoRetrieveCore::isBattlescapeActive())
+		{
+			if (outError != 0)
+			{
+				*outError = "retrieve_not_available";
+			}
+			return false;
+		}
 		action = "retrieve";
 	}
 	else if (scope != "tactical" && scope != "strategic")
@@ -651,6 +687,35 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 			*outError = "invalid_send_scope";
 		}
 		return false;
+	}
+	if (predeterminedRequestId != 0 && !predeterminedRequestId->empty() && scope != "strategic")
+	{
+		if (outError != 0)
+		{
+			*outError = "predetermined_request_id_not_allowed";
+		}
+		return false;
+	}
+	if (strategicEnqueue != 0 && scope != "strategic")
+	{
+		if (outError != 0)
+		{
+			*outError = "strategic_enqueue_not_allowed";
+		}
+		return false;
+	}
+	if (scope == "strategic")
+	{
+		const bool hasLive = strategicEnqueue != 0 && strategicEnqueue->save != 0 && strategicEnqueue->mod != 0;
+		const bool hasFixture = strategicEnqueue != 0 && strategicEnqueue->fixture_marker_prep != 0;
+		if (!hasLive && !hasFixture)
+		{
+			if (outError != 0)
+			{
+				*outError = "strategic_enqueue_required";
+			}
+			return false;
+		}
 	}
 	if (scope == "tactical" && (briefingRequestId == 0 || briefingRequestId[0] == '\0'))
 	{
@@ -746,8 +811,69 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 		}
 	}
 
-	const std::string requestId = CompanionBriefingTestSupport::makeRequestId();
+	std::string requestId;
+	if (predeterminedRequestId != 0 && !predeterminedRequestId->empty())
+	{
+		if (!CompanionBriefingTestSupport::isValidRequestIdFormat(*predeterminedRequestId))
+		{
+			if (outError != 0)
+			{
+				*outError = "invalid_request_id";
+			}
+			return false;
+		}
+		requestId = *predeterminedRequestId;
+	}
+	else
+	{
+		requestId = CompanionBriefingTestSupport::makeRequestId();
+	}
 	const long long nowMs = companionWallClockMs();
+	bool wroteStrategicMarker = false;
+	if (scope == "strategic")
+	{
+		StrategicSendMarkerPrep markerPrep = {};
+		if (strategicEnqueue->save != 0 && strategicEnqueue->mod != 0)
+		{
+			std::string exportError;
+			if (!CompanionStrategicSendEnqueueSupport::buildStrategicMarkerPrepFromLiveExport(
+				strategicEnqueue->save, strategicEnqueue->mod, &markerPrep, &exportError))
+			{
+				if (outError != 0)
+				{
+					*outError = exportError.empty() ? "strategic_export_failed" : exportError;
+				}
+				return false;
+			}
+		}
+		else
+		{
+			markerPrep = *strategicEnqueue->fixture_marker_prep;
+		}
+		std::string relayDir;
+		if (!resolveRelayDir(&relayDir))
+		{
+			if (outError != 0)
+			{
+				*outError = "path_resolution_failed";
+			}
+			return false;
+		}
+		if (!CompanionBriefingTestSupport::writeStrategicSendMarkerFile(
+			relayDir,
+			requestId,
+			markerPrep.content_sha256,
+			markerPrep.campaign_id,
+			markerPrep.exported_at_ms))
+		{
+			if (outError != 0)
+			{
+				*outError = "strategic_marker_write_failed";
+			}
+			return false;
+		}
+		wroteStrategicMarker = true;
+	}
 	const char *scopeForJson = (scope == "retrieve") ? 0 : scope.c_str();
 	if (!writeTextAtomically(requestPath, buildRequestJson(
 		requestId, action, nowMs, scopeForJson, briefingRequestId)))
@@ -755,6 +881,14 @@ bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
 		if (outError != 0)
 		{
 			*outError = "request_write_failed";
+		}
+		if (wroteStrategicMarker)
+		{
+			std::string relayDir;
+			if (resolveRelayDir(&relayDir))
+			{
+				CompanionBriefingTestSupport::removeStrategicSendMarkerFile(relayDir);
+			}
 		}
 		std::string relayDir;
 		if (resolveRelayDir(&relayDir))
@@ -798,6 +932,64 @@ bool isValidationErrorCode(const std::string &code)
 bool isAuthErrorCode(const std::string &code)
 {
 	return code == "AUTH_FAILED" || code == "AUTH" || code == "gh_not_authenticated";
+}
+
+bool tryFormatTerminalCommandOrderLabel(const std::string &lastCommandStatus, std::string *out)
+{
+	if (out == 0 || lastCommandStatus.empty())
+	{
+		return false;
+	}
+	if (lastCommandStatus == "COMPLETED")
+	{
+		*out = "Order completed";
+		return true;
+	}
+	if (lastCommandStatus == "INTERRUPTED")
+	{
+		*out = "Order interrupted";
+		return true;
+	}
+	if (lastCommandStatus == "FAILED")
+	{
+		*out = "Order failed";
+		return true;
+	}
+	if (lastCommandStatus == "REJECTED")
+	{
+		*out = "Order rejected";
+		return true;
+	}
+	return false;
+}
+
+bool tryFormatRetrieveIncompleteCommandLabel(const std::string &lastCommandStatus, std::string *out)
+{
+	if (out == 0 || lastCommandStatus.empty())
+	{
+		return false;
+	}
+	if (lastCommandStatus == "COMPLETED")
+	{
+		*out = "Order done; relay incomplete";
+		return true;
+	}
+	if (lastCommandStatus == "INTERRUPTED")
+	{
+		*out = "Interrupted; relay incomplete";
+		return true;
+	}
+	if (lastCommandStatus == "FAILED")
+	{
+		*out = "Order failed; relay incomplete";
+		return true;
+	}
+	if (lastCommandStatus == "REJECTED")
+	{
+		*out = "Rejected; relay incomplete";
+		return true;
+	}
+	return false;
 }
 
 } // namespace
@@ -860,20 +1052,11 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 	{
 		if (status.action == "retrieve")
 		{
-			if (status.last_command_status == "COMPLETED")
+			if (tryFormatTerminalCommandOrderLabel(status.last_command_status, out))
 			{
-				*out = "Order completed";
+				return;
 			}
-			else if (status.last_command_status == "FAILED"
-			    || status.last_command_status == "REJECTED"
-			    || status.last_command_status == "INTERRUPTED")
-			{
-				*out = "Order failed";
-			}
-			else
-			{
-				*out = "Relay complete";
-			}
+			*out = "Relay complete";
 		}
 		else
 		{
@@ -893,11 +1076,13 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 				*out = "Retrieve error";
 				return;
 			}
-			if (status.last_command_status == "FAILED"
-			    || status.last_command_status == "REJECTED"
-			    || status.last_command_status == "INTERRUPTED")
+			if (status.error_code == "RETRIEVE_INCOMPLETE")
 			{
-				*out = "Order failed";
+				if (tryFormatRetrieveIncompleteCommandLabel(status.last_command_status, out))
+				{
+					return;
+				}
+				*out = "Retrieve incomplete";
 				return;
 			}
 			if (status.last_command_status == "COMPLETED")
@@ -905,9 +1090,8 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 				*out = "Order done; relay incomplete";
 				return;
 			}
-			if (status.error_code == "RETRIEVE_INCOMPLETE")
+			if (tryFormatTerminalCommandOrderLabel(status.last_command_status, out))
 			{
-				*out = "Retrieve incomplete";
 				return;
 			}
 			*out = "Retrieve failed";

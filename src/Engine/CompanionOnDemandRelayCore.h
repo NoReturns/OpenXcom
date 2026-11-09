@@ -7,6 +7,9 @@
 namespace OpenXcom
 {
 
+class SavedGame;
+class Mod;
+
 namespace CompanionOnDemandRelayCore
 {
 
@@ -59,6 +62,22 @@ struct RelayStatusView
 	RelayStatusView();
 };
 
+/** Strategic send only: marker is written inside tryEnqueueSend after in-flight guards. */
+struct StrategicSendMarkerPrep
+{
+	std::string content_sha256;
+	std::string campaign_id;
+	long long exported_at_ms;
+};
+
+/** Live SEND uses save/mod (export after guards). Tests may set fixture_marker_prep only. */
+struct StrategicSendEnqueueContext
+{
+	SavedGame *save;
+	Mod *mod;
+	const StrategicSendMarkerPrep *fixture_marker_prep;
+};
+
 long long companionWallClockMs();
 bool companionSnapshotPathConfigured();
 bool resolveRelayDir(std::string *outDir);
@@ -74,7 +93,10 @@ bool isRelayBusyPhase(RelayUiPhase phase);
 bool suppressSendPublicationHighlight(RelayUiPhase phase);
 bool tryEnqueueAction(const char *action, std::string *outRequestId, std::string *outError);
 bool tryEnqueueSend(const char *sendScope, const char *briefingRequestId,
-	std::string *outRequestId, std::string *outError);
+	std::string *outRequestId, std::string *outError,
+	const std::string *predeterminedRequestId = 0,
+	const StrategicSendEnqueueContext *strategicEnqueue = 0);
+bool reportTerminalSendFailure(const char *message, const char *errorCode);
 void formatStatusLabel(RelayUiPhase phase, std::string *out);
 void formatRelayStatusLabel(const RelayStatusView &status, std::string *out);
 bool relayControlRectHitTest(int absX, int absY, int rectX, int rectY, int rectW, int rectH, bool visible);

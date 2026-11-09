@@ -2,10 +2,13 @@
  * Open X-Com Companion — on-demand relay queue (M1-25E).
  */
 #include "Engine/CompanionAutoRetrieveCore.h"
+#include "Engine/CompanionBriefingTestSupport.h"
 #include "Engine/CompanionOnDemandRelayCore.h"
 #include "Engine/CompanionRelayPublicationFreshnessCore.h"
 #include "Engine/CompanionOnDemandRelayLayout.h"
 #include "Engine/CompanionJsonLite.h"
+#include "Engine/CompanionSha256.h"
+#include "Engine/CompanionStrategicSendEnqueueSupport.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -179,13 +182,143 @@ static void testCompletedMarkerAllowsRetrieveAfterReload(const std::string &root
 		"  \"updated_at_ms\": 2000,\n"
 		"  \"terminal\": true\n"
 		"}\n");
+	enterBattlescape();
 	std::string requestId;
 	std::string error;
 	expect(tryEnqueueAction("retrieve", &requestId, &error),
 		"completed retrieve marker allows new retrieve after reload");
+	leaveBattlescape();
 	expect(requestId != "cccccccccccccccccccccccccccccccc", "new retrieve request id");
 	std::remove(requestPath.c_str());
 	std::remove(statusPath.c_str());
+}
+
+static std::string readFileUtf8(const std::string &path)
+{
+	std::ifstream in(path.c_str(), std::ios::in | std::ios::binary);
+	std::ostringstream ss;
+	ss << in.rdbuf();
+	return ss.str();
+}
+
+static void testStrategicPredeterminedRequestEnqueue(const std::string &root)
+{
+	const std::string snapshotPath = root + "/tactical-strategic-atomic.yaml";
+	writeFile(snapshotPath, "tactical: {}\n");
+#ifdef _WIN32
+	_putenv_s("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str());
+#else
+	setenv("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str(), 1);
+#endif
+	const std::string snapshotDir = CompanionBriefingTestSupport::parentDirectoryOfSnapshotPath(snapshotPath);
+	const std::string predeterminedId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+	const std::string digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+	CompanionOnDemandRelayCore::StrategicSendMarkerPrep prep = {};
+	prep.content_sha256 = digest;
+	prep.campaign_id = "campaign-test";
+	prep.exported_at_ms = 1000;
+	CompanionOnDemandRelayCore::StrategicSendEnqueueContext enqueueCtx = {};
+	enqueueCtx.fixture_marker_prep = &prep;
+	std::string requestId;
+	std::string error;
+	expect(tryEnqueueSend("strategic", 0, &requestId, &error, &predeterminedId, &enqueueCtx),
+		"strategic enqueue with predetermined id");
+	expect(requestId == predeterminedId, "enqueued id matches predetermined id");
+	std::string requestPath;
+	expect(resolveRequestPath(&requestPath), "request path resolves");
+	std::ifstream requestIn(requestPath.c_str(), std::ios::in | std::ios::binary);
+	expect(requestIn.good(), "request file readable");
+	std::ostringstream requestSs;
+	requestSs << requestIn.rdbuf();
+	const std::string requestJson = requestSs.str();
+	std::string fileRequestId;
+	expect(CompanionJsonLite::extractJsonStringField(requestJson, "request_id", &fileRequestId),
+		"request id in file");
+	expect(fileRequestId == predeterminedId, "request file id matches marker");
+	std::string requestPath2;
+	std::string statusPath;
+	resolveRequestPath(&requestPath2);
+	resolveStatusPath(&statusPath);
+	std::remove(requestPath.c_str());
+	std::remove(statusPath.c_str());
+	CompanionBriefingTestSupport::removeStrategicSendMarkerFile(snapshotDir);
+}
+
+static void testStrategicSecondSendPreservesFirstMarker(const std::string &root)
+{
+	const std::string snapshotPath = root + "/tactical-strategic-concurrency.yaml";
+	writeFile(snapshotPath, "tactical: {}\n");
+#ifdef _WIN32
+	_putenv_s("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str());
+#else
+	setenv("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str(), 1);
+#endif
+	const std::string snapshotDir = CompanionBriefingTestSupport::parentDirectoryOfSnapshotPath(snapshotPath);
+	const std::string markerPath = pathJoin(snapshotDir, "companion-strategic-send-marker.json");
+	std::string requestPath;
+	std::string statusPath;
+	resolveRequestPath(&requestPath);
+	resolveStatusPath(&statusPath);
+	std::remove(requestPath.c_str());
+	std::remove(statusPath.c_str());
+	CompanionBriefingTestSupport::removeStrategicSendMarkerFile(snapshotDir);
+	const std::string idA = "11111111111111111111111111111111";
+	const std::string idB = "22222222222222222222222222222222";
+	const std::string biPath = pathJoin(snapshotDir, "companion-base-intelligence.json");
+	const std::string sendPath = pathJoin(snapshotDir, OpenXcom::CompanionStrategicSendEnqueueSupport::STRATEGIC_SEND_BI_FILENAME);
+	const std::string stagedPayload = "{\"schema_version\":2,\"bi_version\":\"snapshot-a\"}\n";
+	writeFile(sendPath, stagedPayload);
+	std::string digestA;
+	expect(CompanionSha256::digestHexLowerUtf8(stagedPayload, &digestA), "digest staged send snapshot");
+	const std::string digestB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+	writeFile(biPath, stagedPayload);
+	const std::string sendAfterA = readFileUtf8(sendPath);
+	CompanionOnDemandRelayCore::StrategicSendMarkerPrep prepA = {};
+	prepA.content_sha256 = digestA;
+	prepA.campaign_id = "campaign-a";
+	prepA.exported_at_ms = 1000;
+	CompanionOnDemandRelayCore::StrategicSendEnqueueContext ctxA = {};
+	ctxA.fixture_marker_prep = &prepA;
+	std::string requestId;
+	std::string error;
+	expect(tryEnqueueSend("strategic", 0, &requestId, &error, &idA, &ctxA),
+		("first strategic send enqueues (" + error + ")").c_str());
+	expect(requestId == idA, "first id");
+	const std::string markerAfterA = readFileUtf8(markerPath);
+	CompanionOnDemandRelayCore::StrategicSendMarkerPrep prepB = {};
+	prepB.content_sha256 = digestB;
+	prepB.campaign_id = "campaign-b";
+	prepB.exported_at_ms = 2000;
+	CompanionOnDemandRelayCore::StrategicSendEnqueueContext ctxB = {};
+	ctxB.fixture_marker_prep = &prepB;
+	std::string requestIdB;
+	expect(!tryEnqueueSend("strategic", 0, &requestIdB, &error, &idB, &ctxB),
+		"second strategic send blocked while pending");
+	expect(error == "request_in_flight", "second send sees request_in_flight");
+	const std::string markerAfterB = readFileUtf8(markerPath);
+	expect(markerAfterB == markerAfterA, "active send marker unchanged after rejected second send");
+	writeFile(biPath, "{\"schema_version\":2,\"bi_version\":\"f8-overwrite\"}\n");
+	const std::string sendAfterB = readFileUtf8(sendPath);
+	expect(sendAfterB == sendAfterA, "staged send snapshot unchanged after rejected second send and F8 overwrite");
+	std::remove(requestPath.c_str());
+	std::remove(statusPath.c_str());
+	CompanionBriefingTestSupport::removeStrategicSendMarkerFile(snapshotDir);
+}
+
+static void testRetrieveBlockedOutsideBattlescape(const std::string &root)
+{
+	const std::string snapshotPath = root + "/tactical-retrieve-guard.yaml";
+	writeFile(snapshotPath, "tactical: {}\n");
+#ifdef _WIN32
+	_putenv_s("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str());
+#else
+	setenv("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str(), 1);
+#endif
+	leaveBattlescape();
+	std::string requestId;
+	std::string error;
+	expect(!tryEnqueueAction("retrieve", &requestId, &error), "retrieve blocked outside battlescape");
+	expect(error == "retrieve_not_available", "retrieve not available error");
 }
 
 static void testEnqueueAndDuplicateGuard(const std::string &root)
@@ -197,6 +330,7 @@ static void testEnqueueAndDuplicateGuard(const std::string &root)
 #else
 	setenv("OPENXCOM_COMPANION_SNAPSHOT_PATH", snapshotPath.c_str(), 1);
 #endif
+	enterBattlescape();
 
 	std::string requestId;
 	std::string error;
@@ -291,6 +425,26 @@ static void testRelayStatusLabels()
 		"completed command with incomplete relay");
 	expect(labelFromStatusJson(
 		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RETRIEVE_INCOMPLETE\",\"last_command_status\":\"INTERRUPTED\"}")
+	    == "Interrupted; relay incomplete",
+		"interrupted command with retrieve incomplete");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RETRIEVE_INCOMPLETE\",\"last_command_status\":\"FAILED\"}")
+	    == "Order failed; relay incomplete",
+		"failed command with retrieve incomplete");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RETRIEVE_INCOMPLETE\",\"last_command_status\":\"REJECTED\"}")
+	    == "Rejected; relay incomplete",
+		"rejected command with retrieve incomplete");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RETRIEVE_INCOMPLETE\",\"last_command_status\":\"INTERRUPTED\"}")
+	    != "Order interrupted",
+		"retrieve incomplete never hides incomplete relay behind order-only label");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
 		"\"error_code\":\"RELAY_OFFLINE\"}") == "Retrieve error",
 		"relay offline is retrieval failure not command failure");
 	expect(labelFromStatusJson(
@@ -301,6 +455,27 @@ static void testRelayStatusLabels()
 		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
 		"\"last_command_status\":\"FAILED\"}") == "Order failed",
 		"retrieve command failed");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"INTERRUPTED\"}") == "Order interrupted",
+		"completed retrieve with interrupted command");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"REJECTED\"}") == "Order rejected",
+		"completed retrieve with rejected command");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"last_command_status\":\"INTERRUPTED\"}") == "Order interrupted",
+		"failed retrieve phase still shows interrupted command label");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"NETWORK_FAILED\",\"last_command_status\":\"INTERRUPTED\"}")
+	    == "Retrieve error",
+		"retrieve network failure takes precedence over interrupted command");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"INTERRUPTED\"}") != "Order failed",
+		"interrupted command is never labeled Order failed");
 }
 
 static void testRelayStickyRetrieveStatusAcceptance()
@@ -1209,6 +1384,9 @@ int main()
 	testEnqueueAndDuplicateGuard(root);
 	testCompletedRequestMarkerAllowsEnqueue(root);
 	testCompletedMarkerAllowsRetrieveAfterReload(root);
+	testRetrieveBlockedOutsideBattlescape(root);
+	testStrategicPredeterminedRequestEnqueue(root);
+	testStrategicSecondSendPreservesFirstMarker(root);
 	testStatusPhaseMapping();
 	testRelayStatusLabels();
 	testRelayStickyRetrieveStatusAcceptance();

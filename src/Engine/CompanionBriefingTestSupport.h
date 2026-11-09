@@ -46,6 +46,9 @@ bool writeBriefingRequestFile(const std::string &requestDir, const std::string &
 bool shouldWriteBriefingRequestAfterExport(bool exportSucceeded, const std::string &snapshotSha256);
 bool writeTacticalSendMarkerFile(const std::string &requestDir, const std::string &briefingRequestId,
 	const std::string &sessionId, int turn, const std::string &snapshotSha256, long long exportedAtMs);
+bool writeStrategicSendMarkerFile(const std::string &requestDir, const std::string &onDemandRequestId,
+	const std::string &contentSha256, const std::string &campaignId, long long exportedAtMs);
+void removeStrategicSendMarkerFile(const std::string &requestDir);
 
 } // namespace CompanionBriefingTestSupport
 
