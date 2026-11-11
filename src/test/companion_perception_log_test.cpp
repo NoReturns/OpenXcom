@@ -4,6 +4,7 @@
 #include "Engine/CompanionPerceptionLogCore.h"
 #include "Engine/RNG.h"
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -113,6 +114,96 @@ static void testGunfireSubjectRequiresVisibleShooter()
 	expect(!shouldAttachGunfireSubjectId(input), "LOS tile alone must not identify hidden shooter");
 	input.shooterVisibleFlag = true;
 	expect(shouldAttachGunfireSubjectId(input), "visible shooter may carry subjectUnitId");
+}
+
+static void testHiddenThrowUsesGenericAudioType()
+{
+	ThrowLaunchFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = true;
+	input.isLaunch = false;
+	input.battleType = 4;
+	input.positionKnown = false;
+	const char *eventType = resolveThrowLaunchEventTypeForTest(input);
+	expect(eventType != 0 && std::strcmp(eventType, "throw_observed") == 0,
+		"hidden throw must not claim grenade class");
+}
+
+static void testVisibleGrenadeThrowClassified()
+{
+	ThrowLaunchFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = true;
+	input.isLaunch = false;
+	input.battleType = 4;
+	input.positionKnown = true;
+	input.throwerVisible = true;
+	const char *eventType = resolveThrowLaunchEventTypeForTest(input);
+	expect(eventType != 0 && std::strcmp(eventType, "grenade_throw_observed") == 0,
+		"visible grenade throw uses grenade_throw_observed");
+}
+
+static void testHiddenThrowerVisibleTileDoesNotClaimGrenade()
+{
+	ThrowLaunchFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = true;
+	input.isLaunch = false;
+	input.battleType = 4;
+	input.positionKnown = true;
+	input.throwerVisible = false;
+	const char *eventType = resolveThrowLaunchEventTypeForTest(input);
+	expect(eventType != 0 && std::strcmp(eventType, "throw_observed") == 0,
+		"origin tile alone must not classify grenade");
+}
+
+static void testInaudibleHiddenThrowSilent()
+{
+	ThrowLaunchFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = false;
+	input.positionKnown = false;
+	const char *eventType = resolveThrowLaunchEventTypeForTest(input);
+	expect(eventType == 0, "inaudible hidden throw must not emit");
+}
+
+static void testVisibleLaunchClassified()
+{
+	ThrowLaunchFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = true;
+	input.isLaunch = true;
+	input.battleType = 2;
+	input.positionKnown = true;
+	input.throwerVisible = true;
+	const char *eventType = resolveThrowLaunchEventTypeForTest(input);
+	expect(eventType != 0 && std::strcmp(eventType, "explosive_launch_observed") == 0,
+		"visible launch uses explosive_launch_observed");
+}
+
+static void testNonGrenadeThrowObjectType()
+{
+	ThrowLaunchFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = true;
+	input.isLaunch = false;
+	input.battleType = 10;
+	input.positionKnown = true;
+	input.throwerVisible = true;
+	const char *eventType = resolveThrowLaunchEventTypeForTest(input);
+	expect(eventType != 0 && std::strcmp(eventType, "object_throw_observed") == 0,
+		"visible non-grenade throw uses object_throw_observed");
+}
+
+static void testThrowSubjectRequiresVisibleShooter()
+{
+	ThrowLaunchFairPlayInput input = {};
+	input.debugMode = false;
+	input.hasShooterUnit = true;
+	input.shooterVisibleFlag = false;
+	expect(!shouldAttachThrowLaunchSubjectId(input), "throw must not attach hidden hostile id");
+	input.shooterVisibleFlag = true;
+	expect(shouldAttachThrowLaunchSubjectId(input), "visible hostile throw may attach subject");
 }
 
 static void testVisibleDoorUsesSeenChannel()
@@ -411,6 +502,13 @@ int main()
 	testUnitLastSeenExportNovosibirskTurnBoundaryMemory();
 	testUnitLastSeenExportRequiresStoredMemory();
 	testGunfireSubjectRequiresVisibleShooter();
+	testHiddenThrowUsesGenericAudioType();
+	testVisibleGrenadeThrowClassified();
+	testHiddenThrowerVisibleTileDoesNotClaimGrenade();
+	testInaudibleHiddenThrowSilent();
+	testVisibleLaunchClassified();
+	testNonGrenadeThrowObjectType();
+	testThrowSubjectRequiresVisibleShooter();
 	testVisibleDoorUsesSeenChannel();
 	testHeardOnlyOmitsObserverAttribution();
 	testGameplayRngUntouched();

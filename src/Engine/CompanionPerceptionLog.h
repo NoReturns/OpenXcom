@@ -13,6 +13,7 @@ namespace OpenXcom
 {
 
 class BattleUnit;
+class BattleItem;
 class SavedBattleGame;
 
 struct RosterCasualtyLedgerEntry
@@ -58,6 +59,14 @@ public:
 	void seedRosterCasualtyLedgerFromLoadedBattle(SavedBattleGame *battle);
 
 	void tryRecordGunfireObserved(SavedBattleGame *battle, BattleUnit *shooter, const Position &origin, bool audible);
+	/** Player-legitimate hostile/friendly throw or launch at projectile start (fair-play; M1 P1-D). */
+	void tryRecordThrowOrLaunchObserved(
+		SavedBattleGame *battle,
+		BattleUnit *shooter,
+		const Position &origin,
+		bool isLaunch,
+		const BattleItem *thrownOrLaunchedItem,
+		bool audible);
 	void tryRecordImpactObserved(SavedBattleGame *battle, const Position &impactTile, bool audible);
 	/** Authoritative projectile terminal impact (tile + voxel classification; deduped per flight). */
 	void tryRecordProjectileImpactObserved(

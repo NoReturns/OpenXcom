@@ -356,6 +356,71 @@ std::string makeSoldierCasualtyEpisodeDedupeKey(
 	return std::string(buf);
 }
 
+namespace
+{
+
+/** Mirrors RuleItem::BattleType values used for throw classification (avoid Mod include in core). */
+const int BT_GRENADE_CORE = 4;
+const int BT_PROXIMITYGRENADE_CORE = 5;
+
+const char *classifyVisibleThrowLaunchEventType(bool isLaunch, int battleType)
+{
+	if (isLaunch)
+	{
+		return "explosive_launch_observed";
+	}
+	if (battleType == BT_GRENADE_CORE || battleType == BT_PROXIMITYGRENADE_CORE)
+	{
+		return "grenade_throw_observed";
+	}
+	return "object_throw_observed";
+}
+
+} // namespace
+
+ThrowLaunchPerceptionResolution resolveThrowLaunchPerceptionExport(const ThrowLaunchPerceptionInput &input)
+{
+	ThrowLaunchPerceptionResolution out = {};
+	if (input.debugMode)
+	{
+		return out;
+	}
+	if (!input.positionKnown && !input.audible)
+	{
+		return out;
+	}
+	out.shouldEmit = true;
+	out.confidence = input.positionKnown ? "source_visible" : "audio_only";
+	if (input.positionKnown)
+	{
+		if (input.throwerVisible)
+		{
+			out.eventType = classifyVisibleThrowLaunchEventType(input.isLaunch, input.battleType);
+		}
+		else
+		{
+			out.eventType = "throw_observed";
+		}
+	}
+	else
+	{
+		out.eventType = "throw_observed";
+	}
+	return out;
+}
+
+bool shouldAttachThrowLaunchHostileSubject(
+	bool debugMode,
+	bool hasShooter,
+	bool shooterVisibleFlag)
+{
+	if (debugMode || !hasShooter)
+	{
+		return false;
+	}
+	return shooterVisibleFlag;
+}
+
 } // namespace CompanionPerceptionLogCore
 
 namespace CompanionPerceptionLogTestSupport
@@ -398,6 +463,38 @@ bool spatialObservationUsesSeenChannel(const SpatialInput &input)
 }
 
 bool shouldAttachGunfireSubjectId(const GunfireInput &input)
+{
+	if (input.debugMode || !input.hasShooterUnit)
+	{
+		return false;
+	}
+	return input.shooterVisibleFlag;
+}
+
+bool shouldRecordThrowLaunch(const ThrowLaunchFairPlayInput &input)
+{
+	if (input.debugMode || !input.audible)
+	{
+		return false;
+	}
+	return true;
+}
+
+const char *resolveThrowLaunchEventTypeForTest(const ThrowLaunchFairPlayInput &input)
+{
+	CompanionPerceptionLogCore::ThrowLaunchPerceptionInput core = {};
+	core.debugMode = input.debugMode;
+	core.audible = input.audible;
+	core.isLaunch = input.isLaunch;
+	core.battleType = input.battleType;
+	core.positionKnown = input.positionKnown;
+	core.throwerVisible = input.throwerVisible;
+	const CompanionPerceptionLogCore::ThrowLaunchPerceptionResolution resolution =
+		CompanionPerceptionLogCore::resolveThrowLaunchPerceptionExport(core);
+	return resolution.shouldEmit ? resolution.eventType : 0;
+}
+
+bool shouldAttachThrowLaunchSubjectId(const ThrowLaunchFairPlayInput &input)
 {
 	if (input.debugMode || !input.hasShooterUnit)
 	{

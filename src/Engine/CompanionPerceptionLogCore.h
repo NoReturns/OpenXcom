@@ -160,6 +160,35 @@ std::string makeSoldierCasualtyEpisodeDedupeKey(
 	int episodeSerial,
 	const char *confidence);
 
+/**
+ * Fair-play throw / launch perception (M1 P1-D).
+ * Item class is reported only when the throw origin is player-visible (positionKnown).
+ */
+struct ThrowLaunchPerceptionInput
+{
+	bool debugMode;
+	bool audible;
+	bool isLaunch;
+	int battleType;
+	bool positionKnown;
+	/** Visible hostile/origin is insufficient for grenade class — requires thrower sprite visible. */
+	bool throwerVisible;
+};
+
+struct ThrowLaunchPerceptionResolution
+{
+	bool shouldEmit;
+	const char *eventType;
+	const char *confidence;
+};
+
+ThrowLaunchPerceptionResolution resolveThrowLaunchPerceptionExport(const ThrowLaunchPerceptionInput &input);
+
+bool shouldAttachThrowLaunchHostileSubject(
+	bool debugMode,
+	bool hasShooter,
+	bool shooterVisibleFlag);
+
 } // namespace CompanionPerceptionLogCore
 
 namespace CompanionPerceptionLogTestSupport
@@ -198,6 +227,23 @@ bool shouldIncludeGunfirePosition(const GunfireInput &input);
 bool shouldIncludeSpatialPosition(const SpatialInput &input);
 bool spatialObservationUsesSeenChannel(const SpatialInput &input);
 bool shouldAttachGunfireSubjectId(const GunfireInput &input);
+
+struct ThrowLaunchFairPlayInput
+{
+	bool debugMode;
+	bool audible;
+	bool isLaunch;
+	int battleType;
+	bool positionKnown;
+	bool throwerVisible;
+	bool shooterVisibleFlag;
+	bool hasShooterUnit;
+};
+
+bool shouldRecordThrowLaunch(const ThrowLaunchFairPlayInput &input);
+const char *resolveThrowLaunchEventTypeForTest(const ThrowLaunchFairPlayInput &input);
+bool shouldAttachThrowLaunchSubjectId(const ThrowLaunchFairPlayInput &input);
+
 bool shouldEmitUnitLastSeenOnHide(const VisibilityInput &input);
 bool shouldEmitUnitLastSeenOnShow(const VisibilityInput &input);
 

@@ -7,6 +7,7 @@
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/BattleUnit.h"
+#include "../Savegame/BattleItem.h"
 #include "../Savegame/Soldier.h"
 #include "../Savegame/Tile.h"
 #include "../Battlescape/TileEngine.h"
@@ -335,6 +336,60 @@ void CompanionPerceptionLog::tryRecordGunfireObserved(SavedBattleGame *battle, B
 	entry.turn = battle->getTurn();
 	entry.confidence = obs.positionKnown ? "source_visible" : "audio_only";
 	if (shooter != 0 && shooter->getOriginalFaction() == FACTION_HOSTILE && isHostileUnitCurrentlySeen(shooter))
+	{
+		entry.hasSubjectUnitId = true;
+		entry.subjectUnitId = shooter->getId();
+	}
+	applyObserverResolution(entry, obs);
+	const int subjectId = entry.hasSubjectUnitId ? entry.subjectUnitId : -1;
+	const std::string dedupeKey = CompanionPerceptionLogCore::makeDedupeKey(
+		entry.type.c_str(),
+		entry.turn,
+		subjectId,
+		obs.positionKnown ? &obs.position : 0,
+		obs.positionKnown,
+		obs.channel);
+	appendEvent(battle, entry, dedupeKey);
+}
+
+void CompanionPerceptionLog::tryRecordThrowOrLaunchObserved(
+	SavedBattleGame *battle,
+	BattleUnit *shooter,
+	const Position &origin,
+	bool isLaunch,
+	const BattleItem *thrownOrLaunchedItem,
+	bool audible)
+{
+	if (!shouldRecordPerception(battle))
+	{
+		return;
+	}
+	CompanionPerceptionLogCore::ThrowLaunchPerceptionInput exportInput = {};
+	exportInput.debugMode = battle->getDebugMode();
+	exportInput.audible = audible;
+	exportInput.isLaunch = isLaunch;
+	exportInput.battleType = thrownOrLaunchedItem != 0 ? static_cast<int>(thrownOrLaunchedItem->getRules()->getBattleType()) : 0;
+	exportInput.throwerVisible = shooter != 0 && shooter->getVisible();
+	TileEngine *tileEngine = battle->getTileEngine();
+	CompanionPerceptionLogCore::ObserverResolution obs =
+		resolveGunfireObservation(battle, tileEngine, shooter, origin, audible);
+	exportInput.positionKnown = obs.positionKnown;
+	const CompanionPerceptionLogCore::ThrowLaunchPerceptionResolution exportResolution =
+		CompanionPerceptionLogCore::resolveThrowLaunchPerceptionExport(exportInput);
+	if (!exportResolution.shouldEmit)
+	{
+		return;
+	}
+	CompanionPerceptionEvent entry{};
+	entry.type = exportResolution.eventType;
+	entry.turn = battle->getTurn();
+	entry.confidence = exportResolution.confidence;
+	if (shooter != 0
+	    && shooter->getOriginalFaction() == FACTION_HOSTILE
+	    && CompanionPerceptionLogCore::shouldAttachThrowLaunchHostileSubject(
+	        battle->getDebugMode(),
+	        true,
+	        isHostileUnitCurrentlySeen(shooter)))
 	{
 		entry.hasSubjectUnitId = true;
 		entry.subjectUnitId = shooter->getId();

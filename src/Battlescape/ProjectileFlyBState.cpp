@@ -482,6 +482,31 @@ bool ProjectileFlyBState::createNewProjectile()
 		CompanionCommandRuntime::notifyThrowProjectileLaunched(_unit->getId());
 	}
 
+	if ((_action.type == BA_THROW || _action.type == BA_LAUNCH) && !_action.playerOrdered)
+	{
+		bool throwLaunchSoundAudible = false;
+		if (_action.type == BA_THROW)
+		{
+			throwLaunchSoundAudible = true;
+		}
+		else if (_ammo != 0 && _ammo->getRules()->getFireSound() != -1)
+		{
+			throwLaunchSoundAudible = true;
+		}
+		else if (_action.weapon != 0 && _action.weapon->getRules()->getFireSound() != -1)
+		{
+			throwLaunchSoundAudible = true;
+		}
+		const BattleItem *perceptionItem = _action.type == BA_LAUNCH ? _ammo : _projectileItem;
+		_parent->getSave()->getCompanionPerceptionLog().tryRecordThrowOrLaunchObserved(
+			_parent->getSave(),
+			_unit,
+			_unit->getPosition(),
+			_action.type == BA_LAUNCH,
+			perceptionItem,
+			throwLaunchSoundAudible);
+	}
+
 	if (_action.type != BA_THROW && _action.type != BA_LAUNCH)
 	{
 		_parent->getSave()->getCompanionPerceptionLog().beginProjectileDirectionObservation(
