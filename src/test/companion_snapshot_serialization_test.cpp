@@ -424,6 +424,70 @@ static void testHealthySoldierWp2Fields()
 	expect(entry["actionCosts"].IsDefined(), "actionCosts present when active");
 }
 
+static RuleItem &carryTestCorpseRules()
+{
+	static RuleItem rules("STR_P1A_CORPSE");
+	static bool loaded = false;
+	if (!loaded)
+	{
+		YAML::Node n;
+		n["type"] = "STR_P1A_CORPSE";
+		n["battleType"] = static_cast<int>(BT_CORPSE);
+		n["size"] = 1;
+		n["weight"] = 10;
+		rules.load(n, &fixtureMod(), 0);
+		loaded = true;
+	}
+	return rules;
+}
+
+static RuleInventory *carryTestBackpackSlot()
+{
+	static RuleInventory backpack("STR_BACK_PACK");
+	static bool loaded = false;
+	if (!loaded)
+	{
+		YAML::Node bp;
+		bp["id"] = "STR_BACK_PACK";
+		bp["x"] = 0;
+		bp["y"] = 0;
+		bp["type"] = static_cast<int>(INV_SLOT);
+		bp["slots"] = YAML::Load("[[0,0]]");
+		backpack.load(bp, 0);
+		loaded = true;
+	}
+	return &backpack;
+}
+
+static void testCarriedUnconsciousExportsOffMapPlacement()
+{
+	TacticalFixture fixture;
+	Soldier *carrierSoldier = fixture.addRosterSoldier(1);
+	BattleUnit *carrier = fixture.addSoldierUnit(carrierSoldier, Position(2, 2, 0), 0);
+	Soldier *injured = fixture.addRosterSoldier(3);
+	BattleUnit *carried = fixture.addSoldierUnit(injured, Position(3, 3, 0), 0);
+	carried->load(YAML::Load(
+		"status: 7\nstunlevel: 200\nhealth: 20\ntu: 0\nenergy: 0\nmorale: 40\n"
+		"armor: [0,0,0,0,0]\nfatalWounds: [0,0,0,0,0,0]\n"));
+	carried->setPosition(Position(-1, -1, -1));
+	BattleItem *body = new BattleItem(&carryTestCorpseRules(), fixture.battle->getCurrentItemId());
+	body->setUnit(carried);
+	placeEquippedItem(fixture.battle, carrier, body, carryTestBackpackSlot(), 0, 0);
+
+	const YAML::Node entry = findUnitByIdDirect(fixture, 3, 5);
+	expect(entry.IsDefined(), "carried soldier listed");
+	expect(!entry["position"].IsDefined(), "carried soldier omits invalid position");
+	expect(entry["battlefieldPlacement"].IsDefined()
+		&& entry["battlefieldPlacement"].as<std::string>() == "carried_in_inventory", "placement kind");
+	expect(entry["positionKnown"].IsDefined() && entry["positionKnown"].as<bool>() == false, "positionKnown false");
+	expect(entry["carriedByUnitId"].as<int>() == 1, "carrier unit id");
+	expect(entry["carriedBodyBattleItemId"].as<int>() == body->getId(), "body battle item id");
+
+	const YAML::Node carrierEntry = findUnitByIdDirect(fixture, 1, 5);
+	expect(carrierEntry["inventory"].IsDefined() && carrierEntry["inventory"].size() == 1, "body in carrier inventory");
+	expect(carrierEntry["inventory"][0]["carriedRosterUnitId"].as<int>() == 3, "inventory carriedRosterUnitId");
+}
+
 static void testUnconsciousOmitsActionCosts()
 {
 	TacticalFixture fixture;
@@ -1546,6 +1610,7 @@ static void testWp8VanillaRifleMagazineEligibilityRegression()
 int main()
 {
 	SNAPSHOT_TEST_STEP(testHealthySoldierWp2Fields);
+	SNAPSHOT_TEST_STEP(testCarriedUnconsciousExportsOffMapPlacement);
 	SNAPSHOT_TEST_STEP(testUnconsciousOmitsActionCosts);
 	SNAPSHOT_TEST_STEP(testRosterCasualtySnapshotUnsettledWhileCollapsing);
 	SNAPSHOT_TEST_STEP(testSoldierDownRecordsAfterKillSoldierRemovesLiveRoster);

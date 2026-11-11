@@ -199,6 +199,77 @@ bool exportFriendlyTacticalDetails(const BattleUnit *unit)
 		&& unit->getGeoscapeSoldier() != 0;
 }
 
+static const Position OFF_MAP_CARRIED_POSITION(-1, -1, -1);
+
+static bool findCarryingBodyItemForUnit(
+	SavedBattleGame *battle,
+	BattleUnit *carried,
+	BattleUnit **carrierOut,
+	BattleItem **bodyItemOut)
+{
+	if (battle == 0 || carried == 0 || carrierOut == 0 || bodyItemOut == 0)
+	{
+		return false;
+	}
+	for (std::vector<BattleUnit*>::iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end(); ++i)
+	{
+		BattleUnit *carrier = *i;
+		if (carrier == 0)
+		{
+			continue;
+		}
+		for (std::vector<BattleItem*>::iterator j = carrier->getInventory()->begin();
+		     j != carrier->getInventory()->end(); ++j)
+		{
+			BattleItem *item = *j;
+			if (item != 0 && item->getUnit() == carried)
+			{
+				*carrierOut = carrier;
+				*bodyItemOut = item;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+static bool shouldExportCarriedUnconsciousRosterPlacement(
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	BattleUnit *unit,
+	BattleUnit **carrierOut,
+	BattleItem **bodyItemOut)
+{
+	if (battle == 0 || campaign == 0 || unit == 0 || !exportFriendlyTacticalDetails(unit))
+	{
+		return false;
+	}
+	if (unit->getStatus() != STATUS_UNCONSCIOUS || unit->getHealth() <= 0)
+	{
+		return false;
+	}
+	if (unit->getPosition() != OFF_MAP_CARRIED_POSITION)
+	{
+		return false;
+	}
+	Soldier *soldier = unit->getGeoscapeSoldier();
+	if (soldier == 0 || soldier->getId() != unit->getId())
+	{
+		return false;
+	}
+	return findCarryingBodyItemForUnit(battle, unit, carrierOut, bodyItemOut);
+}
+
+static bool isLiveUnconsciousRosterCarriedOnBodyItem(const BattleUnit *unit)
+{
+	if (unit == 0 || unit->getGeoscapeSoldier() == 0)
+	{
+		return false;
+	}
+	return unit->getStatus() == STATUS_UNCONSCIOUS && unit->getHealth() > 0;
+}
+
 std::string friendlySoldierDisplayName(const BattleUnit *unit)
 {
 	Soldier *soldier = unit->getGeoscapeSoldier();
@@ -444,6 +515,10 @@ void appendInventoryEntries(YAML::Node &inventory, BattleUnit *unit, SavedGame *
 		entry["itemType"] = item->getRules()->getType();
 		entry["battleType"] = static_cast<int>(item->getRules()->getBattleType());
 		entry["researchUsable"] = companionItemResearchUsable(campaign, item->getRules());
+		if (item->getUnit() != 0 && isLiveUnconsciousRosterCarriedOnBodyItem(item->getUnit()))
+		{
+			entry["carriedRosterUnitId"] = item->getUnit()->getId();
+		}
 		appendNestedLoadedMagazine(entry, item, campaign);
 		appendFirearmAmmoState(entry, item, campaign);
 		appendGrenadeState(entry, item);
@@ -706,7 +781,19 @@ void appendUnit(YAML::Node &units, SavedBattleGame *battle, SavedGame *campaign,
 	entry["id"] = unit->getId();
 	entry["faction"] = static_cast<int>(unit->getFaction());
 	entry["originalFaction"] = static_cast<int>(unit->getOriginalFaction());
-	entry["position"] = unit->getPosition();
+	BattleUnit *carrierUnit = 0;
+	BattleItem *carriedBodyItem = 0;
+	if (shouldExportCarriedUnconsciousRosterPlacement(battle, campaign, unit, &carrierUnit, &carriedBodyItem))
+	{
+		entry["battlefieldPlacement"] = std::string("carried_in_inventory");
+		entry["positionKnown"] = false;
+		entry["carriedByUnitId"] = carrierUnit->getId();
+		entry["carriedBodyBattleItemId"] = carriedBodyItem->getId();
+	}
+	else
+	{
+		entry["position"] = unit->getPosition();
+	}
 
 	if (exportFriendlyTacticalDetails(unit))
 	{
