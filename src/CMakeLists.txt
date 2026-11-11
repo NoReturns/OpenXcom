@@ -155,6 +155,7 @@ set ( engine_src
 	Engine/CompanionBattlescapeOwnershipCore.cpp
 	Engine/CompanionOwnershipHandoffCore.cpp
 	Engine/CompanionSoldierControlPublishCore.cpp
+	Engine/CompanionDropGroundPlacementCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
 	Engine/CompanionBaseIntelligenceExportCore.cpp

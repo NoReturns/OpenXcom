@@ -16,6 +16,7 @@
 #include "../Savegame/Soldier.h"
 #include "../Savegame/Tile.h"
 #include "../Engine/CompanionGroundInventoryCore.h"
+#include "../Engine/CompanionDropGroundPlacementCore.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -118,6 +119,60 @@ static void wireUnitTile(SavedBattleGame *battle, BattleUnit *unit, const Positi
 	unit->setPosition(pos);
 	Tile *below = battle->getTile(Position(pos.x, pos.y, pos.z - 1));
 	unit->setTile(tile, below);
+}
+
+static RuleItem &makeUnconsciousCorpseRules(Mod &mod)
+{
+	static RuleItem rules("STR_P1C_UNCONSCIOUS_CORPSE");
+	static bool loaded = false;
+	if (!loaded)
+	{
+		YAML::Node n;
+		n["type"] = "STR_P1C_UNCONSCIOUS_CORPSE";
+		n["battleType"] = static_cast<int>(BT_CORPSE);
+		n["size"] = 1;
+		n["weight"] = 10;
+		rules.load(n, &mod, 0);
+		loaded = true;
+	}
+	return rules;
+}
+
+static RuleInventory *makeBackpackInventory(Mod &mod, int costToGround)
+{
+	RuleInventory *backpack = new RuleInventory("STR_BACK_PACK");
+	YAML::Node bp;
+	bp["id"] = "STR_BACK_PACK";
+	bp["x"] = 0;
+	bp["y"] = 0;
+	bp["type"] = static_cast<int>(INV_SLOT);
+	bp["slots"] = YAML::Load("[[0,0],[1,0]]");
+	bp["costs"]["STR_GROUND"] = costToGround;
+	backpack->load(bp, 0);
+	mod.registerTestInventoryRule(backpack);
+	return backpack;
+}
+
+static BattleUnit *makeUnconsciousRosterSoldier(SavedBattleGame *battle, Mod &mod, int soldierId)
+{
+	RuleSoldier rs("STR_SOLDIER");
+	Armor ar("STR_JUMPSUIT");
+	Soldier soldier(&rs, &ar, soldierId);
+	BattleUnit *unit = new BattleUnit(&soldier, 0);
+	battle->getUnits()->push_back(unit);
+	unit->load(YAML::Load(
+		"status: 7\nstunlevel: 200\nhealth: 20\ntu: 0\nenergy: 0\nmorale: 40\n"
+		"armor: [0,0,0,0,0]\nfatalWounds: [0,0,0,0,0,0]\n"));
+	unit->setPosition(Position(-1, -1, -1));
+	return unit;
+}
+
+static void carryItemOnSoldier(BattleUnit *carrier, BattleItem *item, RuleInventory *slot, int x, int y)
+{
+	item->setSlot(slot);
+	item->setSlotX(x);
+	item->setSlotY(y);
+	item->moveToOwner(carrier);
 }
 
 static BattleUnit *makeSoldier(SavedBattleGame *battle, Mod &mod, int soldierId, const Position &pos)
@@ -306,6 +361,66 @@ static void testDropBeltToGroundSuccess(Mod &mod, RuleItem &clipRules)
 	expect(unit->getTimeUnits() == tuBefore - 6, "drop: TU matches STR_BELT->STR_GROUND");
 	expect(countItemsOnTile(unit->getTile()) == onTileBefore + 1, "drop: tile gained item");
 	expect(battle.getItems()->size() == battleItemCountBefore, "drop: no duplicate battle item registration");
+
+	CompanionDropGroundPlacementCore::GroundPlacementEvidence placement = {};
+	expect(CompanionDropGroundPlacementCore::captureAfterSuccessfulDrop(clip, unit, idBefore, &placement),
+		"drop: capture placement evidence");
+	expect(placement.present, "drop: placement present");
+	expect(placement.verified, "drop: placement verified");
+	expect(placement.verificationStatus == "engine_postcondition_verified", "drop: verification status");
+	expect(placement.itemBattleItemId == idBefore, "drop: placement item id");
+	expect(placement.tileX == 2 && placement.tileY == 1 && placement.tileZ == 0, "drop: placement tile");
+	expect(placement.inventoryX == clip->getSlotX() && placement.inventoryY == clip->getSlotY(),
+		"drop: placement inventory cell");
+}
+
+static void testDropCarriedUnconsciousBodyToGround(Mod &mod)
+{
+	makeGroundInventory(mod, 10, 12);
+	RuleInventory *backpack = makeBackpackInventory(mod, 6);
+	RuleInventory *groundRule = mod.getInventory("STR_GROUND", true);
+	RuleItem &corpseRules = makeUnconsciousCorpseRules(mod);
+
+	SavedBattleGame battle;
+	battle.setTestMod(&mod);
+	battle.initMap(4, 4, 1);
+	battle.initUtilities(&mod);
+
+	const Position carrierPos(2, 2, 0);
+	BattleUnit *carrier = makeSoldier(&battle, mod, 1, carrierPos);
+	BattleUnit *injured = makeUnconsciousRosterSoldier(&battle, mod, 3);
+	BattleItem *body = new BattleItem(&corpseRules, battle.getCurrentItemId());
+	body->setUnit(injured);
+	carryItemOnSoldier(carrier, body, backpack, 0, 0);
+	registerBattleItem(&battle, body);
+
+	const int bodyId = body->getId();
+	expect(injured->getPosition() == Position(-1, -1, -1), "pre-drop: carried soldier off-map");
+	expect(vectorContains(carrier->getInventory(), body), "pre-drop: body in carrier inventory");
+
+	BattlescapeGame game(&battle, 0);
+	std::string reject;
+	const bool ok = game.tryExecuteCompanionDrop(carrier, body, &reject);
+	expect(ok, reject.c_str());
+	expect(body->getId() == bodyId, "drop body: battle item id stable");
+	expect(body->getOwner() == 0, "drop body: not soldier-owned");
+	expect(body->getSlot() == groundRule, "drop body: ground slot");
+	expect(body->getTile() == carrier->getTile(), "drop body: on carrier tile ground");
+	expect(vectorContains(carrier->getTile()->getInventory(), body), "drop body: tile ground inventory");
+	expect(!vectorContains(carrier->getInventory(), body), "drop body: removed from carrier");
+	expect(body->getUnit() == injured, "drop body: corpse still linked to unconscious soldier");
+	expect(injured->getPosition() == carrierPos, "drop body: unconscious soldier placed on-map at carrier");
+	expect(injured->getPosition() != Position(-1, -1, -1), "drop body: not contradictory carried/off-map");
+	expect(injured->getStatus() == STATUS_UNCONSCIOUS, "drop body: soldier remains unconscious");
+
+	CompanionDropGroundPlacementCore::GroundPlacementEvidence placement = {};
+	expect(CompanionDropGroundPlacementCore::captureAfterSuccessfulDrop(body, carrier, bodyId, &placement),
+		"drop body: capture placement");
+	expect(placement.present && placement.verified, "drop body: placement verified");
+	expect(placement.itemBattleItemId == bodyId, "drop body: placement item id");
+	expect(placement.tileX == carrierPos.x && placement.tileY == carrierPos.y && placement.tileZ == carrierPos.z,
+		"drop body: placement tile");
+
 }
 
 static void testPickupWrongGroundPositionRejected(Mod &mod, RuleItem &clipRules)
@@ -990,6 +1105,7 @@ int main()
 
 	testPickupGroundToRightHandSuccess(mod, clipRules);
 	testDropBeltToGroundSuccess(mod, clipRules);
+	testDropCarriedUnconsciousBodyToGround(mod);
 	testPickupWrongGroundPositionRejected(mod, clipRules);
 	testPickupItemOnOtherTileRejected(mod, clipRules);
 	testPickupInsufficientTuNoMutation(mod, clipRules);

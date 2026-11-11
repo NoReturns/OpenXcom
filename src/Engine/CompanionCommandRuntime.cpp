@@ -4,6 +4,7 @@
 #include "CompanionCommandRuntime.h"
 #include "CompanionCommandCore.h"
 #include "CompanionCommandRuntimeSupport.h"
+#include "CompanionDropGroundPlacementCore.h"
 #include "CompanionRelayPublicationFreshnessCore.h"
 #include "CompanionCommandJournalCore.h"
 #include "CompanionJsonLite.h"
@@ -776,7 +777,8 @@ std::string buildDropResultJson(const CompanionCommandCore::DropCommandParsed &c
 	bool kneeled,
 	const std::string &snapshotSha256,
 	const std::string &inboxSha256,
-	int tuSpent)
+	int tuSpent,
+	const CompanionDropGroundPlacementCore::GroundPlacementEvidence *groundPlacement)
 {
 	std::ostringstream json;
 	json << "{\n"
@@ -819,6 +821,11 @@ std::string buildDropResultJson(const CompanionCommandCore::DropCommandParsed &c
 	if (status == CompanionCommandCore::CMD_COMPLETED && tuSpent >= 0)
 	{
 		json << "  \"tu_spent\": " << tuSpent << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED
+	    && groundPlacement != 0 && groundPlacement->present)
+	{
+		CompanionDropGroundPlacementCore::appendGroundPlacementJson(json, *groundPlacement);
 	}
 	if (!snapshotSha256.empty())
 	{
@@ -1113,7 +1120,7 @@ void rejectDropCommand(const std::string &resultPath,
 	}
 	const std::string json = buildDropResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
-		std::string(), inboxSha256, -1);
+		std::string(), inboxSha256, -1, 0);
 	writeResultFile(resultPath, json);
 }
 
@@ -3974,13 +3981,17 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			return;
 		}
 
+		CompanionDropGroundPlacementCore::GroundPlacementEvidence dropPlacement = {};
+		CompanionDropGroundPlacementCore::captureAfterSuccessfulDrop(
+			item, actor, dropParsed.itemBattleItemId, &dropPlacement);
 		const std::string resultSnapshotSha256 =
 			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
 		writeResultFile(resultPath, buildDropResultJson(dropParsed, CompanionCommandCore::CMD_COMPLETED, std::string(),
 			pos,
 			actor != 0 ? actor->getTimeUnits() : 0,
 			actor != 0 && actor->isKneeled(),
-			resultSnapshotSha256, inboxDigest, tuSpent));
+			resultSnapshotSha256, inboxDigest, tuSpent,
+			dropPlacement.present ? &dropPlacement : 0));
 		logTerminalOnce(dropParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
 		appendJournalEntry(journalPath, dropParsed.commandId);
 		return;
