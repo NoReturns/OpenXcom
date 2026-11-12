@@ -308,7 +308,8 @@ bool tryKickEnsureOnDemandDaemonHelper()
 
 } // namespace
 
-RelayStatusView::RelayStatusView() : terminal(false), parsed(false), updated_at_ms(0)
+RelayStatusView::RelayStatusView()
+	: terminal(false), parsed(false), updated_at_ms(0), last_retrieve_updated_at_ms(0)
 {
 }
 
@@ -416,7 +417,11 @@ bool parseRelayStatusJson(const std::string &statusJson, RelayStatusView *out)
 	CompanionJsonLite::extractJsonStringField(statusJson, "last_command_id", &out->last_command_id);
 	CompanionJsonLite::extractJsonStringField(statusJson, "last_command_status", &out->last_command_status);
 	CompanionJsonLite::extractJsonStringField(statusJson, "retrieve_outcome", &out->retrieve_outcome);
+	CompanionJsonLite::extractJsonStringField(statusJson, "last_retrieve_request_id", &out->last_retrieve_request_id);
+	CompanionJsonLite::extractJsonStringField(statusJson, "last_retrieve_phase", &out->last_retrieve_phase);
+	CompanionJsonLite::extractJsonStringField(statusJson, "last_retrieve_error_code", &out->last_retrieve_error_code);
 	CompanionJsonLite::extractJsonInt64Field(statusJson, "updated_at_ms", &out->updated_at_ms);
+	CompanionJsonLite::extractJsonInt64Field(statusJson, "last_retrieve_updated_at_ms", &out->last_retrieve_updated_at_ms);
 	int terminalInt = 0;
 	if (CompanionJsonLite::extractJsonIntField(statusJson, "terminal", &terminalInt))
 	{
@@ -502,6 +507,10 @@ bool shouldAcceptRelayStatusUpdate(const RelayStatusView &existing, const RelayS
 		return false;
 	}
 	if (!hasExisting || !existing.parsed)
+	{
+		return true;
+	}
+	if (incoming.last_retrieve_updated_at_ms > existing.last_retrieve_updated_at_ms)
 	{
 		return true;
 	}
@@ -992,6 +1001,43 @@ bool tryFormatRetrieveIncompleteCommandLabel(const std::string &lastCommandStatu
 	return false;
 }
 
+RelayStatusView resolveEffectiveLabelStatus(const RelayStatusView &status)
+{
+	RelayStatusView effective = status;
+	if (!status.parsed || status.last_retrieve_phase.empty() || status.last_retrieve_updated_at_ms <= 0)
+	{
+		return effective;
+	}
+	if (status.last_retrieve_phase == "no_new_orders"
+	    && status.phase == "completed"
+	    && status.action == "retrieve"
+	    && !status.last_command_status.empty())
+	{
+		return effective;
+	}
+	if (status.last_retrieve_updated_at_ms < status.updated_at_ms
+	    && status.phase == "completed"
+	    && !status.last_command_status.empty())
+	{
+		return effective;
+	}
+	effective.phase = status.last_retrieve_phase;
+	effective.action = "retrieve";
+	if (!status.last_retrieve_error_code.empty())
+	{
+		effective.error_code = status.last_retrieve_error_code;
+	}
+	else if (status.last_retrieve_phase != status.phase)
+	{
+		effective.error_code.clear();
+	}
+	if (!status.last_retrieve_request_id.empty())
+	{
+		effective.request_id = status.last_retrieve_request_id;
+	}
+	return effective;
+}
+
 } // namespace
 
 void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
@@ -1005,40 +1051,41 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 	{
 		return;
 	}
-	if (status.outcome == "deferred"
-	    || (status.phase == "sending" && status.error_code == "RATE_LIMIT" && !status.terminal))
+	const RelayStatusView effective = resolveEffectiveLabelStatus(status);
+	if (effective.outcome == "deferred"
+	    || (effective.phase == "sending" && effective.error_code == "RATE_LIMIT" && !effective.terminal))
 	{
 		*out = "Deferred: RATE LIMIT";
 		return;
 	}
-	if (status.phase == "manual_upload_required" || status.outcome == "manual_upload_required")
+	if (effective.phase == "manual_upload_required" || effective.outcome == "manual_upload_required")
 	{
 		*out = "Manual upload required";
 		return;
 	}
-	if (status.phase == "not_ready")
+	if (effective.phase == "not_ready")
 	{
 		*out = "Not ready";
 		return;
 	}
-	if (status.phase == "sending")
+	if (effective.phase == "sending")
 	{
 		*out = "Sending";
 		return;
 	}
-	if (status.phase == "retrieving")
+	if (effective.phase == "retrieving")
 	{
 		*out = "Retrieving";
 		return;
 	}
-	if (status.phase == "no_new_orders")
+	if (effective.phase == "no_new_orders")
 	{
 		*out = "No new orders";
 		return;
 	}
-	if (status.phase == "sent")
+	if (effective.phase == "sent")
 	{
-		if (status.outcome == "skipped_unchanged")
+		if (effective.outcome == "skipped_unchanged")
 		{
 			*out = "Unchanged";
 		}
@@ -1048,11 +1095,11 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 		}
 		return;
 	}
-	if (status.phase == "completed")
+	if (effective.phase == "completed")
 	{
-		if (status.action == "retrieve")
+		if (effective.action == "retrieve")
 		{
-			if (tryFormatTerminalCommandOrderLabel(status.last_command_status, out))
+			if (tryFormatTerminalCommandOrderLabel(effective.last_command_status, out))
 			{
 				return;
 			}
@@ -1064,44 +1111,44 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 		}
 		return;
 	}
-	if (status.phase == "failed")
+	if (effective.phase == "failed")
 	{
-		if (status.action == "retrieve")
+		if (effective.action == "retrieve")
 		{
-			if (status.error_code == "RETRIEVAL_ERROR"
-			    || status.error_code == "NETWORK_FAILED"
-			    || status.error_code == "RATE_LIMIT"
-			    || status.error_code == "RELAY_OFFLINE")
+			if (effective.error_code == "RETRIEVAL_ERROR"
+			    || effective.error_code == "NETWORK_FAILED"
+			    || effective.error_code == "RATE_LIMIT"
+			    || effective.error_code == "RELAY_OFFLINE")
 			{
 				*out = "Retrieve error";
 				return;
 			}
-			if (status.error_code == "RETRIEVE_INCOMPLETE")
+			if (effective.error_code == "RETRIEVE_INCOMPLETE")
 			{
-				if (tryFormatRetrieveIncompleteCommandLabel(status.last_command_status, out))
+				if (tryFormatRetrieveIncompleteCommandLabel(effective.last_command_status, out))
 				{
 					return;
 				}
 				*out = "Retrieve incomplete";
 				return;
 			}
-			if (status.last_command_status == "COMPLETED")
+			if (effective.last_command_status == "COMPLETED")
 			{
 				*out = "Order done; relay incomplete";
 				return;
 			}
-			if (tryFormatTerminalCommandOrderLabel(status.last_command_status, out))
+			if (tryFormatTerminalCommandOrderLabel(effective.last_command_status, out))
 			{
 				return;
 			}
 			*out = "Retrieve failed";
 			return;
 		}
-		if (isValidationErrorCode(status.error_code))
+		if (isValidationErrorCode(effective.error_code))
 		{
 			*out = "Failed: VALIDATION";
 		}
-		else if (isAuthErrorCode(status.error_code))
+		else if (isAuthErrorCode(effective.error_code))
 		{
 			*out = "Failed: AUTH";
 		}

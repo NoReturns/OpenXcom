@@ -502,6 +502,47 @@ static void testRelayStickyRetrieveStatusAcceptance()
 		&offlineFailure);
 	expect(!shouldAcceptRelayStatusUpdate(completedCmd, offlineFailure, true),
 		"unrelated relay offline failure must not erase completed retrieve");
+
+	RelayStatusView stickyWithAttempt;
+	parseRelayStatusJson(
+		"{\"request_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"action\":\"retrieve\","
+		"\"phase\":\"completed\",\"terminal\":true,\"last_command_status\":\"COMPLETED\","
+		"\"updated_at_ms\":5000,\"last_retrieve_request_id\":\"dddddddddddddddddddddddddddddddd\","
+		"\"last_retrieve_phase\":\"failed\",\"last_retrieve_error_code\":\"NETWORK_FAILED\","
+		"\"last_retrieve_updated_at_ms\":7000}",
+		&stickyWithAttempt);
+	expect(labelFromStatusJson(
+		"{\"request_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"action\":\"retrieve\","
+		"\"phase\":\"completed\",\"terminal\":true,\"last_command_status\":\"COMPLETED\","
+		"\"updated_at_ms\":5000,\"last_retrieve_request_id\":\"dddddddddddddddddddddddddddddddd\","
+		"\"last_retrieve_phase\":\"failed\",\"last_retrieve_error_code\":\"NETWORK_FAILED\","
+		"\"last_retrieve_updated_at_ms\":7000}") == "Retrieve error",
+		"last_retrieve attempt surfaces retrieval error over sticky Order completed");
+
+	expect(shouldAcceptRelayStatusUpdate(completedCmd, stickyWithAttempt, true),
+		"newer last_retrieve_updated_at_ms refreshes overlay cache");
+
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"COMPLETED\",\"updated_at_ms\":3000,"
+		"\"last_retrieve_phase\":\"completed\",\"last_retrieve_updated_at_ms\":3000}") == "Order completed",
+		"lifecycle B: successful last_retrieve clears prior error label");
+
+	RelayStatusView newerAttempt;
+	parseRelayStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"COMPLETED\",\"updated_at_ms\":5000,"
+		"\"last_retrieve_phase\":\"failed\",\"last_retrieve_error_code\":\"RETRIEVAL_ERROR\","
+		"\"last_retrieve_updated_at_ms\":7000}",
+		&newerAttempt);
+	RelayStatusView staleAttempt;
+	parseRelayStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"NETWORK_FAILED\",\"updated_at_ms\":2000,"
+		"\"last_retrieve_updated_at_ms\":2000}",
+		&staleAttempt);
+	expect(!shouldAcceptRelayStatusUpdate(newerAttempt, staleAttempt, true),
+		"lifecycle C: older delayed update does not replace newer last_retrieve");
 }
 
 static void testLegacyStatusJsonWithoutOptionalFields()
