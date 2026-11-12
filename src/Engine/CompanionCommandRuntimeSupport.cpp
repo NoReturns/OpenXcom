@@ -267,6 +267,234 @@ bool shouldRehydrateOrphanedDirectedFireForSession(
 	return commandSessionBindingMatchesLiveBattle(liveSessionId, commandSessionId, resultSessionId);
 }
 
+bool isOpenCompanionResultStatus(const std::string &status)
+{
+	return status == "EXECUTING" || status == "ACCEPTED";
+}
+
+bool isCrossSessionPersistedOpenCommand(
+	const std::string &liveSessionId,
+	const std::string &inboxSessionId,
+	const std::string &resultSessionId,
+	const std::string &resultStatus)
+{
+	if (liveSessionId.empty())
+	{
+		return false;
+	}
+	if (!isOpenCompanionResultStatus(resultStatus))
+	{
+		return false;
+	}
+	if (!inboxSessionId.empty())
+	{
+		return inboxSessionId != liveSessionId;
+	}
+	return !resultSessionId.empty() && resultSessionId != liveSessionId;
+}
+
+bool shouldPreserveSameSessionInFlightExecution(
+	const std::string &liveSessionId,
+	const std::string &activeCommandSessionId,
+	const std::string &resultSessionId,
+	const std::string &resultCommandId,
+	bool activeInFlight,
+	const std::string &activeCommandId)
+{
+	if (!activeInFlight || activeCommandId.empty() || activeCommandId != resultCommandId)
+	{
+		return false;
+	}
+	if (!liveSessionId.empty() && !activeCommandSessionId.empty() &&
+	    activeCommandSessionId == liveSessionId)
+	{
+		return true;
+	}
+	return commandSessionBindingMatchesLiveBattle(liveSessionId, activeCommandSessionId, resultSessionId);
+}
+
+bool shouldRecoverPersistedCrossSessionOrphan(
+	const std::string &liveSessionId,
+	const std::string &inboxSessionId,
+	const std::string &resultSessionId,
+	const std::string &resultStatus,
+	const std::string &inboxCommandId,
+	const std::string &resultCommandId,
+	bool activeInFlight,
+	const std::string &activeCommandId,
+	const std::string &activeCommandSessionId)
+{
+	if (!isCrossSessionPersistedOpenCommand(liveSessionId, inboxSessionId, resultSessionId, resultStatus))
+	{
+		return false;
+	}
+	if (!inboxCommandId.empty() && !resultCommandId.empty() && inboxCommandId != resultCommandId)
+	{
+		return false;
+	}
+	if (shouldPreserveSameSessionInFlightExecution(
+		    liveSessionId,
+		    activeCommandSessionId,
+		    resultSessionId,
+		    resultCommandId,
+		    activeInFlight,
+		    activeCommandId))
+	{
+		return false;
+	}
+	return true;
+}
+
+bool parseTacticalResultSessionBinding(
+	const std::string &resultJson,
+	std::string *commandIdOut,
+	std::string *statusOut,
+	std::string *sessionIdOut,
+	std::string *inboxSha256Out)
+{
+	if (!parseTacticalResultBinding(resultJson, commandIdOut, statusOut, inboxSha256Out))
+	{
+		return false;
+	}
+	if (sessionIdOut != 0)
+	{
+		sessionIdOut->clear();
+		std::string sessionId;
+		if (extractJsonString(resultJson, "session_id", &sessionId))
+		{
+			*sessionIdOut = sessionId;
+		}
+	}
+	return true;
+}
+
+const char *sessionBoundaryInterruptedPublicReasonForCommandType(const std::string &commandType)
+{
+	if (commandType == "SNAP_SHOT" || commandType == "AUTO_SHOT" || commandType == "AIMED_SHOT")
+	{
+		return "Battle session changed; in-flight directed fire cannot resume after reload.";
+	}
+	return "Battle session changed; in-flight command cannot resume after reload.";
+}
+
+bool parseSnapShotParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::SnapShotCommandParsed *out)
+{
+	if (out == 0 || resultJson.empty())
+	{
+		return false;
+	}
+	std::string status;
+	std::string commandType;
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "status", &status) ||
+	    !isOpenCompanionResultStatus(status) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "command_type", &commandType))
+	{
+		return false;
+	}
+	if (commandType != "SNAP_SHOT" && commandType != "AUTO_SHOT" && commandType != "AIMED_SHOT")
+	{
+		return false;
+	}
+	out->valid = false;
+	out->commandType = commandType;
+	out->targetX = 0;
+	out->targetY = 0;
+	out->targetZ = 0;
+	out->activeHand.clear();
+	out->stateVersion = 0;
+	out->rejectCode.clear();
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "command_id", &out->commandId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "session_id", &out->sessionId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "snapshot_sha256", &out->snapshotSha256))
+	{
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(resultJson, "actor_unit_id", &out->actorUnitId) ||
+	    !CompanionJsonLite::extractJsonIntField(resultJson, "turn", &out->turn))
+	{
+		return false;
+	}
+	out->valid = !out->commandId.empty() && !out->sessionId.empty();
+	return out->valid;
+}
+
+bool parseMoveParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::MoveCommandParsed *out)
+{
+	if (out == 0 || resultJson.empty())
+	{
+		return false;
+	}
+	std::string status;
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "status", &status) ||
+	    !isOpenCompanionResultStatus(status))
+	{
+		return false;
+	}
+	out->valid = false;
+	out->commandType = "MOVE";
+	out->destX = 0;
+	out->destY = 0;
+	out->destZ = 0;
+	out->stateVersion = 0;
+	out->rejectCode.clear();
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "command_id", &out->commandId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "session_id", &out->sessionId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "snapshot_sha256", &out->snapshotSha256))
+	{
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(resultJson, "actor_unit_id", &out->actorUnitId) ||
+	    !CompanionJsonLite::extractJsonIntField(resultJson, "turn", &out->turn))
+	{
+		return false;
+	}
+	out->valid = !out->commandId.empty() && !out->sessionId.empty();
+	return out->valid;
+}
+
+bool parseKneelParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::KneelCommandParsed *out)
+{
+	if (out == 0 || resultJson.empty())
+	{
+		return false;
+	}
+	std::string status;
+	std::string commandType;
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "status", &status) ||
+	    !isOpenCompanionResultStatus(status) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "command_type", &commandType))
+	{
+		return false;
+	}
+	if (commandType != "KNEEL" && commandType != "STAND")
+	{
+		return false;
+	}
+	out->valid = false;
+	out->commandType = commandType;
+	out->stateVersion = 0;
+	out->rejectCode.clear();
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "command_id", &out->commandId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "session_id", &out->sessionId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "snapshot_sha256", &out->snapshotSha256))
+	{
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(resultJson, "actor_unit_id", &out->actorUnitId) ||
+	    !CompanionJsonLite::extractJsonIntField(resultJson, "turn", &out->turn))
+	{
+		return false;
+	}
+	out->valid = !out->commandId.empty() && !out->sessionId.empty();
+	return out->valid;
+}
+
 bool shouldRunCompanionCommandTickDuringThink(
 	bool playerTurn,
 	bool debugMode,

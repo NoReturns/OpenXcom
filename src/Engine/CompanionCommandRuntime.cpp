@@ -2619,6 +2619,274 @@ void tryArchiveStaleInboxForSessionChange(SavedBattleGame *battle)
 	}
 }
 
+static std::string activeInFlightCommandSessionId()
+{
+	if (!g_active.inFlight)
+	{
+		return std::string();
+	}
+	switch (g_active.kind)
+	{
+	case ActiveCommand::KIND_MOVE:
+		return g_active.moveParsed.sessionId;
+	case ActiveCommand::KIND_SNAP_SHOT:
+	case ActiveCommand::KIND_AUTO_SHOT:
+	case ActiveCommand::KIND_AIMED_SHOT:
+		return g_active.snapParsed.sessionId;
+	case ActiveCommand::KIND_THROW:
+		return g_active.throwParsed.sessionId;
+	default:
+		return std::string();
+	}
+}
+
+static bool tryTerminalizePersistedCrossSessionOpenResult(
+	SavedBattleGame *battle,
+	const std::string &liveSessionId,
+	const std::string &commandPath,
+	const std::string &resultPath,
+	const std::string &journalPath)
+{
+	if (battle == 0 || liveSessionId.empty())
+	{
+		return false;
+	}
+
+	std::string resultJson;
+	if (!readTextFile(resultPath, &resultJson))
+	{
+		return false;
+	}
+	std::string resultCommandId;
+	std::string resultStatus;
+	std::string resultSessionId;
+	std::string resultInboxDigest;
+	if (!CompanionCommandRuntimeSupport::parseTacticalResultSessionBinding(
+		    resultJson, &resultCommandId, &resultStatus, &resultSessionId, &resultInboxDigest))
+	{
+		return false;
+	}
+	if (resultCommandId.empty())
+	{
+		return false;
+	}
+
+	std::string journalJson;
+	readTextFile(journalPath, &journalJson);
+	if (!journalContainsCommandId(journalJson, resultCommandId))
+	{
+		return false;
+	}
+
+	std::string commandJson;
+	const bool inboxPresent = readTextFile(commandPath, &commandJson);
+	std::string inboxCommandId;
+	std::string inboxSessionId;
+	std::string inboxCommandType;
+	if (inboxPresent)
+	{
+		CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &inboxCommandId);
+		CompanionJsonLite::extractJsonStringField(commandJson, "session_id", &inboxSessionId);
+		CompanionJsonLite::extractJsonStringField(commandJson, "command_type", &inboxCommandType);
+	}
+	else
+	{
+		CompanionJsonLite::extractJsonStringField(resultJson, "command_type", &inboxCommandType);
+	}
+
+	if (!CompanionCommandRuntimeSupport::shouldRecoverPersistedCrossSessionOrphan(
+		    liveSessionId,
+		    inboxSessionId,
+		    resultSessionId,
+		    resultStatus,
+		    inboxCommandId,
+		    resultCommandId,
+		    g_active.inFlight,
+		    g_active.inFlight ? g_active.commandId : std::string(),
+		    activeInFlightCommandSessionId()))
+	{
+		return false;
+	}
+
+	if (inboxPresent)
+	{
+		if (inboxCommandId != resultCommandId)
+		{
+			return false;
+		}
+		if (!resultInboxDigest.empty())
+		{
+			std::string inboxDigest;
+			if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest) ||
+			    inboxDigest != resultInboxDigest)
+			{
+				return false;
+			}
+		}
+	}
+	else
+	{
+		if (inboxCommandType.empty())
+		{
+			CompanionJsonLite::extractJsonStringField(resultJson, "command_type", &inboxCommandType);
+		}
+		if (inboxSessionId.empty())
+		{
+			inboxSessionId = resultSessionId;
+		}
+		inboxCommandId = resultCommandId;
+		if (inboxCommandType.empty() || resultCommandId.empty() || resultInboxDigest.empty())
+		{
+			return false;
+		}
+	}
+
+	const char *publicReason =
+		CompanionCommandRuntimeSupport::sessionBoundaryInterruptedPublicReasonForCommandType(inboxCommandType);
+	const std::string resultSnapshotSha256 =
+		snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_INTERRUPTED);
+	std::string inboxDigestHex;
+	if (inboxPresent)
+	{
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigestHex))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		inboxDigestHex = resultInboxDigest;
+	}
+
+	std::string json;
+	if (inboxCommandType == "MOVE")
+	{
+		CompanionCommandCore::MoveCommandParsed parsed = {};
+		if (!(inboxPresent
+		          ? CompanionCommandCore::parseMoveCommandJson(commandJson, &parsed)
+		          : CompanionCommandRuntimeSupport::parseMoveParsedFromOpenResultJson(resultJson, &parsed)))
+		{
+			return false;
+		}
+		BattleUnit *actor = findUnitById(battle, parsed.actorUnitId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		json = buildMoveResultJson(
+			parsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			publicReason,
+			pos,
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			false,
+			resultSnapshotSha256,
+			inboxDigestHex);
+	}
+	else if (inboxCommandType == "SNAP_SHOT" || inboxCommandType == "AUTO_SHOT" || inboxCommandType == "AIMED_SHOT")
+	{
+		CompanionCommandCore::SnapShotCommandParsed snapParsed = {};
+		if (!(inboxPresent
+		          ? CompanionCommandCore::parseSnapShotCommandJson(commandJson, &snapParsed)
+		          : CompanionCommandRuntimeSupport::parseSnapShotParsedFromOpenResultJson(resultJson, &snapParsed)))
+		{
+			return false;
+		}
+		BattleUnit *actor = findUnitById(battle, snapParsed.actorUnitId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		json = buildSnapShotResultJson(
+			snapParsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			publicReason,
+			pos,
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256,
+			inboxDigestHex);
+	}
+	else if (inboxCommandType == "KNEEL")
+	{
+		CompanionCommandCore::KneelCommandParsed kneelParsed = {};
+		if (!(inboxPresent
+		          ? CompanionCommandCore::parseKneelCommandJson(commandJson, &kneelParsed)
+		          : CompanionCommandRuntimeSupport::parseKneelParsedFromOpenResultJson(resultJson, &kneelParsed)))
+		{
+			return false;
+		}
+		BattleUnit *actor = findUnitById(battle, kneelParsed.actorUnitId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		json = buildKneelResultJson(
+			kneelParsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			publicReason,
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256,
+			inboxDigestHex);
+	}
+	else if (inboxCommandType == "STAND")
+	{
+		CompanionCommandCore::StandCommandParsed standParsed = {};
+		if (inboxPresent)
+		{
+			if (!CompanionCommandCore::parseStandCommandJson(commandJson, &standParsed))
+			{
+				return false;
+			}
+		}
+		else if (!CompanionCommandRuntimeSupport::parseKneelParsedFromOpenResultJson(resultJson, &standParsed))
+		{
+			return false;
+		}
+		BattleUnit *actor = findUnitById(battle, standParsed.actorUnitId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		json = buildKneelResultJson(
+			standParsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			publicReason,
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256,
+			inboxDigestHex);
+	}
+	else
+	{
+		return false;
+	}
+
+	writeResultFile(resultPath, json);
+	logTerminalOnce(resultCommandId, CompanionCommandCore::CMD_INTERRUPTED);
+	logCommandDiagnostic(
+		"persisted cross-session orphan command_id=" + resultCommandId.substr(0, 8) + "...");
+	if (g_active.inFlight && g_active.commandId == resultCommandId)
+	{
+		g_active.inFlight = false;
+		g_active.kind = ActiveCommand::KIND_NONE;
+		clearRosterCasualtyDeferClock();
+	}
+	tryArchiveStaleInboxForSessionChange(battle);
+	g_inboxCachedMtime = 0;
+	return true;
+}
+
+static void tryRecoverPersistedCrossSessionOrphanOnBinding(SavedBattleGame *battle)
+{
+	const std::string dir = snapshotDirectory();
+	if (dir.empty() || battle == 0)
+	{
+		return;
+	}
+	const std::string liveSessionId = battle->getCompanionEventLog().getSessionId();
+	tryTerminalizePersistedCrossSessionOpenResult(
+		battle,
+		liveSessionId,
+		joinPath(dir, "tactical-command.json"),
+		joinPath(dir, "tactical-result.json"),
+		joinPath(dir, "tactical-command-journal.json"));
+}
+
 } // namespace
 
 void onBattleCompanionBindingContext(SavedBattleGame *battle)
@@ -2629,6 +2897,7 @@ void onBattleCompanionBindingContext(SavedBattleGame *battle)
 	}
 	const std::string sessionId = battle->getCompanionEventLog().getSessionId();
 	const std::string tacticalId = battle->getCompanionTacticalBattleId();
+	tryRecoverPersistedCrossSessionOrphanOnBinding(battle);
 	const bool hadPriorContext = !g_boundSessionId.empty() || !g_boundTacticalBattleId.empty();
 	const bool contextChanged = hadPriorContext &&
 		(sessionId != g_boundSessionId || tacticalId != g_boundTacticalBattleId);
@@ -2788,100 +3057,12 @@ static bool tryResolveOrphanedDirectedFireSessionBoundary(
 	const std::string &resultPath,
 	const std::string &journalPath)
 {
-	if (g_active.inFlight || game == 0 || battle == 0)
+	if (g_active.inFlight || battle == 0)
 	{
 		return false;
 	}
-	std::string resultJson;
-	if (!readTextFile(resultPath, &resultJson))
-	{
-		return false;
-	}
-	std::string status;
-	std::string resultCommandId;
-	std::string resultSessionId;
-	std::string resultInboxDigest;
-	CompanionJsonLite::extractJsonStringField(resultJson, "status", &status);
-	if (status != "EXECUTING")
-	{
-		return false;
-	}
-	CompanionJsonLite::extractJsonStringField(resultJson, "command_id", &resultCommandId);
-	CompanionJsonLite::extractJsonStringField(resultJson, "session_id", &resultSessionId);
-	if (resultCommandId.empty())
-	{
-		return false;
-	}
-
-	std::string journalJson;
-	readTextFile(journalPath, &journalJson);
-	if (!journalContainsCommandId(journalJson, resultCommandId))
-	{
-		return false;
-	}
-
-	std::string commandJson;
-	if (!readTextFile(commandPath, &commandJson))
-	{
-		return false;
-	}
-	std::string inboxCommandId;
-	std::string inboxCommandType;
-	CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &inboxCommandId);
-	CompanionJsonLite::extractJsonStringField(commandJson, "command_type", &inboxCommandType);
-	if (inboxCommandId != resultCommandId)
-	{
-		return false;
-	}
-	if (inboxCommandType != "SNAP_SHOT" && inboxCommandType != "AUTO_SHOT" && inboxCommandType != "AIMED_SHOT")
-	{
-		return false;
-	}
-
-	CompanionCommandCore::SnapShotCommandParsed snapParsed = {};
-	if (!CompanionCommandCore::parseSnapShotCommandJson(commandJson, &snapParsed))
-	{
-		return false;
-	}
-
-	std::string inboxDigest;
-	if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
-	{
-		return false;
-	}
-	CompanionJsonLite::extractJsonStringField(resultJson, "inbox_sha256", &resultInboxDigest);
-	if (!resultInboxDigest.empty() && resultInboxDigest != inboxDigest)
-	{
-		return false;
-	}
-
-	if (CompanionCommandRuntimeSupport::shouldRehydrateOrphanedDirectedFireForSession(
-		    liveSessionId, snapParsed.sessionId, resultSessionId))
-	{
-		return false;
-	}
-
-	BattleUnit *actor = findUnitById(battle, snapParsed.actorUnitId);
-	const std::string publicReason =
-		"Battle session changed; in-flight directed fire cannot resume after reload.";
-	const std::string resultSnapshotSha256 =
-		snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_INTERRUPTED);
-	const Position finalPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
-	const std::string json = buildSnapShotResultJson(
-		snapParsed,
-		CompanionCommandCore::CMD_INTERRUPTED,
-		publicReason,
-		finalPos,
-		finalPos,
-		actor != 0 ? actor->getTimeUnits() : 0,
-		actor != 0 && actor->isKneeled(),
-		resultSnapshotSha256,
-		inboxDigest);
-	writeResultFile(resultPath, json);
-	logTerminalOnce(resultCommandId, CompanionCommandCore::CMD_INTERRUPTED);
-	logCommandDiagnostic(
-		"session-boundary orphan directed fire command_id=" + resultCommandId.substr(0, 8) + "...");
-	return true;
+	return tryTerminalizePersistedCrossSessionOpenResult(
+		battle, liveSessionId, commandPath, resultPath, journalPath);
 }
 
 static bool tryRehydrateOrphanedDirectedFireActive(

@@ -77,6 +77,56 @@ bool shouldRehydrateOrphanedDirectedFireForSession(
 	const std::string &commandSessionId,
 	const std::string &resultSessionId);
 
+bool isOpenCompanionResultStatus(const std::string &status);
+
+bool isCrossSessionPersistedOpenCommand(
+	const std::string &liveSessionId,
+	const std::string &inboxSessionId,
+	const std::string &resultSessionId,
+	const std::string &resultStatus);
+
+bool shouldPreserveSameSessionInFlightExecution(
+	const std::string &liveSessionId,
+	const std::string &commandSessionId,
+	const std::string &resultSessionId,
+	const std::string &resultCommandId,
+	bool activeInFlight,
+	const std::string &activeCommandId);
+
+/** Persisted EXECUTING/ACCEPTED from a prior battle session (disk orphan), not same-session in-flight work. */
+bool shouldRecoverPersistedCrossSessionOrphan(
+	const std::string &liveSessionId,
+	const std::string &inboxSessionId,
+	const std::string &resultSessionId,
+	const std::string &resultStatus,
+	const std::string &inboxCommandId,
+	const std::string &resultCommandId,
+	bool activeInFlight,
+	const std::string &activeCommandId,
+	const std::string &activeCommandSessionId);
+
+bool parseTacticalResultSessionBinding(
+	const std::string &resultJson,
+	std::string *commandIdOut,
+	std::string *statusOut,
+	std::string *sessionIdOut,
+	std::string *inboxSha256Out);
+
+const char *sessionBoundaryInterruptedPublicReasonForCommandType(const std::string &commandType);
+
+/** Persisted non-terminal result after launcher quarantine removed tactical-command.json. */
+bool parseSnapShotParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::SnapShotCommandParsed *out);
+
+bool parseMoveParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::MoveCommandParsed *out);
+
+bool parseKneelParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::KneelCommandParsed *out);
+
 enum HandleStateCompanionStage
 {
 	HANDLE_STATE_COMPANION_BRIEFING = 1,

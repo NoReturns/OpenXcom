@@ -148,6 +148,55 @@ static void testOrphanDirectedFireSessionBinding()
 		"rehydrate blocked when live battle session rotated");
 }
 
+static void testSessionOrphan01bPersistedCrossSessionRecoveryPolicy()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	const std::string sessionA = "112482ac508d5bc16dcde1470d197d09";
+	const std::string sessionB = "c2c699950ddc838bfe4b37babc03967f";
+	const std::string commandId = "aster-20261110-seppe-sectoid-auto-29";
+	expect(isCrossSessionPersistedOpenCommand(sessionB, sessionA, sessionA, "EXECUTING"),
+		"incident 029 inbox/result are open and belong to Session A");
+	expect(!isCrossSessionPersistedOpenCommand(std::string(), sessionA, sessionA, "EXECUTING"),
+		"ambiguous live session must not trigger cross-session recovery");
+	expect(shouldRecoverPersistedCrossSessionOrphan(
+		    sessionB, sessionA, sessionA, "EXECUTING", commandId, commandId, false, std::string(), std::string()),
+		"disk-only Session A EXECUTING recovers when binding to Session B");
+	expect(!shouldRecoverPersistedCrossSessionOrphan(
+		    sessionB, sessionA, sessionA, "EXECUTING", commandId, commandId, true, commandId, sessionB),
+		"same-session active in-flight must not be recovered as cross-session orphan");
+	expect(!shouldRecoverPersistedCrossSessionOrphan(
+		    sessionB, sessionB, sessionB, "EXECUTING", commandId, commandId, true, commandId, sessionB),
+		"genuine same-session execution must be preserved");
+	expect(!shouldRecoverPersistedCrossSessionOrphan(
+		    sessionB, sessionA, sessionA, "INTERRUPTED", commandId, commandId, false, std::string(), std::string()),
+		"idempotent: terminal result is not re-recovered");
+	const char *reason = sessionBoundaryInterruptedPublicReasonForCommandType("AUTO_SHOT");
+	expect(reason != 0 && std::string(reason).find("directed fire") != std::string::npos,
+		"directed-fire session boundary reason is explicit");
+}
+
+static void testSessionOrphan01bTerminalizeFromOpenResultAfterInboxQuarantine()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	const std::string resultJson =
+		"{\"schema_version\":1,\"command_id\":\"aster-20261110-seppe-sectoid-auto-29\","
+		"\"command_type\":\"AUTO_SHOT\",\"status\":\"EXECUTING\","
+		"\"session_id\":\"112482ac508d5bc16dcde1470d197d09\",\"turn\":4,\"actor_unit_id\":1,"
+		"\"snapshot_sha256\":\"15f9c26f5435a30438d68fb69fe5269f08bb209860416b1d261693f0ea592c12\","
+		"\"inbox_sha256\":\"a5154a3afed19545d1e4feb326524187a7bcfa61f63fe815aec7ea56dc6a2ee5\"}";
+	const std::string sessionB = "c2c699950ddc838bfe4b37babc03967f";
+	const std::string sessionA = "112482ac508d5bc16dcde1470d197d09";
+	CompanionCommandCore::SnapShotCommandParsed snap = {};
+	expect(parseSnapShotParsedFromOpenResultJson(resultJson, &snap),
+		"open EXECUTING result supplies directed-fire binding after inbox quarantine");
+	expect(snap.commandId == "aster-20261110-seppe-sectoid-auto-29", "preserved command_id");
+	expect(snap.sessionId == sessionA, "preserved session_id");
+	expect(shouldRecoverPersistedCrossSessionOrphan(
+		    sessionB, std::string(), sessionA, "EXECUTING", std::string(),
+		    "aster-20261110-seppe-sectoid-auto-29", false, std::string(), std::string()),
+		"cross-session recovery policy with quarantined inbox");
+}
+
 static void testCompanionCommandPollDuringIdleThink()
 {
 	using namespace CompanionCommandRuntimeSupport;
@@ -2114,6 +2163,8 @@ int main()
 	testOwnershipInvalidAssignmentModeRejected();
 	testDeferInFlightCompletionWhileReentrant();
 	testOrphanDirectedFireSessionBinding();
+	testSessionOrphan01bPersistedCrossSessionRecoveryPolicy();
+	testSessionOrphan01bTerminalizeFromOpenResultAfterInboxQuarantine();
 	testCompanionCommandPollDuringIdleThink();
 	testCompanionCommandInboxThrottle();
 	testExecutorDisabledByDefault();
