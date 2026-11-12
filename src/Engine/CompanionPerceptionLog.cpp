@@ -221,6 +221,7 @@ void CompanionPerceptionLog::beginSession(const std::string &sessionId)
 	_rosterCasualtyState.clear();
 	_rosterCasualtyEpisodeSerial.clear();
 	_rosterCasualtyLedger.clear();
+	_combatCasualtyAttributedVictims.clear();
 	_projectileDirectionFlight.active = false;
 	_projectileDirectionFlight.orderedTileSamples.clear();
 	_projectileDirectionFlight.nextImpactOrdinal = 0;
@@ -815,6 +816,80 @@ void CompanionPerceptionLog::syncRosterCasualtyLedger(
 	entry.position = position;
 	entry.subjectName = subjectName;
 	_rosterCasualtyLedger[subjectUnitId] = entry;
+}
+
+void CompanionPerceptionLog::tryRecordCombatCasualtyAttributed(
+	SavedBattleGame *battle,
+	BattleUnit *victim,
+	BattleUnit *fatalActor,
+	bool mindControlKillCredit,
+	bool fatalWoundBleedOutPath,
+	bool terrainExplosionWithoutActor,
+	bool hiddenExplosionContext)
+{
+	if (battle == 0 || victim == 0 || !shouldRecordPerception(battle))
+	{
+		return;
+	}
+	const int victimId = victim->getId();
+	if (_combatCasualtyAttributedVictims.find(victimId) != _combatCasualtyAttributedVictims.end())
+	{
+		return;
+	}
+	const Position victimPos = victim->getPosition();
+	const bool victimPositionKnown = victim->getVisible()
+		|| isTileCurrentlySeenByAnyFriendly(battle, victimPos);
+	CompanionPerceptionLogCore::CombatCasualtyAttributionExportInput exportInput = {};
+	exportInput.debugMode = battle->getDebugMode();
+	exportInput.victimConfirmedDead = true;
+	exportInput.fatalActorPresent = fatalActor != 0;
+	exportInput.fatalActorVisible = fatalActor != 0 && fatalActor->getVisible();
+	exportInput.victimRosterSoldier = isOriginalXcomRosterCasualtySubjectUnit(victim);
+	exportInput.victimHostileOriginal = victim->getOriginalFaction() == FACTION_HOSTILE;
+	exportInput.victimVisible = victim->getVisible();
+	exportInput.victimPositionKnown = victimPositionKnown;
+	exportInput.mindControlKillCredit = mindControlKillCredit;
+	exportInput.fatalWoundBleedOutPath = fatalWoundBleedOutPath;
+	exportInput.terrainExplosionWithoutActor = terrainExplosionWithoutActor;
+	exportInput.hiddenExplosionContext = hiddenExplosionContext;
+	const CompanionPerceptionLogCore::CombatCasualtyAttributionExportResolution exportResolution =
+		CompanionPerceptionLogCore::resolveCombatCasualtyAttributionExport(exportInput);
+	if (!exportResolution.shouldEmit)
+	{
+		return;
+	}
+	CompanionPerceptionEvent entry{};
+	entry.type = "combat_casualty_attributed";
+	entry.turn = battle->getTurn();
+	entry.confidence = "fatal";
+	entry.attributionScope = "fatal";
+	entry.perceptionChannel = victimPositionKnown ? "seen" : "notification";
+	if (victimPositionKnown)
+	{
+		entry.positionKnown = true;
+		entry.position = victimPos;
+	}
+	if (exportResolution.exportVictimSubjectId)
+	{
+		entry.hasSubjectUnitId = true;
+		entry.subjectUnitId = victimId;
+		if (exportInput.victimRosterSoldier)
+		{
+			Soldier *geoscape = victim->getGeoscapeSoldier();
+			if (geoscape != 0)
+			{
+				entry.subjectName = geoscape->getName(true);
+			}
+		}
+	}
+	if (exportResolution.exportAttributedActorId && fatalActor != 0)
+	{
+		entry.hasAttributedActorUnitId = true;
+		entry.attributedActorUnitId = fatalActor->getId();
+	}
+	const std::string dedupeKey = CompanionPerceptionLogCore::makeCombatCasualtyAttributionDedupeKey(victimId);
+	appendEvent(battle, entry, dedupeKey);
+	_combatCasualtyAttributedVictims.insert(victimId);
 }
 
 void CompanionPerceptionLog::tryRecordSoldierDown(SavedBattleGame *battle, BattleUnit *soldier, bool uiNotificationShown)

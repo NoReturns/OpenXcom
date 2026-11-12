@@ -135,6 +135,37 @@ std::string makeProjectileImpactDedupeKey(int turn, int flightId, int impactOrdi
 
 bool isCombatCasualtyPerceptionEventType(const char *eventType);
 
+/** M1 PERCEPTION-B2: authoritative fatal casualty attribution (engine murderer at death settlement). */
+struct CombatCasualtyAttributionExportInput
+{
+	bool debugMode;
+	bool victimConfirmedDead;
+	bool fatalActorPresent;
+	bool fatalActorVisible;
+	bool victimRosterSoldier;
+	bool victimHostileOriginal;
+	bool victimVisible;
+	bool victimPositionKnown;
+	bool mindControlKillCredit;
+	bool fatalWoundBleedOutPath;
+	bool terrainExplosionWithoutActor;
+	bool hiddenExplosionContext;
+};
+
+struct CombatCasualtyAttributionExportResolution
+{
+	bool shouldEmit;
+	bool exportVictimSubjectId;
+	bool exportAttributedActorId;
+};
+
+CombatCasualtyAttributionExportResolution resolveCombatCasualtyAttributionExport(
+	const CombatCasualtyAttributionExportInput &input);
+
+std::string makeCombatCasualtyAttributionDedupeKey(int victimUnitId);
+
+bool isCombatCasualtyAttributionPerceptionEventType(const char *eventType);
+
 /** Roster soldier ID ceiling (matches BattleUnit::MAX_SOLDIER_ID). */
 const int ROSTER_SOLDIER_ID_MAX = 1000000;
 

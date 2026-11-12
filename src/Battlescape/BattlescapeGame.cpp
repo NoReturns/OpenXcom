@@ -46,6 +46,7 @@
 #include "../Savegame/Tile.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/BattleItem.h"
+#include "../Engine/CompanionPerceptionLog.h"
 #include "../Mod/RuleItem.h"
 #include "../Mod/RuleInventory.h"
 #include "../Mod/Armor.h"
@@ -725,10 +726,13 @@ void BattlescapeGame::checkForCasualties(BattleItem *murderweapon, BattleUnit *o
 			}
 		}
 
+		BattleUnit *fatalActor = murderer;
+		bool mindControlKillCredit = false;
 		if (murderer && killStat.status != STATUS_IGNORE_ME)
 		{
 			if (murderer->getFaction() == FACTION_PLAYER && murderer->getOriginalFaction() != FACTION_PLAYER)
 			{
+				mindControlKillCredit = true;
 				// This must be a mind controlled unit. Find out who mind controlled him and award the kill to that unit.
 				for (std::vector<BattleUnit*>::iterator i = _save->getUnits()->begin(); i != _save->getUnits()->end(); ++i)
 				{
@@ -757,6 +761,19 @@ void BattlescapeGame::checkForCasualties(BattleItem *murderweapon, BattleUnit *o
 		{
 			if ((*j)->getHealth() == 0)
 			{
+				if (killStat.status == STATUS_DEAD)
+				{
+					const bool fatalWoundBleedOutPath = murderweapon == 0 && !hiddenExplosion && !terrainExplosion;
+					const bool terrainExplosionWithoutActor = terrainExplosion && fatalActor == 0;
+					_save->getCompanionPerceptionLog().tryRecordCombatCasualtyAttributed(
+						_save,
+						victim,
+						fatalActor,
+						mindControlKillCredit,
+						fatalWoundBleedOutPath,
+						terrainExplosionWithoutActor,
+						hiddenExplosion);
+				}
 				if ((*j)->getStatus() == STATUS_UNCONSCIOUS)
 				{
 					noCorpse = true;

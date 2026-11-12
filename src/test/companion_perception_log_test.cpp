@@ -453,6 +453,123 @@ static void testCombatCasualtyEventRegistry()
 		"soldier_down registered");
 	expect(!CompanionPerceptionLogCore::isCombatCasualtyPerceptionEventType("impact_observed"),
 		"impact not casualty type");
+	expect(CompanionPerceptionLogCore::isCombatCasualtyAttributionPerceptionEventType("combat_casualty_attributed"),
+		"combat attribution type registered");
+}
+
+static void testCombatCasualtyAttributionVisibleKill()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimHostileOriginal = true;
+	input.victimVisible = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(res.shouldEmit, "visible actor kills visible hostile");
+	expect(res.exportVictimSubjectId && res.exportAttributedActorId, "both identities exported");
+}
+
+static void testCombatCasualtyAttributionRosterVictim()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimRosterSoldier = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(res.shouldEmit, "visible hostile kills roster soldier");
+}
+
+static void testCombatCasualtyAttributionHiddenActor()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = false;
+	input.victimRosterSoldier = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "hidden actor omits attribution");
+}
+
+static void testCombatCasualtyAttributionHiddenHostileVictim()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimHostileOriginal = true;
+	input.victimVisible = false;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "hidden hostile victim omits attribution");
+}
+
+static void testCombatCasualtyAttributionOmitsMcCredit()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimHostileOriginal = true;
+	input.victimVisible = true;
+	input.mindControlKillCredit = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "mind-control credit path omits attribution");
+}
+
+static void testCombatCasualtyAttributionOmitsFatalWound()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimHostileOriginal = true;
+	input.victimVisible = true;
+	input.fatalWoundBleedOutPath = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "fatal wound bleed-out omits attribution");
+}
+
+static void testCombatCasualtyAttributionOmitsUnknownMurderer()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = false;
+	input.victimHostileOriginal = true;
+	input.victimVisible = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "unknown murderer omits attribution");
+}
+
+static void testCombatCasualtyAttributionDedupeKey()
+{
+	const std::string key = makeCombatCasualtyAttributionDedupeKey(1000003);
+	expect(key == "combat_casualty_attributed:1000003", "dedupe key per victim");
+}
+
+static void testCombatCasualtyAttributionOmitsTerrainWithoutActor()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = false;
+	input.victimHostileOriginal = true;
+	input.victimVisible = true;
+	input.terrainExplosionWithoutActor = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "terrain without actor omits attribution");
+}
+
+static void testCombatCasualtyAttributionOmitsHiddenExplosion()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimHostileOriginal = true;
+	input.victimVisible = true;
+	input.hiddenExplosionContext = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "hidden explosion context omits attribution");
 }
 
 static void testExplosionOriginVisibleDeathDetonation()
@@ -574,6 +691,16 @@ int main()
 	testProjectileImpactTerrainStillClassified();
 	testProjectileImpactHiddenUnitMatchesTerrainFairPlay();
 	testCombatCasualtyEventRegistry();
+	testCombatCasualtyAttributionVisibleKill();
+	testCombatCasualtyAttributionRosterVictim();
+	testCombatCasualtyAttributionHiddenActor();
+	testCombatCasualtyAttributionHiddenHostileVictim();
+	testCombatCasualtyAttributionOmitsMcCredit();
+	testCombatCasualtyAttributionOmitsFatalWound();
+	testCombatCasualtyAttributionOmitsUnknownMurderer();
+	testCombatCasualtyAttributionDedupeKey();
+	testCombatCasualtyAttributionOmitsTerrainWithoutActor();
+	testCombatCasualtyAttributionOmitsHiddenExplosion();
 	testRosterCasualtySubjectAcceptsPostKiaIdentity();
 	testExplosionOriginVisibleDeathDetonation();
 	testExplosionOriginHiddenSourceOmitsClass();

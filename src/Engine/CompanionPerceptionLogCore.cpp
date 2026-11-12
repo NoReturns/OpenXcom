@@ -327,6 +327,56 @@ bool isCombatCasualtyPerceptionEventType(const char *eventType)
 		|| std::strcmp(eventType, "soldier_recovered") == 0;
 }
 
+bool isCombatCasualtyAttributionPerceptionEventType(const char *eventType)
+{
+	return eventType != 0 && std::strcmp(eventType, "combat_casualty_attributed") == 0;
+}
+
+CombatCasualtyAttributionExportResolution resolveCombatCasualtyAttributionExport(
+	const CombatCasualtyAttributionExportInput &input)
+{
+	CombatCasualtyAttributionExportResolution out = {};
+	if (input.debugMode || !input.victimConfirmedDead || !input.fatalActorPresent)
+	{
+		return out;
+	}
+	if (input.mindControlKillCredit || input.fatalWoundBleedOutPath || input.terrainExplosionWithoutActor
+		|| input.hiddenExplosionContext)
+	{
+		return out;
+	}
+	if (!input.fatalActorVisible)
+	{
+		return out;
+	}
+	if (input.victimHostileOriginal)
+	{
+		if (!input.victimVisible)
+		{
+			return out;
+		}
+		out.exportVictimSubjectId = true;
+	}
+	else if (input.victimRosterSoldier)
+	{
+		out.exportVictimSubjectId = true;
+	}
+	else
+	{
+		return out;
+	}
+	out.exportAttributedActorId = true;
+	out.shouldEmit = true;
+	return out;
+}
+
+std::string makeCombatCasualtyAttributionDedupeKey(int victimUnitId)
+{
+	char buf[64];
+	std::sprintf(buf, "combat_casualty_attributed:%d", victimUnitId);
+	return std::string(buf);
+}
+
 ExplosionOriginExportResolution resolveExplosionOriginExport(const ExplosionOriginExportInput &input)
 {
 	ExplosionOriginExportResolution out = {};

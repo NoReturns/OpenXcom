@@ -950,6 +950,8 @@ void appendPerceptionLog(YAML::Node &root, const CompanionPerceptionLog &log, Sa
 		}
 		const bool psychEvent = CompanionPerceptionLogCore::isPsychologicalPerceptionEventType(i->type.c_str());
 		const bool combatCasualtyEvent = CompanionPerceptionLogCore::isCombatCasualtyPerceptionEventType(i->type.c_str());
+		const bool combatAttributionEvent =
+			CompanionPerceptionLogCore::isCombatCasualtyAttributionPerceptionEventType(i->type.c_str());
 		const bool exportSubject =
 			i->hasSubjectUnitId && i->type != "door_sound_heard" && i->type != "projectile_direction_observed"
 			&& i->type != "hostile_casualty_tile_observed";
@@ -957,9 +959,17 @@ void appendPerceptionLog(YAML::Node &root, const CompanionPerceptionLog &log, Sa
 		{
 			ev["subjectUnitId"] = i->subjectUnitId;
 		}
-		if ((psychEvent || combatCasualtyEvent) && !i->subjectName.empty())
+		if ((psychEvent || combatCasualtyEvent || combatAttributionEvent) && !i->subjectName.empty())
 		{
 			ev["subjectName"] = i->subjectName;
+		}
+		if (i->hasAttributedActorUnitId)
+		{
+			ev["attributedActorUnitId"] = i->attributedActorUnitId;
+		}
+		if (!i->attributionScope.empty())
+		{
+			ev["attributionScope"] = i->attributionScope;
 		}
 		if (!i->compassDirection.empty())
 		{

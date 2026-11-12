@@ -1264,6 +1264,128 @@ static void testHostileDeathPerceptionOmitsWhenTileNotInSight()
 		"no perception when tile not in friendly sight");
 }
 
+static void testCombatCasualtyAttributionSerializedVisibleFatalKill()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(5);
+	BattleUnit *shooter = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	BattleUnit *victim = fixture.addAlienUnit(1000005, true, 4, false);
+	placeUnitOnDiscoveredTile(fixture, shooter, Position(0, 0, 0));
+	placeUnitOnDiscoveredTile(fixture, victim, Position(1, 0, 0));
+	shooter->setVisible(true);
+	victim->setVisible(true);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b2-attribution-visible-kill");
+	perception.tryRecordCombatCasualtyAttributed(
+		fixture.battle, victim, shooter, false, false, false, false);
+	const YAML::Node root = buildParsedSnapshot(fixture);
+	const YAML::Node events = root["perceptionLog"]["events"];
+	expect(events.size() == 1, "one attribution event");
+	expect(events[0]["type"].as<std::string>() == "combat_casualty_attributed", "attribution type");
+	expect(events[0]["subjectUnitId"].as<int>() == 1000005, "victim id");
+	expect(events[0]["attributedActorUnitId"].as<int>() == 5, "fatal actor id");
+	expect(events[0]["attributionScope"].as<std::string>() == "fatal", "attribution scope");
+	expect(events[0]["confidence"].as<std::string>() == "fatal", "confidence fatal");
+	expect(events[0]["perceptionChannel"].as<std::string>() == "seen", "seen channel when victim tile known");
+	expect(events[0]["positionKnown"].as<bool>(), "position known");
+}
+
+static void testCombatCasualtyAttributionOmitsHiddenActor()
+{
+	TacticalFixture fixture;
+	BattleUnit *shooter = fixture.addAlienUnit(1000009, false, 4, false);
+	BattleUnit *victim = fixture.addAlienUnit(1000006, true, 4, false);
+	victim->setVisible(true);
+	expect(!shooter->getVisible(), "shooter fixture hidden");
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b2-hidden-actor");
+	perception.tryRecordCombatCasualtyAttributed(
+		fixture.battle, victim, shooter, false, false, false, false);
+	const YAML::Node root = buildParsedSnapshot(fixture);
+	expect(!root["perceptionLog"]["events"].IsDefined() || root["perceptionLog"]["events"].size() == 0,
+		"hidden actor omits attribution");
+}
+
+static void testCombatCasualtyAttributionOmitsHiddenHostileVictim()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(7);
+	BattleUnit *shooter = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	BattleUnit *victim = fixture.addAlienUnit(1000007, false, 4, false);
+	shooter->setVisible(true);
+	victim->setVisible(false);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b2-hidden-victim");
+	perception.tryRecordCombatCasualtyAttributed(
+		fixture.battle, victim, shooter, false, false, false, false);
+	const YAML::Node root = buildParsedSnapshot(fixture);
+	expect(!root["perceptionLog"]["events"].IsDefined() || root["perceptionLog"]["events"].size() == 0,
+		"hidden hostile victim omits attribution");
+}
+
+static void testCombatCasualtyAttributionSequencedBeforeSoldierDown()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(8);
+	BattleUnit *shooter = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	BattleUnit *victimAlien = fixture.addAlienUnit(1000008, true, 4, false);
+	shooter->setVisible(true);
+	victimAlien->setVisible(true);
+	Soldier *rosterVictim = fixture.addRosterSoldier(9);
+	BattleUnit *victimSoldier = fixture.addSoldierUnit(rosterVictim, Position(1, 1, 0), 0);
+	victimSoldier->load(YAML::Load("status: 6\nhealth: 0\ntu: 0\nenergy: 0\nmorale: 0\narmor: [0,0,0,0,0]\nfatalWounds: [0,0,0,0,0,0]\n"));
+	victimSoldier->setVisible(true);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b2-settlement-order");
+	perception.tryRecordCombatCasualtyAttributed(
+		fixture.battle, victimSoldier, shooter, false, false, false, false);
+	perception.tryRecordSoldierDown(fixture.battle, victimSoldier, true);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 2, "attribution then soldier_down");
+	expect(events[0]["type"].as<std::string>() == "combat_casualty_attributed", "attribution first");
+	expect(events[0]["seq"].as<int>() == 1, "attribution seq 1");
+	expect(events[0]["subjectUnitId"].as<int>() == 9, "roster victim");
+	expect(events[0]["attributedActorUnitId"].as<int>() == 8, "visible shooter");
+	expect(events[1]["type"].as<std::string>() == "soldier_down", "soldier_down second");
+	expect(events[1]["seq"].as<int>() == 2, "soldier_down seq 2");
+	expect(!events[1]["attributedActorUnitId"].IsDefined(), "soldier_down unchanged semantics");
+}
+
+static void testUnconsciousSoldierDownWithoutCombatAttribution()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(10);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 0);
+	unit->load(YAML::Load(
+		"status: 7\nstunlevel: 80\nhealth: 20\ntu: 0\nenergy: 0\nmorale: 50\n"
+		"armor: [0,0,0,0,0]\nfatalWounds: [0,0,0,0,0,0]\n"));
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b2-unconscious-only");
+	perception.tryRecordSoldierDown(fixture.battle, unit, true);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 1, "only soldier_down");
+	expect(events[0]["type"].as<std::string>() == "soldier_down", "soldier_down type");
+	expect(events[0]["confidence"].as<std::string>() == "unconscious", "unconscious confidence");
+}
+
+static void testHostileCasualtyTileObservedSemanticsUnchanged()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(11);
+	BattleUnit *friendly = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	placeUnitOnDiscoveredTile(fixture, friendly, Position(0, 0, 0));
+	Tile *deathTile = fixture.battle->getTile(Position(1, 0, 0));
+	deathTile->setDiscovered(true, 2);
+	deathTile->setVisible(+1);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b2-hostile-tile-cue");
+	perception.tryRecordHostileDeathObserved(fixture.battle, Position(1, 0, 0), false);
+	const YAML::Node ev = buildParsedSnapshot(fixture)["perceptionLog"]["events"][0];
+	expect(ev["type"].as<std::string>() == "hostile_casualty_tile_observed", "hostile tile cue preserved");
+	expect(!ev["subjectUnitId"].IsDefined(), "hostile tile cue still omits subjectUnitId");
+	expect(!ev["attributedActorUnitId"].IsDefined(), "no attribution on tile cue");
+}
+
 static void testExplosionOriginClassSerializedWhenDeathDetonationGatesPass()
 {
 	TacticalFixture fixture;
@@ -1735,6 +1857,12 @@ int main()
 	SNAPSHOT_TEST_STEP(testWp8MedikitChargesAndCarriedWeight);
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionWhenTileInFriendlySight);
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionOmitsWhenTileNotInSight);
+	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionSerializedVisibleFatalKill);
+	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionOmitsHiddenActor);
+	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionOmitsHiddenHostileVictim);
+	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionSequencedBeforeSoldierDown);
+	SNAPSHOT_TEST_STEP(testUnconsciousSoldierDownWithoutCombatAttribution);
+	SNAPSHOT_TEST_STEP(testHostileCasualtyTileObservedSemanticsUnchanged);
 	SNAPSHOT_TEST_STEP(testExplosionOriginClassSerializedWhenDeathDetonationGatesPass);
 	SNAPSHOT_TEST_STEP(testExplosionGenericNoOriginClassWithoutEngineContext);
 	SNAPSHOT_TEST_STEP(testExplosionAudioOnlyOmitsOriginClassDespiteEngineContext);

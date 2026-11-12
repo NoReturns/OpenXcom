@@ -46,6 +46,9 @@ struct CompanionPerceptionEvent
 	std::string subjectName;
 	std::string explosionOriginClass;
 	std::string explosionOriginClassSource;
+	int attributedActorUnitId = -1;
+	bool hasAttributedActorUnitId = false;
+	std::string attributionScope;
 };
 
 class CompanionPerceptionLog
@@ -98,6 +101,19 @@ public:
 		bool hadCarriedInventory);
 	void noteHostileVisibility(SavedBattleGame *battle, BattleUnit *hostile, bool nowVisible);
 	void recordHostileLastSeenBeforeTurnReset(SavedBattleGame *battle, BattleUnit *hostile);
+
+	/**
+	 * Authoritative fatal kill attribution when engine murderer and identities are fairly observable.
+	 * Called from BattlescapeGame::checkForCasualties with pre–mind-control fatal actor.
+	 */
+	void tryRecordCombatCasualtyAttributed(
+		SavedBattleGame *battle,
+		BattleUnit *victim,
+		BattleUnit *fatalActor,
+		bool mindControlKillCredit,
+		bool fatalWoundBleedOutPath,
+		bool terrainExplosionWithoutActor,
+		bool hiddenExplosionContext);
 
 	/** Roster soldier became unconscious or dead (player-legitimate; session-deduped). */
 	void tryRecordSoldierDown(SavedBattleGame *battle, BattleUnit *soldier, bool uiNotificationShown);
@@ -165,6 +181,7 @@ private:
 	std::map<int, int> _rosterCasualtyState;
 	std::map<int, int> _rosterCasualtyEpisodeSerial;
 	std::map<int, RosterCasualtyLedgerEntry> _rosterCasualtyLedger;
+	std::set<int> _combatCasualtyAttributedVictims;
 };
 
 }
