@@ -158,6 +158,7 @@ set ( engine_src
 	Engine/CompanionDropGroundPlacementCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
+	Engine/CompanionBaseIntelligencePurchaseCatalogCore.cpp
 	Engine/CompanionBaseIntelligenceExportCore.cpp
 	Engine/CompanionBaseIntelligenceExport.cpp
   Engine/CrossPlatform.cpp
