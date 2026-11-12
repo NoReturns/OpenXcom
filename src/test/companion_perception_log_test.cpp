@@ -455,6 +455,52 @@ static void testCombatCasualtyEventRegistry()
 		"impact not casualty type");
 }
 
+static void testExplosionOriginVisibleDeathDetonation()
+{
+	ExplosionOriginExportInput input = {};
+	input.unitDeathDetonationEngineContext = true;
+	input.blastLegitimatelyObservable = true;
+	input.sourceUnitCurrentlyVisible = true;
+	ExplosionOriginExportResolution res = resolveExplosionOriginExport(input);
+	expect(res.explosionOriginClass != 0 && std::strcmp(res.explosionOriginClass, "unit_death_detonation") == 0,
+		"visible death detonation exports class");
+	expect(res.explosionOriginClassSource != 0 && std::strcmp(res.explosionOriginClassSource, "engine_state") == 0,
+		"origin source is engine_state");
+}
+
+static void testExplosionOriginHiddenSourceOmitsClass()
+{
+	ExplosionOriginExportInput input = {};
+	input.unitDeathDetonationEngineContext = true;
+	input.blastLegitimatelyObservable = true;
+	input.sourceUnitCurrentlyVisible = false;
+	ExplosionOriginExportResolution res = resolveExplosionOriginExport(input);
+	expect(res.explosionOriginClass == 0 || res.explosionOriginClass[0] == '\0',
+		"hidden source must not export death detonation class");
+}
+
+static void testExplosionOriginAudioOnlyOmitsClass()
+{
+	ExplosionOriginExportInput input = {};
+	input.unitDeathDetonationEngineContext = true;
+	input.blastLegitimatelyObservable = false;
+	input.sourceUnitCurrentlyVisible = true;
+	ExplosionOriginExportResolution res = resolveExplosionOriginExport(input);
+	expect(res.explosionOriginClass == 0 || res.explosionOriginClass[0] == '\0',
+		"non-observable blast must not export class");
+}
+
+static void testExplosionOriginGrenadeContextOmitsClass()
+{
+	ExplosionOriginExportInput input = {};
+	input.unitDeathDetonationEngineContext = false;
+	input.blastLegitimatelyObservable = true;
+	input.sourceUnitCurrentlyVisible = true;
+	ExplosionOriginExportResolution res = resolveExplosionOriginExport(input);
+	expect(res.explosionOriginClass == 0 || res.explosionOriginClass[0] == '\0',
+		"non-death engine context must not export class");
+}
+
 static void testRosterCasualtySubjectAcceptsPostKiaIdentity()
 {
 	using CompanionPerceptionLogCore::RosterCasualtySubjectInput;
@@ -529,6 +575,10 @@ int main()
 	testProjectileImpactHiddenUnitMatchesTerrainFairPlay();
 	testCombatCasualtyEventRegistry();
 	testRosterCasualtySubjectAcceptsPostKiaIdentity();
+	testExplosionOriginVisibleDeathDetonation();
+	testExplosionOriginHiddenSourceOmitsClass();
+	testExplosionOriginAudioOnlyOmitsClass();
+	testExplosionOriginGrenadeContextOmitsClass();
 
 	if (g_failures != 0)
 	{

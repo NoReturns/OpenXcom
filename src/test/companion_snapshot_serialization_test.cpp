@@ -1264,6 +1264,100 @@ static void testHostileDeathPerceptionOmitsWhenTileNotInSight()
 		"no perception when tile not in friendly sight");
 }
 
+static void testExplosionOriginClassSerializedWhenDeathDetonationGatesPass()
+{
+	TacticalFixture fixture;
+	const Position blastPos(2, 2, 0);
+	CyberdiscFixture *bundle = new CyberdiscFixture(1000010, true, 4, false, blastPos);
+	YAML::Node spec;
+	spec["specab"] = static_cast<int>(SPECAB_EXPLODEONDEATH);
+	bundle->rules.load(spec, &fixtureMod());
+	fixture.cyberdiscBundles.push_back(bundle);
+	fixture.battle->getUnits()->push_back(bundle->unit);
+	placeUnitOnDiscoveredTile(fixture, bundle->unit, blastPos);
+	Tile *blastTile = fixture.battle->getTile(blastPos);
+	expect(blastTile != 0, "blast tile");
+	blastTile->setVisible(+1);
+	CompanionPerceptionLog::ExplosionPerceptionEngineContext ctx;
+	ctx.unitDeathDetonationEngineContext = true;
+	ctx.sourceUnitForVisibility = bundle->unit;
+	fixture.battle->getCompanionPerceptionLog().tryRecordExplosionObservedOrHeard(
+		fixture.battle, blastPos, true, &ctx);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 1, "one explosion perception");
+	expect(events[0]["type"].as<std::string>() == "explosion_observed_or_heard", "explosion type");
+	expect(events[0]["confidence"].as<std::string>() == "blast_visible", "visible blast");
+	expect(events[0]["explosionOriginClass"].as<std::string>() == "unit_death_detonation", "origin class");
+	expect(events[0]["explosionOriginClassSource"].as<std::string>() == "engine_state", "origin source");
+	expect(!events[0]["subjectUnitId"].IsDefined(), "explosion must not leak subjectUnitId");
+}
+
+static void testExplosionGenericNoOriginClassWithoutEngineContext()
+{
+	TacticalFixture fixture;
+	Tile *blastTile = fixture.battle->getTile(Position(1, 1, 0));
+	expect(blastTile != 0, "blast tile");
+	blastTile->setDiscovered(true, 2);
+	blastTile->setVisible(+1);
+	fixture.battle->getCompanionPerceptionLog().tryRecordExplosionObservedOrHeard(
+		fixture.battle, Position(1, 1, 0), true, 0);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 1, "generic explosion recorded");
+	expect(!events[0]["explosionOriginClass"].IsDefined(), "generic explosion omits origin class");
+	expect(!events[0]["explosionOriginClassSource"].IsDefined(), "generic explosion omits origin source");
+}
+
+static void testExplosionAudioOnlyOmitsOriginClassDespiteEngineContext()
+{
+	TacticalFixture fixture;
+	const Position blastPos(3, 3, 0);
+	CyberdiscFixture *bundle = new CyberdiscFixture(1000011, true, 4, false, blastPos);
+	YAML::Node spec;
+	spec["specab"] = static_cast<int>(SPECAB_EXPLODEONDEATH);
+	bundle->rules.load(spec, &fixtureMod());
+	fixture.cyberdiscBundles.push_back(bundle);
+	fixture.battle->getUnits()->push_back(bundle->unit);
+	Tile *blastTile = fixture.battle->getTile(blastPos);
+	expect(blastTile != 0, "blast tile");
+	blastTile->setDiscovered(true, 2);
+	blastTile->setVisible(0);
+	CompanionPerceptionLog::ExplosionPerceptionEngineContext ctx;
+	ctx.unitDeathDetonationEngineContext = true;
+	ctx.sourceUnitForVisibility = bundle->unit;
+	fixture.battle->getCompanionPerceptionLog().tryRecordExplosionObservedOrHeard(
+		fixture.battle, blastPos, true, &ctx);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 1, "audio-only explosion recorded");
+	expect(events[0]["confidence"].as<std::string>() == "audio_only", "audio only");
+	expect(!events[0]["explosionOriginClass"].IsDefined(), "audio-only omits origin class");
+}
+
+static void testExplosionHiddenSourceOmitsOriginClassDespiteVisibleBlast()
+{
+	TacticalFixture fixture;
+	const Position blastPos(2, 2, 0);
+	CyberdiscFixture *bundle = new CyberdiscFixture(1000012, false, 4, false, blastPos);
+	YAML::Node spec;
+	spec["specab"] = static_cast<int>(SPECAB_EXPLODEONDEATH);
+	bundle->rules.load(spec, &fixtureMod());
+	fixture.cyberdiscBundles.push_back(bundle);
+	fixture.battle->getUnits()->push_back(bundle->unit);
+	placeUnitOnDiscoveredTile(fixture, bundle->unit, blastPos);
+	Tile *blastTile = fixture.battle->getTile(blastPos);
+	expect(blastTile != 0, "blast tile");
+	blastTile->setVisible(+1);
+	bundle->unit->setVisible(false);
+	CompanionPerceptionLog::ExplosionPerceptionEngineContext ctx;
+	ctx.unitDeathDetonationEngineContext = true;
+	ctx.sourceUnitForVisibility = bundle->unit;
+	fixture.battle->getCompanionPerceptionLog().tryRecordExplosionObservedOrHeard(
+		fixture.battle, blastPos, true, &ctx);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 1, "visible blast without class");
+	expect(events[0]["confidence"].as<std::string>() == "blast_visible", "blast visible");
+	expect(!events[0]["explosionOriginClass"].IsDefined(), "hidden source omits origin class");
+}
+
 /**
  * WP8B2: Companion RELOAD/UNLOAD used RuleItem::clipSize on the firearm; vanilla UFO rifles use clipSize 0
  * on the weapon and put capacity on STR_RIFLE_CLIP. Magazine eligibility must follow needsAmmo + compatibleAmmo.
@@ -1641,6 +1735,10 @@ int main()
 	SNAPSHOT_TEST_STEP(testWp8MedikitChargesAndCarriedWeight);
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionWhenTileInFriendlySight);
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionOmitsWhenTileNotInSight);
+	SNAPSHOT_TEST_STEP(testExplosionOriginClassSerializedWhenDeathDetonationGatesPass);
+	SNAPSHOT_TEST_STEP(testExplosionGenericNoOriginClassWithoutEngineContext);
+	SNAPSHOT_TEST_STEP(testExplosionAudioOnlyOmitsOriginClassDespiteEngineContext);
+	SNAPSHOT_TEST_STEP(testExplosionHiddenSourceOmitsOriginClassDespiteVisibleBlast);
 	SNAPSHOT_TEST_STEP(testWp8VanillaRifleMagazineEligibilityRegression);
 	SNAPSHOT_TEST_STEP(testGroundInventoryResearchUsableUnresearchedAlienWeapon);
 	SNAPSHOT_TEST_STEP(testGroundInventoryResearchUsableResearchedAlienWeapon);

@@ -44,6 +44,8 @@ struct CompanionPerceptionEvent
 	std::string travelDirection;
 	std::string incomingBearing;
 	std::string subjectName;
+	std::string explosionOriginClass;
+	std::string explosionOriginClassSource;
 };
 
 class CompanionPerceptionLog
@@ -77,7 +79,17 @@ public:
 		BattleUnit *victimUnit,
 		int flightId,
 		int impactOrdinal);
-	void tryRecordExplosionObservedOrHeard(SavedBattleGame *battle, const Position &centerTile, bool audible);
+	struct ExplosionPerceptionEngineContext
+	{
+		bool unitDeathDetonationEngineContext = false;
+		BattleUnit *sourceUnitForVisibility = 0;
+	};
+
+	void tryRecordExplosionObservedOrHeard(
+		SavedBattleGame *battle,
+		const Position &centerTile,
+		bool audible,
+		const ExplosionPerceptionEngineContext *engineContext = 0);
 	void tryRecordDoorSoundHeard(SavedBattleGame *battle, const Position &doorTile);
 	/** Records a player-legitimate tile observation when a hostile dies (informational; not groundInventory). */
 	void tryRecordHostileDeathObserved(

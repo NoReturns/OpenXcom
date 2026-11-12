@@ -973,6 +973,14 @@ void appendPerceptionLog(YAML::Node &root, const CompanionPerceptionLog &log, Sa
 		{
 			ev["incomingBearing"] = i->incomingBearing;
 		}
+		if (!i->explosionOriginClass.empty())
+		{
+			ev["explosionOriginClass"] = i->explosionOriginClass;
+		}
+		if (!i->explosionOriginClassSource.empty())
+		{
+			ev["explosionOriginClassSource"] = i->explosionOriginClassSource;
+		}
 		events.push_back(ev);
 	}
 	perceptionLog["events"] = events;

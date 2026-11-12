@@ -137,8 +137,24 @@ void ExplosionBState::init()
 
 			if (t != 0)
 			{
+				const bool unitDeathDetonationEngineContext =
+					!_cosmetic
+					&& _item == 0
+					&& _tile == 0
+					&& _unit != 0
+					&& (_unit->getSpecialAbility() == SPECAB_EXPLODEONDEATH
+						|| _unit->getSpecialAbility() == SPECAB_BURN_AND_EXPLODE);
+				CompanionPerceptionLog::ExplosionPerceptionEngineContext perceptionContext = {};
+				if (unitDeathDetonationEngineContext)
+				{
+					perceptionContext.unitDeathDetonationEngineContext = true;
+					perceptionContext.sourceUnitForVisibility = _unit;
+				}
 				_parent->getSave()->getCompanionPerceptionLog().tryRecordExplosionObservedOrHeard(
-					_parent->getSave(), t->getPosition(), true);
+					_parent->getSave(),
+					t->getPosition(),
+					true,
+					unitDeathDetonationEngineContext ? &perceptionContext : 0);
 			}
 
 			_parent->getMap()->getCamera()->centerOnPosition(t->getPosition(), false);

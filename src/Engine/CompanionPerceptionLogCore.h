@@ -189,6 +189,26 @@ bool shouldAttachThrowLaunchHostileSubject(
 	bool hasShooter,
 	bool shooterVisibleFlag);
 
+/** M1 PERCEPTION-B1: death-triggered unit explosion origin class (optional on explosion_observed_or_heard). */
+struct ExplosionOriginExportInput
+{
+	bool debugMode;
+	/** Engine verified: no item/tile, SPECAB unit death detonation path. */
+	bool unitDeathDetonationEngineContext;
+	/** Blast center tile is player-legitimately observable (not audio-only). */
+	bool blastLegitimatelyObservable;
+	/** Source unit sprite visible at record time (not unit_last_seen memory). */
+	bool sourceUnitCurrentlyVisible;
+};
+
+struct ExplosionOriginExportResolution
+{
+	const char *explosionOriginClass;
+	const char *explosionOriginClassSource;
+};
+
+ExplosionOriginExportResolution resolveExplosionOriginExport(const ExplosionOriginExportInput &input);
+
 } // namespace CompanionPerceptionLogCore
 
 namespace CompanionPerceptionLogTestSupport

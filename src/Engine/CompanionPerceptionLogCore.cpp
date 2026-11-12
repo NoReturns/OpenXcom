@@ -327,6 +327,26 @@ bool isCombatCasualtyPerceptionEventType(const char *eventType)
 		|| std::strcmp(eventType, "soldier_recovered") == 0;
 }
 
+ExplosionOriginExportResolution resolveExplosionOriginExport(const ExplosionOriginExportInput &input)
+{
+	ExplosionOriginExportResolution out = {};
+	if (input.debugMode)
+	{
+		return out;
+	}
+	if (!input.unitDeathDetonationEngineContext)
+	{
+		return out;
+	}
+	if (!input.blastLegitimatelyObservable || !input.sourceUnitCurrentlyVisible)
+	{
+		return out;
+	}
+	out.explosionOriginClass = "unit_death_detonation";
+	out.explosionOriginClassSource = "engine_state";
+	return out;
+}
+
 bool isOriginalXcomRosterCasualtySubject(const RosterCasualtySubjectInput &input)
 {
 	if (input.unitId <= 0 || input.unitId >= ROSTER_SOLDIER_ID_MAX)

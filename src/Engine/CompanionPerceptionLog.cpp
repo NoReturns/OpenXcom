@@ -462,7 +462,11 @@ void CompanionPerceptionLog::tryRecordProjectileImpactObserved(
 	appendEvent(battle, entry, dedupeKey);
 }
 
-void CompanionPerceptionLog::tryRecordExplosionObservedOrHeard(SavedBattleGame *battle, const Position &centerTile, bool audible)
+void CompanionPerceptionLog::tryRecordExplosionObservedOrHeard(
+	SavedBattleGame *battle,
+	const Position &centerTile,
+	bool audible,
+	const ExplosionPerceptionEngineContext *engineContext)
 {
 	TileEngine *tileEngine = battle != 0 ? battle->getTileEngine() : 0;
 	CompanionPerceptionLogCore::ObserverResolution obs =
@@ -472,6 +476,27 @@ void CompanionPerceptionLog::tryRecordExplosionObservedOrHeard(SavedBattleGame *
 	entry.turn = battle->getTurn();
 	entry.confidence = obs.positionKnown ? "blast_visible" : "audio_only";
 	applyObserverResolution(entry, obs);
+	if (engineContext != 0 && battle != 0 && !battle->getDebugMode())
+	{
+		CompanionPerceptionLogCore::ExplosionOriginExportInput originInput = {};
+		originInput.debugMode = battle->getDebugMode();
+		originInput.unitDeathDetonationEngineContext = engineContext->unitDeathDetonationEngineContext;
+		originInput.blastLegitimatelyObservable = obs.positionKnown;
+		if (engineContext->sourceUnitForVisibility != 0)
+		{
+			originInput.sourceUnitCurrentlyVisible = engineContext->sourceUnitForVisibility->getVisible();
+		}
+		const CompanionPerceptionLogCore::ExplosionOriginExportResolution originExport =
+			CompanionPerceptionLogCore::resolveExplosionOriginExport(originInput);
+		if (originExport.explosionOriginClass != 0 && originExport.explosionOriginClass[0] != '\0')
+		{
+			entry.explosionOriginClass = originExport.explosionOriginClass;
+			if (originExport.explosionOriginClassSource != 0)
+			{
+				entry.explosionOriginClassSource = originExport.explosionOriginClassSource;
+			}
+		}
+	}
 	const std::string dedupeKey = CompanionPerceptionLogCore::makeDedupeKey(
 		entry.type.c_str(),
 		entry.turn,
