@@ -49,6 +49,8 @@ struct CompanionPerceptionEvent
 	int attributedActorUnitId = -1;
 	bool hasAttributedActorUnitId = false;
 	std::string attributionScope;
+	/** reaction_attack_executed: snap | melee */
+	std::string actionType;
 };
 
 class CompanionPerceptionLog
@@ -64,6 +66,13 @@ public:
 	void seedRosterCasualtyLedgerFromLoadedBattle(SavedBattleGame *battle);
 
 	void tryRecordGunfireObserved(SavedBattleGame *battle, BattleUnit *shooter, const Position &origin, bool audible);
+	/** Reaction attack performed after init vetoes (TileEngine::tryReaction, not commitment alone). */
+	void tryRecordReactionAttackExecuted(
+		SavedBattleGame *battle,
+		BattleUnit *actor,
+		const Position &origin,
+		const char *actionType,
+		bool audible);
 	/** Player-legitimate hostile/friendly throw or launch at projectile start (fair-play; M1 P1-D). */
 	void tryRecordThrowOrLaunchObserved(
 		SavedBattleGame *battle,
@@ -182,6 +191,7 @@ private:
 	std::map<int, int> _rosterCasualtyEpisodeSerial;
 	std::map<int, RosterCasualtyLedgerEntry> _rosterCasualtyLedger;
 	std::set<int> _combatCasualtyAttributedVictims;
+	int _reactionAttackRecordOrdinal;
 };
 
 }

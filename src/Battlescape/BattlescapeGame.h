@@ -63,7 +63,9 @@ struct BattleAction
 	int number; // first action of turn, second, etc.?
 	/// True when the player explicitly committed this action (UI fire confirm), not reaction/AI/panic.
 	bool playerOrdered;
-	BattleAction() : type(BA_NONE), actor(0), weapon(0), TU(0), targeting(false), value(0), strafe(false), run(false), diff(0), autoShotCounter(0), cameraPosition(0, 0, -1), desperate(false), finalFacing(-1), finalAction(false), number(0), playerOrdered(false) { }
+	/// True when TileEngine::tryReaction scheduled this attack (not deliberate player/AI turn fire).
+	bool reactionFire;
+	BattleAction() : type(BA_NONE), actor(0), weapon(0), TU(0), targeting(false), value(0), strafe(false), run(false), diff(0), autoShotCounter(0), cameraPosition(0, 0, -1), desperate(false), finalFacing(-1), finalAction(false), number(0), playerOrdered(false), reactionFire(false) { }
 };
 
 /**

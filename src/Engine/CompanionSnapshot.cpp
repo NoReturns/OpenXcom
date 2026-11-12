@@ -991,6 +991,10 @@ void appendPerceptionLog(YAML::Node &root, const CompanionPerceptionLog &log, Sa
 		{
 			ev["explosionOriginClassSource"] = i->explosionOriginClassSource;
 		}
+		if (!i->actionType.empty())
+		{
+			ev["actionType"] = i->actionType;
+		}
 		events.push_back(ev);
 	}
 	perceptionLog["events"] = events;

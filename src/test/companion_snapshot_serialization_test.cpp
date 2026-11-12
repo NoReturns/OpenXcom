@@ -1368,6 +1368,87 @@ static void testUnconsciousSoldierDownWithoutCombatAttribution()
 	expect(events[0]["confidence"].as<std::string>() == "unconscious", "unconscious confidence");
 }
 
+static void testReactionAttackExecutedSerializationVisibleHostile()
+{
+	TacticalFixture fixture;
+	BattleUnit *reactor = fixture.addAlienUnit(1000012, true, 4, false);
+	placeUnitOnDiscoveredTile(fixture, reactor, Position(3, 3, 0));
+	reactor->setVisible(true);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("reaction-ledger-snap");
+	perception.tryRecordReactionAttackExecuted(fixture.battle, reactor, reactor->getPosition(), "snap", true);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 1, "one reaction_attack_executed");
+	expect(events[0]["type"].as<std::string>() == "reaction_attack_executed", "reaction type");
+	expect(events[0]["actionType"].as<std::string>() == "snap", "actionType snap");
+	expect(events[0]["subjectUnitId"].as<int>() == 1000012, "shooter subjectUnitId");
+}
+
+static void testReactionAttackExecutedAudioOnlyOmitsSubject()
+{
+	TacticalFixture fixture;
+	BattleUnit *reactor = fixture.addAlienUnit(1000013, false, 4, false);
+	reactor->setVisible(false);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("reaction-ledger-audio");
+	perception.tryRecordReactionAttackExecuted(fixture.battle, reactor, reactor->getPosition(), "melee", true);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 1, "audio-only reaction emits");
+	expect(events[0]["confidence"].as<std::string>() == "audio_only", "audio_only confidence");
+	expect(!events[0]["subjectUnitId"].IsDefined(), "hidden reactor omits subjectUnitId");
+	expect(events[0]["actionType"].as<std::string>() == "melee", "melee actionType");
+}
+
+static void testReactionAttackExecutedCoexistsWithGunfireObserved()
+{
+	TacticalFixture fixture;
+	BattleUnit *reactor = fixture.addAlienUnit(1000014, true, 4, false);
+	placeUnitOnDiscoveredTile(fixture, reactor, Position(2, 1, 0));
+	reactor->setVisible(true);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("reaction-gunfire-coexist");
+	perception.tryRecordGunfireObserved(fixture.battle, reactor, reactor->getPosition(), true);
+	perception.tryRecordReactionAttackExecuted(fixture.battle, reactor, reactor->getPosition(), "snap", true);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 2, "gunfire and reaction both emitted");
+	expect(events[0]["type"].as<std::string>() == "gunfire_observed", "gunfire unchanged");
+	expect(events[1]["type"].as<std::string>() == "reaction_attack_executed", "reaction second");
+	expect(events[1]["actionType"].as<std::string>() == "snap", "reaction actionType");
+}
+
+static void testReactionAttackExecutedHiddenInaudibleSilent()
+{
+	TacticalFixture fixture;
+	BattleUnit *reactor = fixture.addAlienUnit(1000015, false, 4, false);
+	reactor->setVisible(false);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("reaction-silent");
+	perception.tryRecordReactionAttackExecuted(fixture.battle, reactor, reactor->getPosition(), "melee", false);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(!events.IsDefined() || events.size() == 0, "hidden inaudible silent");
+}
+
+static void testReactionAttackExecutedSequencedPerAction()
+{
+	TacticalFixture fixture;
+	BattleUnit *reactorA = fixture.addAlienUnit(1000016, true, 4, false);
+	BattleUnit *reactorB = fixture.addAlienUnit(1000017, true, 4, false);
+	placeUnitOnDiscoveredTile(fixture, reactorA, Position(0, 2, 0));
+	placeUnitOnDiscoveredTile(fixture, reactorB, Position(1, 2, 0));
+	reactorA->setVisible(true);
+	reactorB->setVisible(true);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("reaction-multi");
+	perception.tryRecordReactionAttackExecuted(fixture.battle, reactorA, reactorA->getPosition(), "snap", true);
+	perception.tryRecordReactionAttackExecuted(fixture.battle, reactorB, reactorB->getPosition(), "snap", true);
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 2, "two executed reactions");
+	expect(events[0]["seq"].as<int>() == 1, "first seq");
+	expect(events[1]["seq"].as<int>() == 2, "second seq");
+	expect(events[0]["subjectUnitId"].as<int>() == 1000016, "first shooter");
+	expect(events[1]["subjectUnitId"].as<int>() == 1000017, "second shooter");
+}
+
 static void testHostileCasualtyTileObservedSemanticsUnchanged()
 {
 	TacticalFixture fixture;
@@ -1862,6 +1943,11 @@ int main()
 	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionOmitsHiddenHostileVictim);
 	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionSequencedBeforeSoldierDown);
 	SNAPSHOT_TEST_STEP(testUnconsciousSoldierDownWithoutCombatAttribution);
+	SNAPSHOT_TEST_STEP(testReactionAttackExecutedSerializationVisibleHostile);
+	SNAPSHOT_TEST_STEP(testReactionAttackExecutedAudioOnlyOmitsSubject);
+	SNAPSHOT_TEST_STEP(testReactionAttackExecutedCoexistsWithGunfireObserved);
+	SNAPSHOT_TEST_STEP(testReactionAttackExecutedHiddenInaudibleSilent);
+	SNAPSHOT_TEST_STEP(testReactionAttackExecutedSequencedPerAction);
 	SNAPSHOT_TEST_STEP(testHostileCasualtyTileObservedSemanticsUnchanged);
 	SNAPSHOT_TEST_STEP(testExplosionOriginClassSerializedWhenDeathDetonationGatesPass);
 	SNAPSHOT_TEST_STEP(testExplosionGenericNoOriginClassWithoutEngineContext);

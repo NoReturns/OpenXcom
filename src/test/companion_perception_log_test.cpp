@@ -3,6 +3,7 @@
  */
 #include "Engine/CompanionPerceptionLogCore.h"
 #include "Engine/RNG.h"
+#include "Savegame/BattleUnit.h"
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -114,6 +115,49 @@ static void testGunfireSubjectRequiresVisibleShooter()
 	expect(!shouldAttachGunfireSubjectId(input), "LOS tile alone must not identify hidden shooter");
 	input.shooterVisibleFlag = true;
 	expect(shouldAttachGunfireSubjectId(input), "visible shooter may carry subjectUnitId");
+}
+
+static void testReactionAttackHiddenInaudibleSilent()
+{
+	ReactionAttackFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = false;
+	input.positionKnown = false;
+	expect(!shouldRecordReactionAttackExecuted(input), "hidden inaudible reaction must not record");
+}
+
+static void testReactionAttackAudioOnlyRecords()
+{
+	ReactionAttackFairPlayInput input = {};
+	input.debugMode = false;
+	input.audible = true;
+	input.positionKnown = false;
+	expect(shouldRecordReactionAttackExecuted(input), "audible reaction may record without position");
+}
+
+static void testReactionAttackHostileSubjectRequiresVisibility()
+{
+	ReactionAttackFairPlayInput input = {};
+	input.debugMode = false;
+	input.hasActor = true;
+	input.actorOriginalFaction = FACTION_HOSTILE;
+	input.actorVisible = false;
+	expect(!shouldAttachReactionAttackSubjectId(input), "hidden hostile reactor must not expose subjectUnitId");
+	input.actorVisible = true;
+	expect(shouldAttachReactionAttackSubjectId(input), "visible hostile reactor may expose subjectUnitId");
+}
+
+static void testReactionAttackRosterSubjectRequiresVisibility()
+{
+	ReactionAttackFairPlayInput input = {};
+	input.debugMode = false;
+	input.hasActor = true;
+	input.actorOriginalFaction = FACTION_PLAYER;
+	input.actorHasGeoscapeSoldier = true;
+	input.actorVisible = false;
+	expect(!shouldAttachReactionAttackSubjectId(input), "off-screen roster reactor must not expose subjectUnitId");
+	input.actorVisible = true;
+	expect(shouldAttachReactionAttackSubjectId(input), "visible roster reactor may expose subjectUnitId");
 }
 
 static void testHiddenThrowUsesGenericAudioType()
@@ -665,6 +709,10 @@ int main()
 	testUnitLastSeenExportNovosibirskTurnBoundaryMemory();
 	testUnitLastSeenExportRequiresStoredMemory();
 	testGunfireSubjectRequiresVisibleShooter();
+	testReactionAttackHiddenInaudibleSilent();
+	testReactionAttackAudioOnlyRecords();
+	testReactionAttackHostileSubjectRequiresVisibility();
+	testReactionAttackRosterSubjectRequiresVisibility();
 	testHiddenThrowUsesGenericAudioType();
 	testVisibleGrenadeThrowClassified();
 	testHiddenThrowerVisibleTileDoesNotClaimGrenade();

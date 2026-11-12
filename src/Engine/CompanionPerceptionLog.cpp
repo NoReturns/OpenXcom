@@ -12,6 +12,7 @@
 #include "../Savegame/Tile.h"
 #include "../Battlescape/TileEngine.h"
 #include "../Battlescape/BattlescapeGame.h"
+#include <cstdio>
 #include <cstring>
 
 namespace OpenXcom
@@ -204,7 +205,8 @@ void applyObserverResolution(CompanionPerceptionEvent &entry, const CompanionPer
 } // namespace
 
 CompanionPerceptionLog::CompanionPerceptionLog()
-	: _nextSeq(1), _droppedCount(0), _nextProjectileFlightId(1), _nextPsychObservationSerial(0)
+	: _nextSeq(1), _droppedCount(0), _nextProjectileFlightId(1), _nextPsychObservationSerial(0),
+	  _reactionAttackRecordOrdinal(0)
 {
 	_projectileDirectionFlight.active = false;
 }
@@ -222,6 +224,7 @@ void CompanionPerceptionLog::beginSession(const std::string &sessionId)
 	_rosterCasualtyEpisodeSerial.clear();
 	_rosterCasualtyLedger.clear();
 	_combatCasualtyAttributedVictims.clear();
+	_reactionAttackRecordOrdinal = 0;
 	_projectileDirectionFlight.active = false;
 	_projectileDirectionFlight.orderedTileSamples.clear();
 	_projectileDirectionFlight.nextImpactOrdinal = 0;
@@ -350,6 +353,52 @@ void CompanionPerceptionLog::tryRecordGunfireObserved(SavedBattleGame *battle, B
 		obs.positionKnown ? &obs.position : 0,
 		obs.positionKnown,
 		obs.channel);
+	appendEvent(battle, entry, dedupeKey);
+}
+
+void CompanionPerceptionLog::tryRecordReactionAttackExecuted(
+	SavedBattleGame *battle,
+	BattleUnit *actor,
+	const Position &origin,
+	const char *actionType,
+	bool audible)
+{
+	if (battle == 0 || actor == 0 || actionType == 0 || actionType[0] == '\0' || !shouldRecordPerception(battle))
+	{
+		return;
+	}
+	TileEngine *tileEngine = battle->getTileEngine();
+	CompanionPerceptionLogCore::ObserverResolution obs =
+		resolveGunfireObservation(battle, tileEngine, actor, origin, audible);
+	CompanionPerceptionLogCore::ReactionAttackFairPlayInput fairPlay = {};
+	fairPlay.debugMode = battle->getDebugMode();
+	fairPlay.audible = audible;
+	fairPlay.positionKnown = obs.positionKnown;
+	fairPlay.hasActor = true;
+	fairPlay.actorUnitId = actor->getId();
+	fairPlay.actorOriginalFaction = actor->getOriginalFaction();
+	fairPlay.actorVisible = actor->getVisible();
+	fairPlay.actorHasGeoscapeSoldier = actor->getGeoscapeSoldier() != 0;
+	if (!CompanionPerceptionLogCore::shouldRecordReactionAttackExecuted(fairPlay))
+	{
+		return;
+	}
+	CompanionPerceptionEvent entry{};
+	entry.type = "reaction_attack_executed";
+	entry.turn = battle->getTurn();
+	entry.actionType = actionType;
+	entry.confidence = obs.positionKnown ? "source_visible" : "audio_only";
+	if (CompanionPerceptionLogCore::shouldAttachReactionAttackSubjectId(fairPlay))
+	{
+		entry.hasSubjectUnitId = true;
+		entry.subjectUnitId = actor->getId();
+	}
+	applyObserverResolution(entry, obs);
+	const int subjectId = entry.hasSubjectUnitId ? entry.subjectUnitId : -1;
+	const int ordinal = ++_reactionAttackRecordOrdinal;
+	char dedupeBuf[128];
+	std::sprintf(dedupeBuf, "reaction_attack_executed:%d:%d:%d", entry.turn, actor->getId(), ordinal);
+	const std::string dedupeKey = dedupeBuf;
 	appendEvent(battle, entry, dedupeKey);
 }
 

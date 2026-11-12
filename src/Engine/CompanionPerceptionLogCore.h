@@ -240,6 +240,21 @@ struct ExplosionOriginExportResolution
 
 ExplosionOriginExportResolution resolveExplosionOriginExport(const ExplosionOriginExportInput &input);
 
+struct ReactionAttackFairPlayInput
+{
+	bool debugMode;
+	bool audible;
+	bool positionKnown;
+	bool hasActor;
+	int actorUnitId;
+	int actorOriginalFaction;
+	bool actorVisible;
+	bool actorHasGeoscapeSoldier;
+};
+
+bool shouldRecordReactionAttackExecuted(const ReactionAttackFairPlayInput &input);
+bool shouldAttachReactionAttackSubjectId(const ReactionAttackFairPlayInput &input);
+
 } // namespace CompanionPerceptionLogCore
 
 namespace CompanionPerceptionLogTestSupport

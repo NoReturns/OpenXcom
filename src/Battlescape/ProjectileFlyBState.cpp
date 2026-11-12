@@ -513,6 +513,21 @@ bool ProjectileFlyBState::createNewProjectile()
 			_parent->getSave(), _unit->getId(), _action.autoShotCounter, _action.type);
 	}
 
+	if (_action.reactionFire)
+	{
+		bool reactionAudible = false;
+		if (_ammo != 0 && _ammo->getRules()->getFireSound() != -1)
+		{
+			reactionAudible = true;
+		}
+		else if (_action.weapon != 0 && _action.weapon->getRules()->getFireSound() != -1)
+		{
+			reactionAudible = true;
+		}
+		_parent->getSave()->getCompanionPerceptionLog().tryRecordReactionAttackExecuted(
+			_parent->getSave(), _unit, _unit->getPosition(), "snap", reactionAudible);
+	}
+
 	return true;
 }
 

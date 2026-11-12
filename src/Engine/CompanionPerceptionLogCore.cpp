@@ -3,6 +3,7 @@
  */
 #include "CompanionPerceptionLogCore.h"
 #include "CompanionSnapshotUnitStateCore.h"
+#include "../Savegame/BattleUnit.h"
 #include "../fmath.h"
 #include <cstdio>
 #include <cstring>
@@ -489,6 +490,32 @@ bool shouldAttachThrowLaunchHostileSubject(
 		return false;
 	}
 	return shooterVisibleFlag;
+}
+
+bool shouldRecordReactionAttackExecuted(const ReactionAttackFairPlayInput &input)
+{
+	if (input.debugMode)
+	{
+		return false;
+	}
+	return input.audible || input.positionKnown;
+}
+
+bool shouldAttachReactionAttackSubjectId(const ReactionAttackFairPlayInput &input)
+{
+	if (input.debugMode || !input.hasActor)
+	{
+		return false;
+	}
+	if (input.actorOriginalFaction == FACTION_HOSTILE)
+	{
+		return input.actorVisible;
+	}
+	if (input.actorOriginalFaction == FACTION_PLAYER && input.actorHasGeoscapeSoldier)
+	{
+		return input.actorVisible;
+	}
+	return false;
 }
 
 } // namespace CompanionPerceptionLogCore

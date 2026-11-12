@@ -32,6 +32,7 @@
 #include "../Engine/Sound.h"
 #include "../Mod/Mod.h"
 #include "../Mod/RuleItem.h"
+#include "../Engine/CompanionPerceptionLog.h"
 #include "../fmath.h"
 
 namespace OpenXcom
@@ -216,6 +217,21 @@ void MeleeAttackBState::performMeleeAttack()
 
 	// make an explosion animation
 	_parent->statePushFront(new ExplosionBState(_parent, _voxel, _action.weapon, _action.actor, 0, true, true));
+
+	if (_action.reactionFire)
+	{
+		bool reactionAudible = false;
+		if (_ammo != 0 && _ammo->getRules()->getMeleeAttackSound() != -1)
+		{
+			reactionAudible = true;
+		}
+		else if (_weapon != 0 && _weapon->getRules()->getMeleeAttackSound() != -1)
+		{
+			reactionAudible = true;
+		}
+		_parent->getSave()->getCompanionPerceptionLog().tryRecordReactionAttackExecuted(
+			_parent->getSave(), _unit, _unit->getPosition(), "melee", reactionAudible);
+	}
 }
 
 /**

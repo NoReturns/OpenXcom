@@ -1087,6 +1087,7 @@ bool TileEngine::tryReaction(BattleUnit *unit, BattleUnit *target, int attackTyp
 
 		if (action.targeting && unit->spendTimeUnits(action.TU))
 		{
+			action.reactionFire = true;
 			action.TU = 0;
 			if (action.type == BA_HIT)
 			{
