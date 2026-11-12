@@ -123,8 +123,18 @@ static void seedRules()
 	cn["type"] = "STR_TEST_CRAFT";
 	cn["fuelMax"] = 1000;
 	cn["weapons"] = 0;
+	cn["costBuy"] = 550000;
+	cn["transferTime"] = 72;
 	craftRules->load(cn, &m, 0);
 	m.registerTestCraftRule(craftRules);
+
+	RuleCraft *craftRulesB = new RuleCraft("STR_TEST_CRAFT_B");
+	YAML::Node cnb;
+	cnb["type"] = "STR_TEST_CRAFT_B";
+	cnb["fuelMax"] = 800;
+	cnb["weapons"] = 0;
+	craftRulesB->load(cnb, &m, 0);
+	m.registerTestCraftRule(craftRulesB);
 
 	RuleUfo *ufoRules = new RuleUfo("STR_TEST_UFO");
 	YAML::Node un;
@@ -139,7 +149,29 @@ static void seedRules()
 	// Item rules for storage math (Base::getUsedStores / ItemContainer::getTotalSize use getItem(..., true)).
 	m.registerTestItemRule(new RuleItem("STR_RIFLE"));
 	m.registerTestItemRule(new RuleItem("STR_CLIP"));
-	m.registerTestItemRule(new RuleItem("STR_ELECTRO"));
+	RuleItem *electro = new RuleItem("STR_ELECTRO");
+	YAML::Node en;
+	en["type"] = "STR_ELECTRO";
+	en["costBuy"] = 500;
+	en["transferTime"] = 12;
+	electro->load(en, &m, 0);
+	m.registerTestItemRule(electro);
+
+	RuleItem *buyItem = new RuleItem("STR_TEST_BUY_ITEM");
+	YAML::Node bin;
+	bin["type"] = "STR_TEST_BUY_ITEM";
+	bin["costBuy"] = 1200;
+	bin["transferTime"] = 36;
+	buyItem->load(bin, &m, 0);
+	m.registerTestItemRule(buyItem);
+
+	RuleItem *lockedBuyItem = new RuleItem("STR_TEST_BUY_LOCKED");
+	YAML::Node lbin;
+	lbin["type"] = "STR_TEST_BUY_LOCKED";
+	lbin["costBuy"] = 800;
+	lbin["requires"] = YAML::Load("[STR_TEST_LOCKED]");
+	lockedBuyItem->load(lbin, &m, 0);
+	m.registerTestItemRule(lockedBuyItem);
 
 	RuleResearch *starter = new RuleResearch("STR_TEST_START");
 	YAML::Node ry;
@@ -155,6 +187,21 @@ static void seedRules()
 	ly["dependencies"] = YAML::Load("[STR_NEVER_DONE]");
 	locked->load(ly, 0);
 	m.registerTestResearchRule(locked);
+
+	RuleResearch *pickable = new RuleResearch("STR_TEST_PICKABLE");
+	YAML::Node py2;
+	py2["name"] = "STR_TEST_PICKABLE";
+	py2["cost"] = 25;
+	pickable->load(py2, 0);
+	m.registerTestResearchRule(pickable);
+
+	RuleResearch *requiresOnly = new RuleResearch("STR_TEST_REQUIRES_ONLY");
+	YAML::Node ro;
+	ro["name"] = "STR_TEST_REQUIRES_ONLY";
+	ro["cost"] = 0;
+	ro["requires"] = YAML::Load("[STR_TEST_START]");
+	requiresOnly->load(ro, 0);
+	m.registerTestResearchRule(requiresOnly);
 
 	RuleResearch *psiGate = new RuleResearch("STR_TEST_PSI_GATE");
 	YAML::Node py;
@@ -238,12 +285,19 @@ static SavedGame *makeEarlyScenario()
 
 	b->getStorageItems()->addItem("STR_RIFLE", 2);
 	b->getStorageItems()->addItem("STR_CLIP", 40);
+	b->getStorageItems()->addItem("STR_ELECTRO", 3);
 
 	Craft *c = new Craft(mod().getCraft("STR_TEST_CRAFT", true), b, 501);
+	c->setName("Custom Alpha Name");
 	c->setFuel(500);
 	c->setDamage(5);
 	c->setStatus("STR_READY");
 	b->getCrafts()->push_back(c);
+
+	Craft *cB = new Craft(mod().getCraft("STR_TEST_CRAFT_B", true), b, 501);
+	cB->setFuel(300);
+	cB->setStatus("STR_OUT");
+	b->getCrafts()->push_back(cB);
 
 	// Second base — both leave Target id at 0 (typical geoscape flow); export uses stable slot ids 1 and 2.
 	Base *b2 = new Base(&mod());
@@ -266,6 +320,7 @@ static SavedGame *makeEarlyScenario()
 	Craft *c2 = new Craft(mod().getCraft("STR_TEST_CRAFT", true), b2, 502);
 	c2->setFuel(400);
 	c2->setStatus("STR_READY");
+	c2->setMissionComplete(true);
 	b2->getCrafts()->push_back(c2);
 
 	save->addFinishedResearchSimple(mod().getResearch("STR_TEST_START", true));
@@ -376,6 +431,8 @@ int main()
 	expect(renamed.ok, "export after rename must succeed");
 	expect(renamed.jsonUtf8.find(",{\"id\":2,") != std::string::npos, "slot id unchanged after rename");
 	expect(renamed.jsonUtf8.find("Renamed Second") != std::string::npos, "renamed label present");
+	expect(renamed.jsonUtf8.find("\"unique_key\":\"STR_TEST_CRAFT#501\"") != std::string::npos,
+		"unique_key stable after base rename");
 
 	std::string cid;
 	expect(CompanionJsonLite::extractJsonStringField(built.jsonUtf8, "campaign_id", &cid), "campaign_id");
@@ -385,6 +442,51 @@ int main()
 	expect(built.jsonUtf8.find("\"id\":8002") == std::string::npos, "undetected UFO omitted");
 	expect(built.jsonUtf8.find("psi_strength") == std::string::npos, "psi hidden until psi gate is researched");
 	expect(built.jsonUtf8.find("STR_TEST_CRAFT#501") != std::string::npos, "unnamed craft uses safe export label");
+
+	expect(built.jsonUtf8.find("\"unique_key\":\"STR_TEST_CRAFT#501\"") != std::string::npos,
+		"unique_key uses type and id not custom display name");
+	expect(built.jsonUtf8.find("\"unique_key\":\"STR_TEST_CRAFT_B#501\"") != std::string::npos,
+		"cross-type same numeric id has distinct unique_key");
+	expect(built.jsonUtf8.find("\"unique_key\":\"STR_TEST_CRAFT#502\"") != std::string::npos,
+		"second craft of same type has distinct unique_key");
+	expect(built.jsonUtf8.find("\"Custom Alpha Name\"") != std::string::npos,
+		"display name preserved separately from unique_key");
+	expect(built.jsonUtf8.find("\"status\":\"STR_READY\"") != std::string::npos, "ready craft status");
+	expect(built.jsonUtf8.find("\"status\":\"STR_OUT\"") != std::string::npos, "airborne craft status");
+	expect(built.jsonUtf8.find("\"away_from_base\":true") != std::string::npos, "away_from_base when STR_OUT");
+	expect(built.jsonUtf8.find("\"returning_from_ground_mission\":true") != std::string::npos,
+		"returning_from_ground_mission when mission complete flag set");
+	expect(built.jsonUtf8.find("\"on_mission\":true") != std::string::npos,
+		"legacy on_mission still mirrors getMissionComplete");
+
+	expect(built.jsonUtf8.find("STR_TEST_PICKABLE") != std::string::npos, "pickable research in export");
+	expect(built.jsonUtf8.find("STR_TEST_REQUIRES_ONLY") == std::string::npos,
+		"requires-gated topic excluded from available_by_base");
+	expect(built.jsonUtf8.find("\"completed\"") != std::string::npos, "completed research section present");
+	expect(built.jsonUtf8.find("STR_TEST_START") != std::string::npos, "completed topic preserved");
+
+	expect(built.jsonUtf8.find("\"available_by_base\"") != std::string::npos, "purchasing available_by_base");
+	expect(built.jsonUtf8.find("Purchase catalog not exported") == std::string::npos, "purchasing stub removed");
+	expect(built.jsonUtf8.find("\"kind\":\"scientist\"") != std::string::npos, "scientist catalog row");
+	expect(built.jsonUtf8.find("STR_TEST_BUY_ITEM") != std::string::npos, "buyable item in catalog");
+	expect(built.jsonUtf8.find("\"unit_cost\":1200") != std::string::npos, "item buy cost");
+	expect(built.jsonUtf8.find("\"delivery_hours\":36") != std::string::npos, "item delivery hours");
+	expect(built.jsonUtf8.find("STR_TEST_BUY_LOCKED") == std::string::npos, "unresearched buy item excluded");
+	expect(built.jsonUtf8.find("STR_TEST_CRAFT") != std::string::npos, "buyable craft in catalog");
+	expect(built.jsonUtf8.find("\"delivery_hours\":72") != std::string::npos, "craft delivery hours");
+	expect(built.jsonUtf8.find("living_quarters_free") != std::string::npos, "purchase capacity quarters");
+	const size_t electroPos = built.jsonUtf8.find("\"rule_id\":\"STR_ELECTRO\"");
+	expect(electroPos != std::string::npos, "electro catalog row present");
+	expect(built.jsonUtf8.find("\"quantity_at_base\":3", electroPos) != std::string::npos &&
+			built.jsonUtf8.find("\"quantity_at_base\":3", electroPos) < electroPos + 120,
+		"item qty is on-base stores only (electro 3, transfer separate)");
+
+	save->setFunds(0);
+	const CompanionBaseIntelligenceExportCore::BuildResult broke =
+		CompanionBaseIntelligenceExportCore::buildJsonUtf8(save, &mod(), 1700000000003LL, "test");
+	expect(broke.ok, "export at zero funds must succeed");
+	expect(broke.jsonUtf8.find("STR_TEST_BUY_ITEM") != std::string::npos,
+		"catalog visible at zero funds (availability != affordability)");
 
 	long long funds = 0;
 	expect(CompanionJsonLite::extractJsonInt64Field(built.jsonUtf8, "funds", &funds), "overview funds");

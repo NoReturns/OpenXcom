@@ -2,6 +2,7 @@
  * Open X-Com Companion — manual Geoscape base intelligence JSON (M1-BI1).
  */
 #include "CompanionBaseIntelligenceExportCore.h"
+#include "CompanionBaseIntelligencePurchaseCatalogCore.h"
 #include "../Mod/Mod.h"
 #include "../Mod/Armor.h"
 #include "../Mod/RuleCountry.h"
@@ -180,6 +181,19 @@ bool psiStatsVisibleForExport(SavedGame *save, Mod *mod)
 int exportBaseSlotId(size_t baseIndex)
 {
 	return static_cast<int>(baseIndex + 1);
+}
+
+/** Stable craft identity for JSON: rule type + per-type id (Craft::getUniqueId), not display name. */
+std::string craftUniqueKeyForExport(const Craft *craft)
+{
+	if (craft == 0)
+	{
+		return "";
+	}
+	const CraftId uid = craft->getUniqueId();
+	std::ostringstream o;
+	o << uid.first << '#' << uid.second;
+	return o.str();
 }
 
 void appendItemQtyObject(std::ostringstream &json, const std::map<std::string, int> &sorted, size_t maxKeys, bool *truncated)
@@ -394,6 +408,23 @@ BuildInternalResult buildJsonUtf8Impl(SavedGame *save, Mod *mod, long long expor
 		"Scientists assigned to active research are not included; see bases[].research_active[].assigned_scientists "
 		"and bases[].scientists_total_in_base (= pool + assignments + incoming scientist transfers). "
 		"Engineers assigned to manufacturing are excluded from engineers; see manufacturing_active and engineers_total_in_base.");
+	json << ',';
+	appendEscapedJsonString(json, "aircraft.id");
+	json << ':';
+	appendEscapedJsonString(json,
+		"aircraft[].id is SavedGame::getId(craft rule type): unique per craft type within a save, "
+		"not globally unique across types. Use aircraft[].unique_key (type#id) or type plus id for joins.");
+	json << ',';
+	appendEscapedJsonString(json, "aircraft.unique_key");
+	json << ':';
+	appendEscapedJsonString(json,
+		"Stable string from Craft::getUniqueId(): {ruleType}#{perTypeId}. Does not use customizable craft display names.");
+	json << ',';
+	appendEscapedJsonString(json, "aircraft.on_mission");
+	json << ':';
+	appendEscapedJsonString(json,
+		"DEPRECATED: equals Craft::getMissionComplete() (returning from a completed ground mission). "
+		"Do not use as airborne deployment; see away_from_base (status STR_OUT) and returning_from_ground_mission.");
 	json << '}';
 
 	const std::vector<Base *> *bases = save->getBases();
@@ -980,6 +1011,10 @@ BuildInternalResult buildJsonUtf8Impl(SavedGame *save, Mod *mod, long long expor
 				json << ':';
 				json << c->getId();
 				json << ',';
+				appendEscapedJsonString(json, "unique_key");
+				json << ':';
+				appendEscapedJsonString(json, craftUniqueKeyForExport(c));
+				json << ',';
 				appendEscapedJsonString(json, "status");
 				json << ':';
 				appendEscapedJsonString(json, c->getStatus());
@@ -995,6 +1030,14 @@ BuildInternalResult buildJsonUtf8Impl(SavedGame *save, Mod *mod, long long expor
 				appendEscapedJsonString(json, "low_fuel");
 				json << ':';
 				json << (c->getLowFuel() ? "true" : "false");
+				json << ',';
+				appendEscapedJsonString(json, "away_from_base");
+				json << ':';
+				json << (c->getStatus() == "STR_OUT" ? "true" : "false");
+				json << ',';
+				appendEscapedJsonString(json, "returning_from_ground_mission");
+				json << ':';
+				json << (c->getMissionComplete() ? "true" : "false");
 				json << ',';
 				appendEscapedJsonString(json, "on_mission");
 				json << ':';
@@ -1103,12 +1146,19 @@ BuildInternalResult buildJsonUtf8Impl(SavedGame *save, Mod *mod, long long expor
 			appendEscapedJsonString(json, "topics");
 			json << ':';
 			json << '[';
+			bool firstTopic = true;
 			for (size_t ti = 0; ti < avail.size(); ++ti)
 			{
-				if (ti > 0)
+				// NewResearchListState::fillProjectList — UI-hidden topics with non-empty requires.
+				if (!avail[ti]->getRequirements().empty())
+				{
+					continue;
+				}
+				if (!firstTopic)
 				{
 					json << ',';
 				}
+				firstTopic = false;
 				appendEscapedJsonString(json, avail[ti]->getName());
 			}
 			json << ']';
@@ -1204,12 +1254,7 @@ BuildInternalResult buildJsonUtf8Impl(SavedGame *save, Mod *mod, long long expor
 	}
 	json << "}";
 
-	// purchasing / buy catalog — deferred (not implemented in engine exporter)
-	json << ",\"purchasing\":{";
-	appendEscapedJsonString(json, "note");
-	json << ':';
-	appendEscapedJsonString(json, "Purchase catalog not exported (would require PurchaseState / market parity audit).");
-	json << '}';
+	CompanionBaseIntelligencePurchaseCatalogCore::appendPurchasingJson(json, save, mod);
 
 	// geoscape
 	json << ",\"geoscape\":{";

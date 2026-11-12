@@ -157,6 +157,7 @@ set ( engine_src
 	Engine/CompanionSoldierControlPublishCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
+	Engine/CompanionBaseIntelligencePurchaseCatalogCore.cpp
 	Engine/CompanionBaseIntelligenceExportCore.cpp
 	Engine/CompanionBaseIntelligenceExport.cpp
   Engine/CrossPlatform.cpp
