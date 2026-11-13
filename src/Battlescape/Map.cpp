@@ -49,6 +49,8 @@
 #include "../fmath.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionPerceptionLogCore.h"
+#include "../Engine/CompanionTacticalHoverCoordsCore.h"
+#include <string>
 
 /*
   1) Map origin is top corner.
@@ -146,6 +148,13 @@ Map::Map(Game *game, int width, int height, int x, int y, int visibleMapHeight) 
 	_txtAccuracy->setPalette(_game->getScreen()->getPalette());
 	_txtAccuracy->setHighContrast(true);
 	_txtAccuracy->initText(_game->getMod()->getFont("FONT_BIG"), _game->getMod()->getFont("FONT_SMALL"), _game->getLanguage());
+
+	_txtHoverCoords = new Text(96, 9, 0, 0);
+	_txtHoverCoords->setSmall();
+	_txtHoverCoords->setPalette(_game->getScreen()->getPalette());
+	_txtHoverCoords->setHighContrast(true);
+	_txtHoverCoords->setColor(Palette::blockOffset(15 - 1) - 1);
+	_txtHoverCoords->initText(_game->getMod()->getFont("FONT_BIG"), _game->getMod()->getFont("FONT_SMALL"), _game->getLanguage());
 }
 
 /**
@@ -160,6 +169,7 @@ Map::~Map()
 	delete _message;
 	delete _camera;
 	delete _txtAccuracy;
+	delete _txtHoverCoords;
 }
 
 /**
@@ -1100,6 +1110,10 @@ void Map::drawTerrain(Surface *surface)
 							tmpSurface = _game->getMod()->getSurfaceSet("CURSOR.PCK")->getFrame(frame[_cursorType] + (_animFrame / 4));
 							tmpSurface->blitNShade(surface, screenPosition.x, screenPosition.y, 0);
 						}
+						if (itX == _selectorX && itY == _selectorY && itZ == _camera->getViewLevel())
+						{
+							drawHoverTileCoordinateLabel(surface, screenPosition.x, screenPosition.y);
+						}
 					}
 
 					// Draw waypoints if any on this tile
@@ -1335,6 +1349,35 @@ void Map::mouseOver(Action *action, State *state)
 	setSelectorPosition(_mouseX, _mouseY);
 }
 
+
+/**
+ * Draws map tile coordinates at the upper-left of the tactical selection indicator.
+ */
+void Map::drawHoverTileCoordinateLabel(Surface *surface, int screenX, int screenY)
+{
+	const bool selectorIndicatorAvailable =
+		_cursorType != CT_NONE && !_save->getBattleState()->getMouseOverIcons();
+	const int viewZ = _camera->getViewLevel();
+
+	if (!CompanionTacticalHoverCoordsCore::shouldShowHoverTileCoords(
+			selectorIndicatorAvailable,
+			_selectorX, _selectorY, viewZ,
+			_save->getMapSizeX(), _save->getMapSizeY(), _save->getMapSizeZ()))
+	{
+		return;
+	}
+
+	std::string label;
+	CompanionTacticalHoverCoordsCore::formatHoverTileCoordsLabel(_selectorX, _selectorY, viewZ, &label);
+	_txtHoverCoords->setText(label);
+	_txtHoverCoords->draw();
+	int labelY = screenY;
+	if (_cursorType == CT_AIM && Options::battleUFOExtenderAccuracy)
+	{
+		labelY = screenY - 11;
+	}
+	_txtHoverCoords->blitNShade(surface, screenX, labelY, 0);
+}
 
 /**
  * Sets the selector to a certain tile on the map.

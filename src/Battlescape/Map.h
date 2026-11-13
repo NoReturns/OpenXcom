@@ -67,8 +67,10 @@ private:
 	bool _unitDying, _smoothCamera, _smoothingEngaged, _flashScreen;
 	PathPreview _previewSetting;
 	Text *_txtAccuracy;
+	Text *_txtHoverCoords;
 	SurfaceSet *_projectileSet;
 
+	void drawHoverTileCoordinateLabel(Surface *surface, int screenX, int screenY);
 	void drawUnit(Surface *surface, Tile *unitTile, Tile *currTile, Position tileScreenPosition, int shade, int obstacleShade, bool topLayer);
 	void drawTerrain(Surface *surface);
 	int getTerrainLevel(const Position& pos, int size) const;
