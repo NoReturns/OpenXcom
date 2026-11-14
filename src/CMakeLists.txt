@@ -137,6 +137,7 @@ set ( engine_src
 	Engine/CompanionSnapshotMissionContext.cpp
 	Engine/CompanionSnapshotUnitState.cpp
 	Engine/CompanionSnapshotUnitStateCore.cpp
+	Engine/CompanionTuVisibilityCore.cpp
 	Engine/CompanionSha256.cpp
 	Engine/CompanionBriefingRequest.cpp
 	Engine/CompanionBriefingRequestCore.cpp
@@ -734,6 +735,23 @@ if ( OPENXCOM_BUILD_COMPANION_PICKUP_DROP_ENGINE_TEST )
     target_link_libraries ( companion_pickup_drop_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_pickup_drop_engine_test COMMAND companion_pickup_drop_engine_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_TU_VISIBILITY_CORE_TEST "Build companion TU visibility core tests (ASTER-M1-TU-VISIBILITY-01)" ON )
+if ( OPENXCOM_BUILD_COMPANION_TU_VISIBILITY_CORE_TEST )
+  add_executable ( companion_tu_visibility_core_test
+    test/companion_tu_visibility_core_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_tu_visibility_core_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_tu_visibility_core_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_tu_visibility_core_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_tu_visibility_core_test )
+  else ()
+    target_link_libraries ( companion_tu_visibility_core_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_tu_visibility_core_test COMMAND companion_tu_visibility_core_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_COMMAND_JOURNAL_TESTS "Build companion command journal regression tests" ON )

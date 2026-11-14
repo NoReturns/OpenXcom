@@ -1937,6 +1937,42 @@ static void testGroundItemsUnresearchedExportsResearchUsableFalseWithoutItemType
 	adoptGroundItemForBattleCleanup(fixture.battle, tile, weapon);
 }
 
+static void testKneeledMovementTuAdvisory()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(92);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(2, 2, 0), 0);
+	unit->kneel(true);
+	unit->setTimeUnits(16);
+	fixture.battle->setSelectedUnit(unit);
+	const YAML::Node root = CompanionSnapshotBuild::buildSnapshot(fixture.battle, &fixture.game, 4, false);
+	const YAML::Node entry = findUnitById(root["units"], 92);
+	expect(entry["movementTuAdvisory"].IsDefined(), "movementTuAdvisory present");
+	expect(entry["movementTuAdvisory"]["standUpRequiredBeforeWalk"].as<bool>(), "stand required");
+	expect(entry["movementTuAdvisory"]["standUpTuBeforeWalk"].as<int>() == 8, "stand 8 tu");
+	expect(entry["movementTuAdvisory"]["timeUnitsAfterStandEstimate"].as<int>() == 8, "16-8");
+}
+
+static void testTuReservationSnapshotFields()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(91);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 2);
+	fixture.battle->setSelectedUnit(unit);
+	fixture.battle->setTUReserved(BA_SNAPSHOT);
+	fixture.battle->setKneelReserved(true);
+	unit->setTimeUnits(50);
+
+	const YAML::Node root = CompanionSnapshotBuild::buildSnapshot(fixture.battle, &fixture.game, 4, false);
+	expect(root["tuReservation"].IsDefined(), "tuReservation exported");
+	expect(root["tuReservation"]["fireMode"].as<std::string>() == "snap", "tu fireMode snap");
+	expect(root["tuReservation"]["kneelReserve"].as<bool>(), "kneelReserve true");
+	expect(root["tuReservation"]["engineReservationCheckAvailable"].as<bool>() == false,
+		"reservation check false without live BattlescapeGame");
+	const YAML::Node entry = findUnitById(root["units"], 91);
+	expect(entry["actionCosts"].IsDefined(), "legacy actionCosts preserved");
+}
+
 static void testWp8VanillaRifleMagazineEligibilityRegression()
 {
 	RuleItem rifleRules("STR_TEST_VANILLA_RIFLE");
@@ -2035,6 +2071,8 @@ int main()
 	SNAPSHOT_TEST_STEP(testCarriedEquipmentResearchUsableSplitWeaponAmmoGates);
 	SNAPSHOT_TEST_STEP(testCarriedEquipmentResearchUsableNullCampaignFailClosed);
 	SNAPSHOT_TEST_STEP(testGroundInventoryNestedMagazineResearchUsable);
+	SNAPSHOT_TEST_STEP(testKneeledMovementTuAdvisory);
+	SNAPSHOT_TEST_STEP(testTuReservationSnapshotFields);
 
 	if (g_failures != 0)
 	{

@@ -17,6 +17,7 @@
 #include "../Savegame/Tile.h"
 #include "../Engine/CompanionGroundInventoryCore.h"
 #include "../Engine/CompanionDropGroundPlacementCore.h"
+#include "../Engine/CompanionTuVisibilityCore.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -586,6 +587,10 @@ static void testPickupReservedTuRejected(Mod &mod, RuleItem &clipRules, RuleItem
 	std::vector<int> tileIdsAfter;
 	snapshotTileItemIds(unit->getTile(), &tileIdsAfter);
 	expect(vectorSameInts(tileIdsBefore, tileIdsAfter), "reserved TU: tile unchanged");
+	expect(CompanionTuVisibilityCore::classifyTuOutcome(unit, &game, 10) == "reserved_tu_blocked",
+		"classifyTuOutcome: reserved blocks 10 TU pickup");
+	expect(CompanionTuVisibilityCore::classifyTuOutcome(unit, &game, 500) == "insufficient_tu_reject",
+		"classifyTuOutcome: raw shortfall before reserve");
 }
 
 static void testPickupOccupiedRightHandRejected(Mod &mod, RuleItem &clipRules)

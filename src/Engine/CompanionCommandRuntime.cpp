@@ -27,6 +27,7 @@
 #include "../Battlescape/BattlescapeGame.h"
 #include "../Battlescape/ProjectileFlyBState.h"
 #include "CompanionGroundInventoryCore.h"
+#include "CompanionTuVisibilityCore.h"
 #include "Logger.h"
 #include <map>
 #include "CrossPlatform.h"
@@ -73,6 +74,10 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	std::string snapActionResult;
 	std::string walkActionResult;
 	long long rosterCasualtyDeferStartedAtMs;
+	int tuAtAcceptance;
+	int directedFireTuCost;
+	int directedFireFacingStepsEstimate;
+	bool moveAcceptedWhileKneeled;
 };
 
 ActiveCommand g_active = {};
@@ -424,26 +429,102 @@ std::string buildResultJson(const std::string &commandType,
 	return json.str();
 }
 
+static std::string applyResultJsonExtensions(
+	std::string json,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &machineRejectCode,
+	const CompanionTuVisibilityCore::TuAccountingFields *tuFields)
+{
+	if (status == CompanionCommandCore::CMD_REJECTED && !machineRejectCode.empty())
+	{
+		const std::string::size_type insertAt = json.rfind("  \"completed_at\"");
+		if (insertAt != std::string::npos)
+		{
+			std::ostringstream extra;
+			extra << "  \"reject_code\": \"" << machineRejectCode << "\",\n";
+			json = json.substr(0, insertAt) + extra.str() + json.substr(insertAt);
+		}
+	}
+	if (tuFields != 0)
+	{
+		CompanionTuVisibilityCore::insertTuAccountingIntoResultJson(json, *tuFields);
+	}
+	return json;
+}
+
+static CompanionTuVisibilityCore::TuAccountingFields tuFieldsForInsufficientReject(
+	BattleUnit *actor,
+	BattlescapeGame *game,
+	int actionTuCost,
+	const std::string &rejectCode)
+{
+	CompanionTuVisibilityCore::TuAccountingFields fields;
+	if (rejectCode != "INSUFFICIENT_TU")
+	{
+		return fields;
+	}
+	if (actor != 0)
+	{
+		fields.timeUnitsAtValidation = actor->getTimeUnits();
+	}
+	if (actionTuCost >= 0)
+	{
+		fields.actionTuCost = actionTuCost;
+	}
+	fields.outcomeClass = CompanionTuVisibilityCore::classifyTuOutcome(actor, game, actionTuCost);
+	fields.rejectionPhase = "preflight_validation";
+	return fields;
+}
+
 static std::string insertMoveDiagnosticsFields(
 	const std::string &baseJson,
-	const CompanionCommandCore::WalkStopDiagnostics &diag)
+	const CompanionCommandCore::WalkStopDiagnostics &diag,
+	int remainingTu,
+	int tuAtAcceptance,
+	bool kneeledAtAccept,
+	bool stillKneeled,
+	bool noMovementProgress)
 {
-	if (diag.movementStopReason.empty())
+	std::string json = baseJson;
+	const std::string::size_type insertAt = json.rfind("  \"completed_at\"");
+	if (insertAt != std::string::npos && !diag.movementStopReason.empty())
 	{
-		return baseJson;
+		std::ostringstream extra;
+		extra << "  \"movement_stop_reason\": \"" << diag.movementStopReason << "\",\n";
+		if (!diag.engineActionResult.empty())
+		{
+			extra << "  \"engine_action_result\": \"" << diag.engineActionResult << "\",\n";
+		}
+		json = json.substr(0, insertAt) + extra.str() + json.substr(insertAt);
 	}
-	const std::string::size_type insertAt = baseJson.rfind("  \"completed_at\"");
-	if (insertAt == std::string::npos)
+	if (diag.movementStopReason == "insufficient_time_units")
 	{
-		return baseJson;
+		CompanionTuVisibilityCore::TuAccountingFields tu;
+		if (remainingTu >= 0)
+		{
+			tu.timeUnitsRemaining = remainingTu;
+		}
+		if (tuAtAcceptance >= 0)
+		{
+			tu.timeUnitsAtAcceptance = tuAtAcceptance;
+		}
+		tu.rejectionPhase = "movement_complete";
+		if (kneeledAtAccept && stillKneeled && noMovementProgress)
+		{
+			tu.standUpTuBeforeWalk = 8;
+			tu.outcomeClass = "stand_before_move_insufficient";
+			tu.observationNote =
+				"MOVE accepted while kneeling; engine could not spend stand-up TU (8) before walking.";
+		}
+		else
+		{
+			tu.outcomeClass = "movement_exhaustion";
+			tu.observationNote =
+				"MOVE was accepted; TU ran out during walk animation. Not an INSUFFICIENT_TU preflight reject.";
+		}
+		CompanionTuVisibilityCore::insertTuAccountingIntoResultJson(json, tu);
 	}
-	std::ostringstream extra;
-	extra << "  \"movement_stop_reason\": \"" << diag.movementStopReason << "\",\n";
-	if (!diag.engineActionResult.empty())
-	{
-		extra << "  \"engine_action_result\": \"" << diag.engineActionResult << "\",\n";
-	}
-	return baseJson.substr(0, insertAt) + extra.str() + baseJson.substr(insertAt);
+	return json;
 }
 
 std::string buildMoveResultJson(const CompanionCommandCore::MoveCommandParsed &cmd,
@@ -456,7 +537,10 @@ std::string buildMoveResultJson(const CompanionCommandCore::MoveCommandParsed &c
 	bool destinationReached,
 	const std::string &snapshotSha256,
 	const std::string &inboxSha256,
-	const CompanionCommandCore::WalkStopDiagnostics *stopDiagnostics = 0)
+	const CompanionCommandCore::WalkStopDiagnostics *stopDiagnostics = 0,
+	int tuAtAcceptance = -1,
+	bool kneeledAtAccept = false,
+	bool noMovementProgress = false)
 {
 	const std::string base = buildResultJson(cmd.commandType, cmd.commandId, cmd.sessionId, cmd.turn, cmd.actorUnitId,
 		status, publicReason, startPos, finalPos, remainingTu, kneeled, destinationReached,
@@ -465,7 +549,8 @@ std::string buildMoveResultJson(const CompanionCommandCore::MoveCommandParsed &c
 	{
 		return base;
 	}
-	return insertMoveDiagnosticsFields(base, *stopDiagnostics);
+	return insertMoveDiagnosticsFields(
+		base, *stopDiagnostics, remainingTu, tuAtAcceptance, kneeledAtAccept, kneeled, noMovementProgress);
 }
 
 std::string buildKneelResultJson(const CompanionCommandCore::KneelCommandParsed &cmd,
@@ -922,7 +1007,8 @@ static void writeResultFile(const std::string &resultPath, const std::string &js
 }
 
 void rejectCommand(const std::string &resultPath, const CompanionCommandCore::MoveCommandParsed &parsed,
-	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256,
+	const CompanionTuVisibilityCore::TuAccountingFields *tuFields = 0)
 {
 	CompanionCommandCore::MoveCommandParsed cmd = parsed;
 	if (cmd.commandId.empty())
@@ -936,13 +1022,15 @@ void rejectCommand(const std::string &resultPath, const CompanionCommandCore::Mo
 	{
 		cmd.commandType = "MOVE";
 	}
-	const std::string json = buildMoveResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+	std::string json = buildMoveResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), Position(0, 0, 0), 0, false, false, std::string(), inboxSha256);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
 	writeResultFile(resultPath, json);
 }
 
 void rejectStandCommand(const std::string &resultPath, const CompanionCommandCore::StandCommandParsed &parsed,
-	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256,
+	const CompanionTuVisibilityCore::TuAccountingFields *tuFields = 0)
 {
 	CompanionCommandCore::StandCommandParsed cmd = parsed;
 	if (cmd.commandId.empty())
@@ -956,13 +1044,15 @@ void rejectStandCommand(const std::string &resultPath, const CompanionCommandCor
 	{
 		cmd.commandType = "STAND";
 	}
-	const std::string json = buildKneelResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+	std::string json = buildKneelResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false, std::string(), inboxSha256);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
 	writeResultFile(resultPath, json);
 }
 
 void rejectKneelCommand(const std::string &resultPath, const CompanionCommandCore::KneelCommandParsed &parsed,
-	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256,
+	const CompanionTuVisibilityCore::TuAccountingFields *tuFields = 0)
 {
 	CompanionCommandCore::KneelCommandParsed cmd = parsed;
 	if (cmd.commandId.empty())
@@ -976,13 +1066,15 @@ void rejectKneelCommand(const std::string &resultPath, const CompanionCommandCor
 	{
 		cmd.commandType = "KNEEL";
 	}
-	const std::string json = buildKneelResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+	std::string json = buildKneelResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false, std::string(), inboxSha256);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
 	writeResultFile(resultPath, json);
 }
 
 void rejectSnapShotCommand(const std::string &resultPath, const CompanionCommandCore::SnapShotCommandParsed &parsed,
-	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256,
+	const CompanionTuVisibilityCore::TuAccountingFields *tuFields = 0)
 {
 	CompanionCommandCore::SnapShotCommandParsed cmd = parsed;
 	if (cmd.commandId.empty())
@@ -996,14 +1088,16 @@ void rejectSnapShotCommand(const std::string &resultPath, const CompanionCommand
 	{
 		cmd.commandType = "SNAP_SHOT";
 	}
-	const std::string json = buildSnapShotResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+	std::string json = buildSnapShotResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), Position(0, 0, 0), 0, false,
 		std::string(), inboxSha256);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
 	writeResultFile(resultPath, json);
 }
 
 void rejectPrimeCommand(const std::string &resultPath, const CompanionCommandCore::PrimeCommandParsed &parsed,
-	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256,
+	const CompanionTuVisibilityCore::TuAccountingFields *tuFields = 0)
 {
 	CompanionCommandCore::PrimeCommandParsed cmd = parsed;
 	if (cmd.commandId.empty())
@@ -1017,9 +1111,10 @@ void rejectPrimeCommand(const std::string &resultPath, const CompanionCommandCor
 	{
 		cmd.commandType = "PRIME";
 	}
-	const std::string json = buildPrimeResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+	std::string json = buildPrimeResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
 		std::string(), inboxSha256);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
 	writeResultFile(resultPath, json);
 }
 
@@ -3290,7 +3385,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			const std::string resultSnapshotSha256 =
 				snapshotSha256ForTerminalCommandResult(battle, terminal);
 			const Position finalPos = unit != 0 ? unit->getPosition() : g_active.startPos;
-			const std::string json = buildSnapShotResultJson(
+			std::string json = buildSnapShotResultJson(
 				g_active.snapParsed,
 				terminal,
 				publicReason,
@@ -3300,6 +3395,36 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				unit != 0 && unit->isKneeled(),
 				resultSnapshotSha256,
 				g_active.inboxDigest);
+			if (done.actionResult == "STR_NOT_ENOUGH_TIME_UNITS"
+			    || g_active.snapActionResult == "STR_NOT_ENOUGH_TIME_UNITS")
+			{
+				CompanionTuVisibilityCore::TuAccountingFields tu;
+				tu.timeUnitsAtAcceptance = g_active.tuAtAcceptance;
+				tu.timeUnitsRemaining = unit != 0 ? unit->getTimeUnits() : -1;
+				tu.actionTuCost = g_active.directedFireTuCost;
+				tu.facingTuStepsEstimated = g_active.directedFireFacingStepsEstimate;
+				if (g_active.directedFireFacingStepsEstimate >= 0)
+				{
+					tu.facingTuEstimate = g_active.directedFireFacingStepsEstimate;
+				}
+				tu.facingTuSpentEstimate = CompanionTuVisibilityCore::estimateFacingTuSpent(
+					g_active.tuAtAcceptance,
+					unit != 0 ? unit->getTimeUnits() : -1,
+					g_active.directedFireTuCost);
+				const int remaining = unit != 0 ? unit->getTimeUnits() : -1;
+				if (remaining >= 0 && g_active.directedFireTuCost >= 0 && remaining < g_active.directedFireTuCost)
+				{
+					tu.outcomeClass = "fire_insufficient_after_facing";
+				}
+				else
+				{
+					tu.outcomeClass = "multi_stage_action";
+				}
+				tu.rejectionPhase = "post_acceptance_execution";
+				tu.observationNote =
+					"Command passed preflight checkReservedTU for fire TU only; failure during facing or projectile init.";
+				json = applyResultJsonExtensions(json, terminal, std::string(), &tu);
+			}
 			writeResultFile(resultPath, json);
 			logTerminalOnce(g_active.commandId, terminal);
 			g_active.inFlight = false;
@@ -3333,6 +3458,8 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		}
 
 		const bool reached = unit != 0 && unit->getPosition() == done.requestedDest;
+		const Position finalPos = unit != 0 ? unit->getPosition() : done.startPos;
+		const bool noMovementProgress = finalPos == g_active.startPos;
 		const std::string resultSnapshotSha256 =
 			snapshotSha256ForTerminalCommandResult(battle, terminal);
 		const CompanionCommandCore::WalkStopDiagnostics stopDiagnostics =
@@ -3348,13 +3475,16 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			terminal,
 			publicReason,
 			g_active.startPos,
-			unit != 0 ? unit->getPosition() : done.startPos,
+			finalPos,
 			unit != 0 ? unit->getTimeUnits() : 0,
 			unit != 0 && unit->isKneeled(),
 			reached,
 			resultSnapshotSha256,
 			g_active.inboxDigest,
-			stopDiagnostics.movementStopReason.empty() ? 0 : &stopDiagnostics);
+			stopDiagnostics.movementStopReason.empty() ? 0 : &stopDiagnostics,
+			g_active.tuAtAcceptance,
+			g_active.moveAcceptedWhileKneeled,
+			noMovementProgress);
 		writeResultFile(resultPath, json);
 		if (terminal == CompanionCommandCore::CMD_COMPLETED
 		    || terminal == CompanionCommandCore::CMD_INTERRUPTED
@@ -4402,7 +4532,17 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		}
 		if (!snapVerdict.accepted)
 		{
-			rejectSnapShotCommand(resultPath, snapParsed, snapVerdict.rejectCode, snapVerdict.publicReason, inboxDigest);
+			BattleItem *preflightWeapon = actor != 0 ? actor->getItem(snapParsed.activeHand) : 0;
+			const BattleActionType preflightAction = battleActionTypeForDirectedFireKind(
+				directedFireKindForCommandType(inboxCommandType));
+			const int preflightFireTu = actor != 0 && preflightWeapon != 0
+				? actor->getActionTUs(preflightAction, preflightWeapon)
+				: -1;
+			const CompanionTuVisibilityCore::TuAccountingFields tuReject = tuFieldsForInsufficientReject(
+				actor, game, preflightFireTu, snapVerdict.rejectCode);
+			rejectSnapShotCommand(
+				resultPath, snapParsed, snapVerdict.rejectCode, snapVerdict.publicReason, inboxDigest,
+				snapVerdict.rejectCode == "INSUFFICIENT_TU" ? &tuReject : 0);
 			appendJournalEntry(journalPath, snapParsed.commandId);
 			logRejectOnce(snapParsed.commandId, snapVerdict.rejectCode);
 			maybeLogNotAiControlledReject(
@@ -4420,6 +4560,11 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		logCommandDiagnostic("accepted command_id=" + snapParsed.commandId.substr(0, 8) +
 			"... actor=" + std::to_string(snapParsed.actorUnitId));
 
+		BattleItem *weapon = actor != 0 ? actor->getItem(snapParsed.activeHand) : 0;
+		const BattleActionType actionType = battleActionTypeForDirectedFireKind(
+			directedFireKindForCommandType(inboxCommandType));
+		const int preAcceptFireTu = actor != 0 && weapon != 0 ? actor->getActionTUs(actionType, weapon) : -1;
+
 		beginInFlightCommand();
 		g_active.kind = directedFireKindForCommandType(inboxCommandType);
 		g_active.commandId = snapParsed.commandId;
@@ -4428,15 +4573,19 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		g_active.startPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
 		g_active.snapProjectileLaunched = false;
 		g_active.snapActionResult.clear();
+		g_active.tuAtAcceptance = actor != 0 ? actor->getTimeUnits() : -1;
+		g_active.directedFireTuCost = preAcceptFireTu;
 
-		BattleItem *weapon = actor->getItem(snapParsed.activeHand);
 		const Position target(snapParsed.targetX, snapParsed.targetY, snapParsed.targetZ);
+		g_active.directedFireFacingStepsEstimate =
+			actor != 0
+				? CompanionTuVisibilityCore::estimateDirectedFireFacingSteps(actor, target)
+				: -1;
 		std::string rejectReason;
 		if (actor != 0 && actor->getActiveHand() != snapParsed.activeHand)
 		{
 			actor->setActiveHand(snapParsed.activeHand);
 		}
-		const BattleActionType actionType = battleActionTypeForDirectedFireKind(g_active.kind);
 		if (!game->tryExecuteCompanionDirectedFire(actor, target, weapon, actionType, &rejectReason))
 		{
 			g_active.inFlight = false;
@@ -4452,8 +4601,20 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		g_active.kind = directedFireKindForCommandType(inboxCommandType);
 
 		logSnapShotStartedOnce(snapParsed.commandId, snapParsed.actorUnitId);
-		writeResultFile(resultPath, buildSnapShotResultJson(snapParsed, CompanionCommandCore::CMD_EXECUTING, std::string(),
-			g_active.startPos, g_active.startPos, actor->getTimeUnits(), actor->isKneeled(), g_lastSnapshotSha256, inboxDigest));
+		CompanionTuVisibilityCore::TuAccountingFields acceptTu;
+		acceptTu.timeUnitsAtAcceptance = g_active.tuAtAcceptance;
+		acceptTu.actionTuCost = g_active.directedFireTuCost;
+		acceptTu.facingTuStepsEstimated = g_active.directedFireFacingStepsEstimate;
+		if (g_active.directedFireFacingStepsEstimate >= 0)
+		{
+			acceptTu.facingTuEstimate = g_active.directedFireFacingStepsEstimate;
+		}
+		acceptTu.observationNote =
+			"Post-acceptance facing spends up to facing_tu_steps_estimated (1 TU per step) before projectile init.";
+		std::string executingJson = buildSnapShotResultJson(snapParsed, CompanionCommandCore::CMD_EXECUTING, std::string(),
+			g_active.startPos, g_active.startPos, actor->getTimeUnits(), actor->isKneeled(), g_lastSnapshotSha256, inboxDigest);
+		executingJson = applyResultJsonExtensions(executingJson, CompanionCommandCore::CMD_EXECUTING, std::string(), &acceptTu);
+		writeResultFile(resultPath, executingJson);
 		appendJournalEntry(journalPath, snapParsed.commandId);
 		return;
 	}
@@ -4541,7 +4702,11 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			CompanionCommandCore::validateStandCommand(standInput);
 		if (!standVerdict.accepted)
 		{
-			rejectStandCommand(resultPath, standParsed, standVerdict.rejectCode, standVerdict.publicReason, inboxDigest);
+			const CompanionTuVisibilityCore::TuAccountingFields standTuReject = tuFieldsForInsufficientReject(
+				actor, game, 8, standVerdict.rejectCode);
+			rejectStandCommand(
+				resultPath, standParsed, standVerdict.rejectCode, standVerdict.publicReason, inboxDigest,
+				standVerdict.rejectCode == "INSUFFICIENT_TU" ? &standTuReject : 0);
 			appendJournalEntry(journalPath, standParsed.commandId);
 			logRejectOnce(standParsed.commandId, standVerdict.rejectCode);
 			maybeLogNotAiControlledReject(
@@ -4671,7 +4836,11 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			CompanionCommandCore::validateKneelCommand(kneelInput);
 		if (!kneelVerdict.accepted)
 		{
-			rejectKneelCommand(resultPath, kneelParsed, kneelVerdict.rejectCode, kneelVerdict.publicReason, inboxDigest);
+			const CompanionTuVisibilityCore::TuAccountingFields kneelTuReject = tuFieldsForInsufficientReject(
+				actor, game, 4, kneelVerdict.rejectCode);
+			rejectKneelCommand(
+				resultPath, kneelParsed, kneelVerdict.rejectCode, kneelVerdict.publicReason, inboxDigest,
+				kneelVerdict.rejectCode == "INSUFFICIENT_TU" ? &kneelTuReject : 0);
 			appendJournalEntry(journalPath, kneelParsed.commandId);
 			logRejectOnce(kneelParsed.commandId, kneelVerdict.rejectCode);
 			maybeLogNotAiControlledReject(
@@ -4819,13 +4988,15 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	logCommandDiagnostic("accepted command_id=" + parsed.commandId.substr(0, 8) + "... actor=" + std::to_string(parsed.actorUnitId));
 
 	beginInFlightCommand();
-	g_active.kind = ActiveCommand::KIND_MOVE;
-	g_active.commandId = parsed.commandId;
-	g_active.inboxDigest = inboxDigest;
-	g_active.moveParsed = parsed;
-	g_active.walkActionResult.clear();
+		g_active.kind = ActiveCommand::KIND_MOVE;
+		g_active.commandId = parsed.commandId;
+		g_active.inboxDigest = inboxDigest;
+		g_active.moveParsed = parsed;
+		g_active.walkActionResult.clear();
+		g_active.tuAtAcceptance = actor != 0 ? actor->getTimeUnits() : -1;
+		g_active.moveAcceptedWhileKneeled = actor != 0 && actor->isKneeled();
 
-	std::string rejectReason;
+		std::string rejectReason;
 	const Position dest(parsed.destX, parsed.destY, parsed.destZ);
 	if (!game->tryExecuteCompanionMove(actor, dest, &rejectReason))
 	{

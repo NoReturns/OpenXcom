@@ -13,6 +13,7 @@
 #include "CompanionSnapshotTerrain.h"
 #include "CompanionSnapshotMissionContext.h"
 #include "CompanionSnapshotUnitState.h"
+#include "CompanionTuVisibilityCore.h"
 #include "../Battlescape/BattlescapeState.h"
 #include "../Engine/Game.h"
 #include "../Engine/Language.h"
@@ -685,15 +686,18 @@ bool companionFirearmHasAmmo(BattleItem *weapon)
 	return ammo != 0 && ammo->getAmmoQuantity() > 0;
 }
 
-void appendActionEntry(YAML::Node &actions, BattleUnit *unit, BattleItem *weapon, BattleActionType type, const char *id, bool usable)
+void appendActionEntry(YAML::Node &actions, SavedBattleGame *battle, BattleUnit *unit, BattleItem *weapon, BattleActionType type, const char *id, bool usable)
 {
 	const int tu = unit->getActionTUs(type, weapon);
 	YAML::Node entry;
 	entry["id"] = id;
 	entry["actionType"] = static_cast<int>(type);
 	entry["tuCost"] = tu;
-	entry["canAffordTu"] = tu <= unit->getTimeUnits();
+	const bool legacyAfford = tu <= unit->getTimeUnits();
+	entry["canAffordTu"] = legacyAfford;
 	entry["usable"] = usable;
+	CompanionTuVisibilityCore::appendActionTuReservationAdvisory(entry, battle, unit, tu, legacyAfford);
+	CompanionTuVisibilityCore::appendDirectedFireFacingAdvisory(entry, type);
 	actions.push_back(entry);
 }
 
@@ -712,13 +716,13 @@ void appendHandActionCosts(YAML::Node &handCosts, SavedBattleGame *battle, Battl
 
 	if (!rules->isFixed())
 	{
-		appendActionEntry(actions, unit, weapon, BA_THROW, "throw", envOk);
+		appendActionEntry(actions, battle, unit, weapon, BA_THROW, "throw", envOk);
 	}
 
 	if ((rules->getBattleType() == BT_GRENADE || rules->getBattleType() == BT_PROXIMITYGRENADE)
 		&& weapon->getFuseTimer() == -1)
 	{
-		appendActionEntry(actions, unit, weapon, BA_PRIME, "prime", envOk && companionResearchUsable(battle, weapon, BA_PRIME));
+		appendActionEntry(actions, battle, unit, weapon, BA_PRIME, "prime", envOk && companionResearchUsable(battle, weapon, BA_PRIME));
 	}
 
 	if (rules->getBattleType() == BT_FIREARM)
@@ -728,28 +732,28 @@ void appendHandActionCosts(YAML::Node &handCosts, SavedBattleGame *battle, Battl
 		if (rules->getWaypoints() != 0
 			|| (weapon->getAmmoItem() != 0 && weapon->getAmmoItem()->getRules()->getWaypoints() != 0))
 		{
-			appendActionEntry(actions, unit, weapon, BA_LAUNCH, "launch", researchOk && ammoOk);
+				appendActionEntry(actions, battle, unit, weapon, BA_LAUNCH, "launch", researchOk && ammoOk);
 		}
 		else
 		{
 			if (rules->getAccuracyAuto() != 0)
 			{
-				appendActionEntry(actions, unit, weapon, BA_AUTOSHOT, "auto", researchOk && ammoOk);
+				appendActionEntry(actions, battle, unit, weapon, BA_AUTOSHOT, "auto", researchOk && ammoOk);
 			}
 			if (rules->getAccuracySnap() != 0)
 			{
-				appendActionEntry(actions, unit, weapon, BA_SNAPSHOT, "snap", researchOk && ammoOk);
+				appendActionEntry(actions, battle, unit, weapon, BA_SNAPSHOT, "snap", researchOk && ammoOk);
 			}
 			if (rules->getAccuracyAimed() != 0)
 			{
-				appendActionEntry(actions, unit, weapon, BA_AIMEDSHOT, "aimed", researchOk && ammoOk);
+				appendActionEntry(actions, battle, unit, weapon, BA_AIMEDSHOT, "aimed", researchOk && ammoOk);
 			}
 		}
 	}
 
 	if (rules->getTUMelee() > 0)
 	{
-		appendActionEntry(actions, unit, weapon, BA_HIT, "melee", envOk && companionResearchUsable(battle, weapon, BA_HIT));
+		appendActionEntry(actions, battle, unit, weapon, BA_HIT, "melee", envOk && companionResearchUsable(battle, weapon, BA_HIT));
 	}
 
 	handCosts["actions"] = actions;
@@ -761,6 +765,7 @@ void appendFriendlyActionCosts(YAML::Node &entry, SavedBattleGame *battle, Battl
 	YAML::Node posture;
 	posture["kneelDownTu"] = 4;
 	posture["standUpTu"] = 8;
+	CompanionTuVisibilityCore::appendPostureTuReservationAdvisory(posture, battle, unit);
 	costs["posture"] = posture;
 
 	YAML::Node hands;
@@ -773,6 +778,7 @@ void appendFriendlyActionCosts(YAML::Node &entry, SavedBattleGame *battle, Battl
 	costs["hands"] = hands;
 
 	entry["actionCosts"] = costs;
+	CompanionTuVisibilityCore::appendMovementTuAdvisory(entry, battle, unit);
 }
 
 void appendUnit(YAML::Node &units, SavedBattleGame *battle, SavedGame *campaign, BattleUnit *unit)
@@ -1038,6 +1044,7 @@ YAML::Node buildSnapshotImpl(SavedBattleGame *battle, SavedGame *campaign, int s
 	root["side"] = static_cast<int>(battle->getSide());
 	BattleUnit *selected = battle->getSelectedUnit();
 	root["selectedUnitId"] = selected ? selected->getId() : -1;
+	CompanionTuVisibilityCore::appendBattleTuReservation(root, battle);
 
 	YAML::Node map;
 	map["width"] = battle->getMapSizeX();
