@@ -543,6 +543,20 @@ static void testRelayStickyRetrieveStatusAcceptance()
 		&staleAttempt);
 	expect(!shouldAcceptRelayStatusUpdate(newerAttempt, staleAttempt, true),
 		"lifecycle C: older delayed update does not replace newer last_retrieve");
+
+	RelayStatusView priorFailedSend;
+	parseRelayStatusJson(
+		"{\"request_id\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"action\":\"send\","
+		"\"phase\":\"failed\",\"terminal\":true,\"error_code\":\"NETWORK_FAILED\","
+		"\"updated_at_ms\":8000}",
+		&priorFailedSend);
+	RelayStatusView newSending;
+	parseRelayStatusJson(
+		"{\"request_id\":\"ffffffffffffffffffffffffffffffff\",\"action\":\"send\","
+		"\"phase\":\"sending\",\"terminal\":false,\"updated_at_ms\":9000}",
+		&newSending);
+	expect(shouldAcceptRelayStatusUpdate(priorFailedSend, newSending, true),
+		"in-progress send with new request_id must replace prior terminal failure cache");
 }
 
 static void testLegacyStatusJsonWithoutOptionalFields()

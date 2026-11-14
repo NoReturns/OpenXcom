@@ -2,6 +2,8 @@
 /*
  * Open X-Com Companion — send/retrieve relay controls overlay (M1-25E / M1-26A).
  */
+#include <string>
+
 namespace OpenXcom
 {
 
@@ -38,6 +40,7 @@ void tick(Ui *ui);
 void tickBattlescape(Ui *ui, SavedBattleGame *battle = 0);
 void setControlsVisible(Ui *ui, bool visible);
 bool onRetrievePressed();
+void onRelayTransactionStarted(const char *action, const std::string &requestId);
 bool onAutoRetrieveTogglePressed();
 bool onAutoRetrieveIntervalLessPressed();
 bool onAutoRetrieveIntervalMorePressed();

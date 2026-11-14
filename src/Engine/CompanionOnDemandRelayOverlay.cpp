@@ -564,6 +564,27 @@ void tickBattlescape(Ui *ui, SavedBattleGame *battle)
 	onRetrievePressed();
 }
 
+void onRelayTransactionStarted(const char *action, const std::string &requestId)
+{
+	if (action == 0 || action[0] == '\0')
+	{
+		return;
+	}
+	const std::string actionKey(action);
+	const long long nowMs = companionWallClockMs();
+	g_cachedStatus = RelayStatusView();
+	g_cachedStatus.parsed = true;
+	g_cachedStatus.request_id = requestId;
+	g_cachedStatus.action = actionKey;
+	g_cachedStatus.phase = (actionKey == "retrieve") ? "retrieving" : "sending";
+	g_cachedStatus.terminal = false;
+	g_cachedStatus.updated_at_ms = nowMs;
+	g_hasCachedStatus = true;
+	g_cachedPhase = mapStatusViewToUiPhase(g_cachedStatus);
+	g_lastStatusReadWallMs = 0;
+	formatRelayStatusLabel(g_cachedStatus, &g_lastStatusLabel);
+}
+
 bool onRetrievePressed()
 {
 	std::string requestId;
@@ -572,14 +593,7 @@ bool onRetrievePressed()
 	{
 		return false;
 	}
-	g_cachedPhase = RELAY_UI_RETRIEVING;
-	g_cachedStatus = RelayStatusView();
-	g_cachedStatus.parsed = true;
-	g_cachedStatus.phase = "retrieving";
-	g_cachedStatus.action = "retrieve";
-	g_cachedStatus.terminal = false;
-	g_hasCachedStatus = true;
-	formatRelayStatusLabel(g_cachedStatus, &g_lastStatusLabel);
+	onRelayTransactionStarted("retrieve", requestId);
 	return true;
 }
 
@@ -634,14 +648,7 @@ bool onStrategicSendPressed(SavedGame *save, Mod *mod)
 		}
 		return false;
 	}
-	g_cachedPhase = RELAY_UI_SENDING;
-	g_cachedStatus = RelayStatusView();
-	g_cachedStatus.parsed = true;
-	g_cachedStatus.phase = "sending";
-	g_cachedStatus.action = "send";
-	g_cachedStatus.terminal = false;
-	g_hasCachedStatus = true;
-	formatRelayStatusLabel(g_cachedStatus, &g_lastStatusLabel);
+	onRelayTransactionStarted("send", enqueuedId);
 	return true;
 }
 

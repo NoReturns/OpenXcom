@@ -65,6 +65,7 @@
 #include "../Engine/CompanionBriefingRequest.h"
 #include "../Engine/CompanionBriefingTestSupport.h"
 #include "../Engine/CompanionOnDemandRelayCore.h"
+#include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionGroundInventoryCore.h"
@@ -2556,7 +2557,9 @@ void enqueueCompanionOnDemandTacticalSend(const std::string &briefingRequestId)
 		"tactical", briefingRequestId.c_str(), &relayRequestId, &error))
 	{
 		Log(LOG_INFO) << "Companion on-demand send not queued: " << error;
+		return;
 	}
+	CompanionOnDemandRelayOverlay::onRelayTransactionStarted("send", relayRequestId);
 }
 
 } // namespace

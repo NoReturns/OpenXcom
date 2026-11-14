@@ -510,6 +510,13 @@ bool shouldAcceptRelayStatusUpdate(const RelayStatusView &existing, const RelayS
 	{
 		return true;
 	}
+	if (!incoming.terminal
+	    && !incoming.request_id.empty()
+	    && (incoming.phase == "sending" || incoming.phase == "retrieving")
+	    && (!existing.terminal || incoming.request_id != existing.request_id))
+	{
+		return true;
+	}
 	if (incoming.last_retrieve_updated_at_ms > existing.last_retrieve_updated_at_ms)
 	{
 		return true;
@@ -1017,6 +1024,16 @@ RelayStatusView resolveEffectiveLabelStatus(const RelayStatusView &status)
 	}
 	if (status.last_retrieve_updated_at_ms < status.updated_at_ms
 	    && status.phase == "completed"
+	    && !status.last_command_status.empty())
+	{
+		return effective;
+	}
+	const bool retrievalTransportError = status.last_retrieve_error_code == "RETRIEVAL_ERROR"
+	    || status.last_retrieve_error_code == "NETWORK_FAILED"
+	    || status.last_retrieve_error_code == "RATE_LIMIT"
+	    || status.last_retrieve_error_code == "RELAY_OFFLINE";
+	if (retrievalTransportError
+	    && status.updated_at_ms > status.last_retrieve_updated_at_ms
 	    && !status.last_command_status.empty())
 	{
 		return effective;
