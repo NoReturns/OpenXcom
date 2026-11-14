@@ -525,6 +525,31 @@ static void testCombatCasualtyAttributionRosterVictim()
 	expect(res.shouldEmit, "visible hostile kills roster soldier");
 }
 
+static void testCombatCasualtyAttributionVisibleNeutralCivilian()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimNeutralOriginal = true;
+	input.victimVisible = true;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(res.shouldEmit, "visible actor kills visible neutral civilian");
+	expect(res.exportVictimSubjectId && res.exportAttributedActorId, "neutral victim id exported when seen");
+}
+
+static void testCombatCasualtyAttributionOmitsHiddenNeutralCivilian()
+{
+	CombatCasualtyAttributionExportInput input = {};
+	input.victimConfirmedDead = true;
+	input.fatalActorPresent = true;
+	input.fatalActorVisible = true;
+	input.victimNeutralOriginal = true;
+	input.victimVisible = false;
+	CombatCasualtyAttributionExportResolution res = resolveCombatCasualtyAttributionExport(input);
+	expect(!res.shouldEmit, "hidden neutral civilian omits attribution (fair-play visibility)");
+}
+
 static void testCombatCasualtyAttributionHiddenActor()
 {
 	CombatCasualtyAttributionExportInput input = {};
@@ -741,6 +766,8 @@ int main()
 	testCombatCasualtyEventRegistry();
 	testCombatCasualtyAttributionVisibleKill();
 	testCombatCasualtyAttributionRosterVictim();
+	testCombatCasualtyAttributionVisibleNeutralCivilian();
+	testCombatCasualtyAttributionOmitsHiddenNeutralCivilian();
 	testCombatCasualtyAttributionHiddenActor();
 	testCombatCasualtyAttributionHiddenHostileVictim();
 	testCombatCasualtyAttributionOmitsMcCredit();

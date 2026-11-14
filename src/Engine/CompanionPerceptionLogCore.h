@@ -135,7 +135,7 @@ std::string makeProjectileImpactDedupeKey(int turn, int flightId, int impactOrdi
 
 bool isCombatCasualtyPerceptionEventType(const char *eventType);
 
-/** M1 PERCEPTION-B2: authoritative fatal casualty attribution (engine murderer at death settlement). */
+/** M1 PERCEPTION-B2/B4: authoritative fatal casualty attribution (engine murderer at death settlement). */
 struct CombatCasualtyAttributionExportInput
 {
 	bool debugMode;
@@ -144,6 +144,8 @@ struct CombatCasualtyAttributionExportInput
 	bool fatalActorVisible;
 	bool victimRosterSoldier;
 	bool victimHostileOriginal;
+	/** Original FACTION_NEUTRAL civilian/neutral (PERCEPTION-B4); requires victimVisible like hostiles. */
+	bool victimNeutralOriginal;
 	bool victimVisible;
 	bool victimPositionKnown;
 	bool mindControlKillCredit;

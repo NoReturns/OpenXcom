@@ -895,6 +895,7 @@ void CompanionPerceptionLog::tryRecordCombatCasualtyAttributed(
 	exportInput.fatalActorVisible = fatalActor != 0 && fatalActor->getVisible();
 	exportInput.victimRosterSoldier = isOriginalXcomRosterCasualtySubjectUnit(victim);
 	exportInput.victimHostileOriginal = victim->getOriginalFaction() == FACTION_HOSTILE;
+	exportInput.victimNeutralOriginal = victim->getOriginalFaction() == FACTION_NEUTRAL;
 	exportInput.victimVisible = victim->getVisible();
 	exportInput.victimPositionKnown = victimPositionKnown;
 	exportInput.mindControlKillCredit = mindControlKillCredit;

@@ -362,6 +362,14 @@ CombatCasualtyAttributionExportResolution resolveCombatCasualtyAttributionExport
 	{
 		out.exportVictimSubjectId = true;
 	}
+	else if (input.victimNeutralOriginal)
+	{
+		if (!input.victimVisible)
+		{
+			return out;
+		}
+		out.exportVictimSubjectId = true;
+	}
 	else
 	{
 		return out;

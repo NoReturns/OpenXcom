@@ -92,6 +92,23 @@ struct CyberdiscFixture
 	}
 };
 
+struct NeutralCivilianFixture
+{
+	Unit rules;
+	Armor armor;
+	BattleUnit *unit;
+	NeutralCivilianFixture(int id, bool visible, int direction, bool kneeled)
+		: rules("STR_SECTOID"), armor("STR_SECTOID_ARMOR"), unit(0)
+	{
+		StatAdjustment adjustment;
+		unit = new BattleUnit(&rules, FACTION_NEUTRAL, id, &armor, &adjustment, 0);
+		unit->setVisible(visible);
+		unit->kneel(kneeled);
+		unit->setDirection(direction);
+		unit->setPosition(Position(3, 3, 0));
+	}
+};
+
 /// Owns heap bases/battles so SavedGame::~SavedGame never deletes static fixture memory.
 struct TacticalFixture
 {
@@ -101,6 +118,7 @@ struct TacticalFixture
 	std::vector<SoldierFixture *> soldierBundles;
 	std::vector<AlienFixture *> alienBundles;
 	std::vector<CyberdiscFixture *> cyberdiscBundles;
+	std::vector<NeutralCivilianFixture *> neutralBundles;
 
 	TacticalFixture()
 		: base(new Base(&fixtureMod())),
@@ -126,6 +144,11 @@ struct TacticalFixture
 			delete *i;
 		}
 		cyberdiscBundles.clear();
+		for (std::vector<NeutralCivilianFixture *>::iterator i = neutralBundles.begin(); i != neutralBundles.end(); ++i)
+		{
+			delete *i;
+		}
+		neutralBundles.clear();
 		base->getSoldiers()->clear();
 		game.getBases()->clear();
 		delete base;
@@ -158,6 +181,14 @@ struct TacticalFixture
 	{
 		AlienFixture *bundle = new AlienFixture(id, visible, direction, kneeled);
 		alienBundles.push_back(bundle);
+		battle->getUnits()->push_back(bundle->unit);
+		return bundle->unit;
+	}
+
+	BattleUnit *addNeutralCivilianUnit(int id, bool visible, int direction, bool kneeled)
+	{
+		NeutralCivilianFixture *bundle = new NeutralCivilianFixture(id, visible, direction, kneeled);
+		neutralBundles.push_back(bundle);
 		battle->getUnits()->push_back(bundle->unit);
 		return bundle->unit;
 	}
@@ -1323,6 +1354,45 @@ static void testCombatCasualtyAttributionOmitsHiddenHostileVictim()
 		"hidden hostile victim omits attribution");
 }
 
+static void testCombatCasualtyAttributionBerserkRosterKillsVisibleNeutral()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(11);
+	BattleUnit *shooter = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	BattleUnit *civilian = fixture.addNeutralCivilianUnit(1000011, true, 2, false);
+	placeUnitOnDiscoveredTile(fixture, shooter, Position(0, 0, 0));
+	placeUnitOnDiscoveredTile(fixture, civilian, Position(1, 0, 0));
+	shooter->setVisible(true);
+	civilian->setVisible(true);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b4-berserk-roster-neutral");
+	perception.tryRecordCombatCasualtyAttributed(
+		fixture.battle, civilian, shooter, false, false, false, false);
+	const YAML::Node root = buildParsedSnapshot(fixture);
+	const YAML::Node events = root["perceptionLog"]["events"];
+	expect(events.size() == 1, "one attribution for visible berserk roster vs visible civilian");
+	expect(events[0]["type"].as<std::string>() == "combat_casualty_attributed", "attribution type");
+	expect(events[0]["subjectUnitId"].as<int>() == 1000011, "neutral victim id");
+	expect(events[0]["attributedActorUnitId"].as<int>() == 11, "roster shooter id");
+}
+
+static void testCombatCasualtyAttributionOmitsHiddenNeutralCivilian()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(12);
+	BattleUnit *shooter = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	BattleUnit *civilian = fixture.addNeutralCivilianUnit(1000012, false, 0, false);
+	shooter->setVisible(true);
+	civilian->setVisible(false);
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("b4-hidden-neutral-victim");
+	perception.tryRecordCombatCasualtyAttributed(
+		fixture.battle, civilian, shooter, false, false, false, false);
+	const YAML::Node root = buildParsedSnapshot(fixture);
+	expect(!root["perceptionLog"]["events"].IsDefined() || root["perceptionLog"]["events"].size() == 0,
+		"hidden neutral civilian omits attribution");
+}
+
 static void testCombatCasualtyAttributionSequencedBeforeSoldierDown()
 {
 	TacticalFixture fixture;
@@ -1941,6 +2011,8 @@ int main()
 	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionSerializedVisibleFatalKill);
 	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionOmitsHiddenActor);
 	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionOmitsHiddenHostileVictim);
+	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionBerserkRosterKillsVisibleNeutral);
+	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionOmitsHiddenNeutralCivilian);
 	SNAPSHOT_TEST_STEP(testCombatCasualtyAttributionSequencedBeforeSoldierDown);
 	SNAPSHOT_TEST_STEP(testUnconsciousSoldierDownWithoutCombatAttribution);
 	SNAPSHOT_TEST_STEP(testReactionAttackExecutedSerializationVisibleHostile);
