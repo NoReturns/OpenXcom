@@ -24,7 +24,10 @@
 #include <yaml-cpp/yaml.h>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <exception>
 #include <iostream>
+#include <typeinfo>
 #include <string>
 #include <vector>
 
@@ -1979,6 +1982,214 @@ static void testGroundItemsUnresearchedExportsResearchUsableFalseWithoutItemType
 	adoptGroundItemForBattleCleanup(fixture.battle, tile, weapon);
 }
 
+static RuleItem &prefireTwoHandedFirearmRules()
+{
+	static RuleItem rules("STR_PREFIRE_TF_RIFLE");
+	static bool loaded = false;
+	if (!loaded)
+	{
+		YAML::Node n;
+		n["battleType"] = static_cast<int>(BT_FIREARM);
+		n["twoHanded"] = true;
+		n["clipSize"] = -1;
+		n["accuracySnap"] = 50;
+		n["accuracyAuto"] = 40;
+		n["accuracyAimed"] = 80;
+		n["tuSnap"] = 14;
+		n["tuAuto"] = 20;
+		n["tuAimed"] = 29;
+		rules.load(n, &fixtureMod(), 0);
+		loaded = true;
+	}
+	return rules;
+}
+
+static YAML::Node findHandAction(const YAML::Node &hand, const std::string &id)
+{
+	if (!hand.IsDefined() || !hand["actions"].IsDefined())
+	{
+		return YAML::Node();
+	}
+	for (std::size_t i = 0; i < hand["actions"].size(); ++i)
+	{
+		const YAML::Node action = hand["actions"][i];
+		if (action["id"].as<std::string>() == id)
+		{
+			return action;
+		}
+	}
+	return YAML::Node();
+}
+
+static void equipWeaponInRightHand(TacticalFixture &fixture, BattleUnit *unit, RuleItem *rules, RuleInventory &handSlot)
+{
+	BattleItem *weapon = new BattleItem(rules, fixture.battle->getCurrentItemId());
+	weapon->setSlot(&handSlot);
+	weapon->setSlotX(0);
+	weapon->setSlotY(0);
+	unit->getInventory()->push_back(weapon);
+	registerBattleItem(fixture.battle, weapon);
+}
+
+static void equipItemInLeftHand(TacticalFixture &fixture, BattleUnit *unit, RuleItem *rules, RuleInventory &handSlot)
+{
+	BattleItem *item = new BattleItem(rules, fixture.battle->getCurrentItemId());
+	item->setSlot(&handSlot);
+	item->setSlotX(0);
+	item->setSlotY(0);
+	unit->getInventory()->push_back(item);
+	registerBattleItem(fixture.battle, item);
+}
+
+static void seedSoldierFiringStats(Soldier *soldier, int firing, int maxHealth = 50)
+{
+	UnitStats *stats = soldier->getCurrentStats();
+	stats->firing = firing;
+	stats->health = maxHealth;
+	stats->tu = 80;
+	stats->stamina = 80;
+}
+
+/// BattleUnit::load always indexes armor[] / fatalWounds[]; health-only YAML throws YAML::InvalidNode.
+static void setBattleUnitCurrentHealthForTest(BattleUnit *unit, int currentHealth)
+{
+	YAML::Node n;
+	n["health"] = currentHealth;
+	n["armor"] = YAML::Load("[0,0,0,0,0]");
+	n["fatalWounds"] = YAML::Load("[0,0,0,0,0,0]");
+	unit->load(n);
+}
+
+/// BattleUnit copies soldier stats at construction; keep base/current health in sync for accuracy math.
+static void ensurePrefireBattleUnitStats(BattleUnit *unit, int firing, int maxHealth, int currentHealth = -1)
+{
+	if (currentHealth < 0)
+	{
+		currentHealth = maxHealth;
+	}
+	UnitStats *base = unit->getBaseStats();
+	base->firing = firing;
+	base->health = maxHealth;
+	base->tu = 80;
+	base->stamina = 80;
+	unit->setTimeUnits(80);
+	if (unit->getHealth() != currentHealth)
+	{
+		setBattleUnitCurrentHealthForTest(unit, currentHealth);
+	}
+	expect(base != 0 && base->health > 0, "prefire fixture baseStats health positive");
+	expect(unit->getHealth() > 0, "prefire fixture current health positive");
+}
+
+static void testPrefireDisplayedFiringAccuracyOnFirearmActions()
+{
+	RuleItem &rifleRules = prefireTwoHandedFirearmRules();
+	Wp8TestRules &R = wp8Rules();
+
+	// Standing, two-handed rifle, empty off-hand.
+	{
+		TacticalFixture fixture;
+		Soldier *soldier = fixture.addRosterSoldier(81);
+		seedSoldierFiringStats(soldier, 60);
+		BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 1, 0), 0);
+		ensurePrefireBattleUnitStats(unit, 60, 50);
+		placeUnitOnDiscoveredTile(fixture, unit, Position(1, 1, 0));
+		fixture.battle->setSelectedUnit(unit);
+		equipWeaponInRightHand(fixture, unit, &rifleRules, R.rightHand);
+		const YAML::Node entry = findUnitByIdDirect(fixture, 81, 4);
+		expect(entry.IsDefined() && entry["actionCosts"].IsDefined(), "unit actionCosts exported");
+		const YAML::Node snap = findHandAction(entry["actionCosts"]["hands"]["right"], "snap");
+		expect(snap.IsDefined() && snap["displayedFiringAccuracy"].IsDefined(), "snap displayedFiringAccuracy exported");
+		if (snap.IsDefined() && snap["displayedFiringAccuracy"].IsDefined())
+		{
+			expect(snap["displayedFiringAccuracy"].as<int>()
+					== unit->getFiringAccuracy(BA_SNAPSHOT, unit->getItem("STR_RIGHT_HAND")),
+				"snap displayedFiringAccuracy matches getFiringAccuracy");
+			expect(snap["twoHandedPenaltyActive"].as<bool>() == false, "no two-hand penalty when off-hand empty");
+			expect(snap["displayedFiringAccuracy"].as<int>() == 30,
+				"snap accuracy 60*50/100 standing");
+		}
+	}
+
+	// Same rifle with grenade occupying off-hand (B8-style penalty).
+	{
+		TacticalFixture fixture;
+		Soldier *soldier = fixture.addRosterSoldier(82);
+		seedSoldierFiringStats(soldier, 60);
+		BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(1, 2, 0), 0);
+		ensurePrefireBattleUnitStats(unit, 60, 50);
+		placeUnitOnDiscoveredTile(fixture, unit, Position(1, 2, 0));
+		fixture.battle->setSelectedUnit(unit);
+		equipWeaponInRightHand(fixture, unit, &rifleRules, R.rightHand);
+		equipItemInLeftHand(fixture, unit, &R.grenade, R.leftHand);
+		const YAML::Node entry = findUnitByIdDirect(fixture, 82, 4);
+		const YAML::Node snap = findHandAction(entry["actionCosts"]["hands"]["right"], "snap");
+		expect(snap.IsDefined() && snap["displayedFiringAccuracy"].IsDefined(), "penalty snap exported");
+		if (snap.IsDefined() && snap["displayedFiringAccuracy"].IsDefined())
+		{
+			expect(snap["twoHandedPenaltyActive"].as<bool>(), "two-hand penalty with grenade off-hand");
+			expect(snap["displayedFiringAccuracy"].as<int>()
+					== unit->getFiringAccuracy(BA_SNAPSHOT, unit->getItem("STR_RIGHT_HAND")),
+				"penalty snap matches engine");
+			expect(snap["displayedFiringAccuracy"].as<int>() == 24,
+				"snap 30 * 80% two-hand penalty");
+		}
+	}
+
+	// Kneeling posture bonus.
+	{
+		TacticalFixture fixture;
+		Soldier *soldier = fixture.addRosterSoldier(83);
+		seedSoldierFiringStats(soldier, 60);
+		BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(2, 1, 0), 0);
+		ensurePrefireBattleUnitStats(unit, 60, 50);
+		placeUnitOnDiscoveredTile(fixture, unit, Position(2, 1, 0));
+		unit->kneel(true);
+		fixture.battle->setSelectedUnit(unit);
+		equipWeaponInRightHand(fixture, unit, &rifleRules, R.rightHand);
+		const YAML::Node entry = findUnitByIdDirect(fixture, 83, 4);
+		const YAML::Node snap = findHandAction(entry["actionCosts"]["hands"]["right"], "snap");
+		expect(snap.IsDefined(), "kneel snap action exported");
+		if (snap.IsDefined() && snap["displayedFiringAccuracy"].IsDefined())
+		{
+			expect(snap["displayedFiringAccuracy"].as<int>() == 34,
+				"kneel snap 30*115/100");
+			expect(snap["displayedFiringAccuracy"].as<int>()
+					== unit->getFiringAccuracy(BA_SNAPSHOT, unit->getItem("STR_RIGHT_HAND")),
+				"kneel snap matches engine");
+		}
+	}
+
+	// Health-based accuracy modifier.
+	{
+		TacticalFixture fixture;
+		Soldier *soldier = fixture.addRosterSoldier(84);
+		seedSoldierFiringStats(soldier, 60, 50);
+		BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(2, 2, 0), 0);
+		ensurePrefireBattleUnitStats(unit, 60, 50);
+		placeUnitOnDiscoveredTile(fixture, unit, Position(2, 2, 0));
+		setBattleUnitCurrentHealthForTest(unit, 25);
+		expect(unit->getBaseStats()->health == 50, "wounded fixture retains positive base health");
+		fixture.battle->setSelectedUnit(unit);
+		equipWeaponInRightHand(fixture, unit, &rifleRules, R.rightHand);
+		const YAML::Node entry = findUnitByIdDirect(fixture, 84, 4);
+		const YAML::Node snap = findHandAction(entry["actionCosts"]["hands"]["right"], "snap");
+		const int mod = unit->getAccuracyModifier(unit->getItem("STR_RIGHT_HAND"));
+		const int expected = 60 * 50 / 100 * mod / 100;
+		expect(snap.IsDefined(), "wounded snap action exported");
+		if (snap.IsDefined() && snap["displayedFiringAccuracy"].IsDefined())
+		{
+			expect(snap["displayedFiringAccuracy"].as<int>() == expected,
+				"health modifier reflected in displayed accuracy");
+			expect(snap["displayedFiringAccuracy"].as<int>()
+					== unit->getFiringAccuracy(BA_SNAPSHOT, unit->getItem("STR_RIGHT_HAND")),
+				"wounded snap matches engine");
+			expect(snap["displayedFiringAccuracy"].as<int>() == 26,
+				"wounded snap 25/50 health at snap 50%");
+		}
+	}
+}
+
 static void testKneeledMovementTuAdvisory()
 {
 	TacticalFixture fixture;
@@ -2052,8 +2263,53 @@ static void testWp8VanillaRifleMagazineEligibilityRegression()
 		name(); \
 	} while (0)
 
-int main()
+static bool snapshotTestPrefireOnlyRequested(int argc, char **argv)
 {
+	for (int i = 1; i < argc; ++i)
+	{
+		if (argv[i] != 0 && std::strcmp(argv[i], "--prefire-only") == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+static int snapshotTestFinish()
+{
+	if (g_failures != 0)
+	{
+		std::cerr << g_failures << " test(s) failed." << std::endl;
+		return EXIT_FAILURE;
+	}
+	std::cout << "companion_snapshot_serialization_test: all tests passed." << std::endl;
+	return EXIT_SUCCESS;
+}
+
+int main(int argc, char **argv)
+{
+	if (snapshotTestPrefireOnlyRequested(argc, argv))
+	{
+		std::cerr << "companion_snapshot_serialization_test: testPrefireDisplayedFiringAccuracyOnFirearmActions"
+		          << std::endl;
+		try
+		{
+			testPrefireDisplayedFiringAccuracyOnFirearmActions();
+		}
+		catch (const std::exception &ex)
+		{
+			std::cerr << "prefire-only: UNCAUGHT std::exception type=" << typeid(ex).name() << " what=" << ex.what()
+			          << std::endl;
+			++g_failures;
+		}
+		catch (...)
+		{
+			std::cerr << "prefire-only: UNCAUGHT non-std exception" << std::endl;
+			++g_failures;
+		}
+		return snapshotTestFinish();
+	}
+
 	SNAPSHOT_TEST_STEP(testHealthySoldierWp2Fields);
 	SNAPSHOT_TEST_STEP(testCarriedUnconsciousExportsOffMapPlacement);
 	SNAPSHOT_TEST_STEP(testUnconsciousOmitsActionCosts);
@@ -2114,14 +2370,9 @@ int main()
 	SNAPSHOT_TEST_STEP(testCarriedEquipmentResearchUsableSplitWeaponAmmoGates);
 	SNAPSHOT_TEST_STEP(testCarriedEquipmentResearchUsableNullCampaignFailClosed);
 	SNAPSHOT_TEST_STEP(testGroundInventoryNestedMagazineResearchUsable);
+	SNAPSHOT_TEST_STEP(testPrefireDisplayedFiringAccuracyOnFirearmActions);
 	SNAPSHOT_TEST_STEP(testKneeledMovementTuAdvisory);
 	SNAPSHOT_TEST_STEP(testTuReservationSnapshotFields);
 
-	if (g_failures != 0)
-	{
-		std::cerr << g_failures << " test(s) failed." << std::endl;
-		return EXIT_FAILURE;
-	}
-	std::cout << "companion_snapshot_serialization_test: all tests passed." << std::endl;
-	return EXIT_SUCCESS;
+	return snapshotTestFinish();
 }

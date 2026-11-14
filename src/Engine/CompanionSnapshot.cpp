@@ -686,6 +686,20 @@ bool companionFirearmHasAmmo(BattleItem *weapon)
 	return ammo != 0 && ammo->getAmmoQuantity() > 0;
 }
 
+static bool companionFirearmDisplayedAccuracyAction(BattleActionType type)
+{
+	return type == BA_AUTOSHOT || type == BA_SNAPSHOT || type == BA_AIMEDSHOT || type == BA_LAUNCH;
+}
+
+static bool companionTwoHandedPenaltyActive(BattleUnit *unit, BattleItem *weapon)
+{
+	if (unit == 0 || weapon == 0 || !weapon->getRules()->isTwoHanded())
+	{
+		return false;
+	}
+	return unit->getItem("STR_RIGHT_HAND") != 0 && unit->getItem("STR_LEFT_HAND") != 0;
+}
+
 void appendActionEntry(YAML::Node &actions, SavedBattleGame *battle, BattleUnit *unit, BattleItem *weapon, BattleActionType type, const char *id, bool usable)
 {
 	const int tu = unit->getActionTUs(type, weapon);
@@ -696,6 +710,15 @@ void appendActionEntry(YAML::Node &actions, SavedBattleGame *battle, BattleUnit 
 	const bool legacyAfford = tu <= unit->getTimeUnits();
 	entry["canAffordTu"] = legacyAfford;
 	entry["usable"] = usable;
+	if (weapon != 0 && weapon->getRules()->getBattleType() == BT_FIREARM && companionFirearmDisplayedAccuracyAction(type))
+	{
+		const UnitStats *baseStats = unit->getBaseStats();
+		if (baseStats != 0 && baseStats->health > 0)
+		{
+			entry["displayedFiringAccuracy"] = unit->getFiringAccuracy(type, weapon);
+			entry["twoHandedPenaltyActive"] = companionTwoHandedPenaltyActive(unit, weapon);
+		}
+	}
 	CompanionTuVisibilityCore::appendActionTuReservationAdvisory(entry, battle, unit, tu, legacyAfford);
 	CompanionTuVisibilityCore::appendDirectedFireFacingAdvisory(entry, type);
 	actions.push_back(entry);
