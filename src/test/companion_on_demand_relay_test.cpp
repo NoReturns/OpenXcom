@@ -464,6 +464,17 @@ static void testRelayStatusLabels()
 		"\"last_command_status\":\"REJECTED\"}") == "Order rejected",
 		"completed retrieve with rejected command");
 	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"completed\",\"terminal\":true,"
+		"\"last_command_status\":\"REJECTED\",\"last_command_reject_code\":\"INVALID_ACTIVE_HAND\"}")
+	    == "Invalid active hand",
+		"rejected command with whitelisted reject code");
+	expect(labelFromStatusJson(
+		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
+		"\"error_code\":\"RETRIEVE_INCOMPLETE\",\"last_command_status\":\"REJECTED\","
+		"\"last_command_reject_code\":\"INVALID_ACTIVE_HAND\"}")
+	    == "Invalid active hand; relay incomplete",
+		"rejected command incomplete relay with whitelisted reject code");
+	expect(labelFromStatusJson(
 		"{\"action\":\"retrieve\",\"phase\":\"failed\",\"terminal\":true,"
 		"\"last_command_status\":\"INTERRUPTED\"}") == "Order interrupted",
 		"failed retrieve phase still shows interrupted command label");

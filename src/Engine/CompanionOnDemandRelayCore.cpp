@@ -416,6 +416,7 @@ bool parseRelayStatusJson(const std::string &statusJson, RelayStatusView *out)
 	CompanionJsonLite::extractJsonStringField(statusJson, "error_code", &out->error_code);
 	CompanionJsonLite::extractJsonStringField(statusJson, "last_command_id", &out->last_command_id);
 	CompanionJsonLite::extractJsonStringField(statusJson, "last_command_status", &out->last_command_status);
+	CompanionJsonLite::extractJsonStringField(statusJson, "last_command_reject_code", &out->last_command_reject_code);
 	CompanionJsonLite::extractJsonStringField(statusJson, "retrieve_outcome", &out->retrieve_outcome);
 	CompanionJsonLite::extractJsonStringField(statusJson, "last_retrieve_request_id", &out->last_retrieve_request_id);
 	CompanionJsonLite::extractJsonStringField(statusJson, "last_retrieve_phase", &out->last_retrieve_phase);
@@ -950,7 +951,23 @@ bool isAuthErrorCode(const std::string &code)
 	return code == "AUTH_FAILED" || code == "AUTH" || code == "gh_not_authenticated";
 }
 
-bool tryFormatTerminalCommandOrderLabel(const std::string &lastCommandStatus, std::string *out)
+bool hudLabelForCommandRejectCode(const std::string &rejectCode, std::string *out)
+{
+	if (out == 0 || rejectCode.empty())
+	{
+		return false;
+	}
+	if (rejectCode == "INVALID_ACTIVE_HAND")
+	{
+		*out = "Invalid active hand";
+		return true;
+	}
+	return false;
+}
+
+bool tryFormatTerminalCommandOrderLabel(const std::string &lastCommandStatus,
+	const std::string &lastCommandRejectCode,
+	std::string *out)
 {
 	if (out == 0 || lastCommandStatus.empty())
 	{
@@ -973,13 +990,19 @@ bool tryFormatTerminalCommandOrderLabel(const std::string &lastCommandStatus, st
 	}
 	if (lastCommandStatus == "REJECTED")
 	{
+		if (hudLabelForCommandRejectCode(lastCommandRejectCode, out))
+		{
+			return true;
+		}
 		*out = "Order rejected";
 		return true;
 	}
 	return false;
 }
 
-bool tryFormatRetrieveIncompleteCommandLabel(const std::string &lastCommandStatus, std::string *out)
+bool tryFormatRetrieveIncompleteCommandLabel(const std::string &lastCommandStatus,
+	const std::string &lastCommandRejectCode,
+	std::string *out)
 {
 	if (out == 0 || lastCommandStatus.empty())
 	{
@@ -1002,6 +1025,12 @@ bool tryFormatRetrieveIncompleteCommandLabel(const std::string &lastCommandStatu
 	}
 	if (lastCommandStatus == "REJECTED")
 	{
+		std::string specific;
+		if (hudLabelForCommandRejectCode(lastCommandRejectCode, &specific))
+		{
+			*out = specific + "; relay incomplete";
+			return true;
+		}
 		*out = "Rejected; relay incomplete";
 		return true;
 	}
@@ -1116,7 +1145,8 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 	{
 		if (effective.action == "retrieve")
 		{
-			if (tryFormatTerminalCommandOrderLabel(effective.last_command_status, out))
+			if (tryFormatTerminalCommandOrderLabel(
+			    effective.last_command_status, effective.last_command_reject_code, out))
 			{
 				return;
 			}
@@ -1142,7 +1172,8 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 			}
 			if (effective.error_code == "RETRIEVE_INCOMPLETE")
 			{
-				if (tryFormatRetrieveIncompleteCommandLabel(effective.last_command_status, out))
+				if (tryFormatRetrieveIncompleteCommandLabel(
+				    effective.last_command_status, effective.last_command_reject_code, out))
 				{
 					return;
 				}
@@ -1154,7 +1185,8 @@ void formatRelayStatusLabel(const RelayStatusView &status, std::string *out)
 				*out = "Order done; relay incomplete";
 				return;
 			}
-			if (tryFormatTerminalCommandOrderLabel(effective.last_command_status, out))
+			if (tryFormatTerminalCommandOrderLabel(
+			    effective.last_command_status, effective.last_command_reject_code, out))
 			{
 				return;
 			}

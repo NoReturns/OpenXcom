@@ -54,6 +54,7 @@ struct RelayStatusView
 	std::string error_code;
 	std::string last_command_id;
 	std::string last_command_status;
+	std::string last_command_reject_code;
 	std::string retrieve_outcome;
 	std::string last_retrieve_request_id;
 	std::string last_retrieve_phase;
