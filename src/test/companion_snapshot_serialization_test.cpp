@@ -1537,6 +1537,48 @@ static void testHostileCasualtyTileObservedSemanticsUnchanged()
 	expect(!ev["attributedActorUnitId"].IsDefined(), "no attribution on tile cue");
 }
 
+static void testGrenadeThrowObservedSerializationVisibleAndHiddenHostile()
+{
+	TacticalFixture fixture;
+	Wp8TestRules &R = wp8Rules();
+	BattleItem *grenadeItem = new BattleItem(&R.grenade, fixture.battle->getCurrentItemId());
+	registerBattleItem(fixture.battle, grenadeItem);
+
+	BattleUnit *visibleThrower = fixture.addAlienUnit(1000020, true, 4, false);
+	const Position visibleOrigin(1, 1, 0);
+	placeUnitOnDiscoveredTile(fixture, visibleThrower, visibleOrigin);
+	visibleThrower->setVisible(true);
+	Tile *visibleTile = fixture.battle->getTile(visibleOrigin);
+	expect(visibleTile != 0, "visible throw tile");
+	visibleTile->setVisible(+1);
+
+	CompanionPerceptionLog &perception = fixture.battle->getCompanionPerceptionLog();
+	perception.beginSession("p1d-grenade-throw-snap");
+	perception.tryRecordThrowOrLaunchObserved(
+		fixture.battle, visibleThrower, visibleOrigin, false, grenadeItem, true);
+
+	BattleUnit *hiddenThrower = fixture.addAlienUnit(1000021, false, 4, false);
+	const Position hiddenOrigin(2, 1, 0);
+	placeUnitOnDiscoveredTile(fixture, hiddenThrower, hiddenOrigin);
+	hiddenThrower->setVisible(false);
+	Tile *hiddenOriginTile = fixture.battle->getTile(hiddenOrigin);
+	expect(hiddenOriginTile != 0, "hidden thrower origin tile");
+	hiddenOriginTile->setVisible(+1);
+
+	perception.tryRecordThrowOrLaunchObserved(
+		fixture.battle, hiddenThrower, hiddenOrigin, false, grenadeItem, true);
+
+	const YAML::Node events = buildParsedSnapshot(fixture)["perceptionLog"]["events"];
+	expect(events.size() == 2, "visible throw then hidden throw");
+	expect(events[0]["type"].as<std::string>() == "grenade_throw_observed", "visible hostile grenade type");
+	expect(events[0]["confidence"].as<std::string>() == "source_visible", "visible throw confidence");
+	expect(events[0]["positionKnown"].as<bool>(), "visible throw positionKnown");
+	expect(events[0]["subjectUnitId"].as<int>() == 1000020, "visible hostile thrower id");
+	expect(events[1]["type"].as<std::string>() == "throw_observed", "hidden thrower must not claim grenade class");
+	expect(!events[1]["subjectUnitId"].IsDefined(), "hidden thrower must not export subjectUnitId");
+	expect(events[1]["confidence"].as<std::string>() == "source_visible", "origin tile visible without thrower identity");
+}
+
 static void testExplosionOriginClassSerializedWhenDeathDetonationGatesPass()
 {
 	TacticalFixture fixture;
@@ -2057,6 +2099,7 @@ int main()
 	SNAPSHOT_TEST_STEP(testReactionAttackExecutedHiddenInaudibleSilent);
 	SNAPSHOT_TEST_STEP(testReactionAttackExecutedSequencedPerAction);
 	SNAPSHOT_TEST_STEP(testHostileCasualtyTileObservedSemanticsUnchanged);
+	SNAPSHOT_TEST_STEP(testGrenadeThrowObservedSerializationVisibleAndHiddenHostile);
 	SNAPSHOT_TEST_STEP(testExplosionOriginClassSerializedWhenDeathDetonationGatesPass);
 	SNAPSHOT_TEST_STEP(testExplosionGenericNoOriginClassWithoutEngineContext);
 	SNAPSHOT_TEST_STEP(testExplosionAudioOnlyOmitsOriginClassDespiteEngineContext);
