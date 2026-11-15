@@ -90,19 +90,79 @@ static RuleInventory *wp10RegisterGroundInventory(Mod &mod)
 	return ground;
 }
 
-static void wp10WireUnitTile(SavedBattleGame *battle, BattleUnit *unit, const Position &pos)
+static void wp10DetachUnitFromTiles(SavedBattleGame *battle, BattleUnit *unit)
 {
-	Tile *tile = battle->getTile(pos);
-	if (tile == 0)
+	if (battle == 0 || unit == 0 || unit->isOut())
 	{
 		return;
 	}
+	const int size = unit->getArmor()->getSize() - 1;
+	if (unit->getTile() != 0 && unit->getTile()->getUnit() == unit)
+	{
+		const Position base = unit->getTile()->getPosition();
+		for (int x = size; x >= 0; --x)
+		{
+			for (int y = size; y >= 0; --y)
+			{
+				Tile *occupied = battle->getTile(base + Position(x, y, 0));
+				if (occupied != 0)
+				{
+					occupied->setUnit(0);
+				}
+			}
+		}
+	}
+	else
+	{
+		const Position pos = unit->getPosition();
+		for (int x = size; x >= 0; --x)
+		{
+			for (int y = size; y >= 0; --y)
+			{
+				Tile *occupied = battle->getTile(pos + Position(x, y, 0));
+				if (occupied != 0 && occupied->getUnit() == unit)
+				{
+					occupied->setUnit(0);
+				}
+			}
+		}
+	}
+	unit->setTile(0);
+}
+
+static bool wp10WireUnitTile(SavedBattleGame *battle, BattleUnit *unit, const Position &pos)
+{
+	Tile *tile = battle->getTile(pos);
+	if (tile == 0 || unit == 0)
+	{
+		return false;
+	}
 	tile->setDiscovered(true, 2);
 	tile->setMapData(wp10FloorMapData(wp10HarnessFloorMapDataSet()), 1, 0, O_FLOOR);
-	unit->setPosition(pos);
-	battle->setUnitPosition(unit, pos);
+	if (!battle->setUnitPosition(unit, pos))
+	{
+		return false;
+	}
 	Tile *below = battle->getTile(Position(pos.x, pos.y, pos.z - 1));
 	unit->setTile(tile, below);
+	return tile->getUnit() == unit;
+}
+
+static bool wp10UnitListedOnBattle(SavedBattleGame &battle, BattleUnit *unit)
+{
+	if (battle.getUnits() == 0 || unit == 0)
+	{
+		return false;
+	}
+	for (std::vector<BattleUnit *>::const_iterator i = battle.getUnits()->begin();
+	     i != battle.getUnits()->end(); ++i)
+	{
+		if (*i == unit)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 static BattleUnit *wp10MakeVisibleHostile(
@@ -117,7 +177,7 @@ static BattleUnit *wp10MakeVisibleHostile(
 	hostile->getBaseStats()->psiStrength = psiStrength;
 	hostile->getBaseStats()->psiSkill = 0;
 	battle.getUnits()->push_back(hostile);
-	wireUnitTile(&battle, hostile, pos);
+	expect(wp10WireUnitTile(&battle, hostile, pos), "visible hostile tile wiring");
 	return hostile;
 }
 
@@ -236,22 +296,80 @@ struct Wp10RelayHarness
 		wp10WriteFile(wp10Join(relayDir, "companion-soldier-control.json"), controlJson);
 	}
 
-	void clearBattleUnits()
+	void clearBattleItems()
 	{
-		if (battle.getUnits() == 0)
+		if (battle.getItems() == 0)
 		{
 			return;
 		}
-		for (std::vector<BattleUnit *>::iterator i = battle.getUnits()->begin();
-		     i != battle.getUnits()->end(); ++i)
+		for (std::vector<BattleItem *>::iterator i = battle.getItems()->begin();
+		     i != battle.getItems()->end(); ++i)
 		{
 			delete *i;
 		}
-		battle.getUnits()->clear();
+		battle.getItems()->clear();
+	}
+
+	void clearBattleUnits()
+	{
+		if (battle.getUnits() != 0)
+		{
+			for (std::vector<BattleUnit *>::iterator i = battle.getUnits()->begin();
+			     i != battle.getUnits()->end(); ++i)
+			{
+				wp10DetachUnitFromTiles(&battle, *i);
+				delete *i;
+			}
+			battle.getUnits()->clear();
+		}
+		clearBattleItems();
 		actor = 0;
 		hostile = 0;
 		psiAmp = 0;
 		psiAmpBattleItemId = 0;
+	}
+
+	void assertScenarioTileOccupancy()
+	{
+		const Position actorPos(1, 1, 0);
+		const Position hostilePos(3, 1, 0);
+		expect(actor != 0, "tile occupancy actor present");
+		expect(hostile != 0, "tile occupancy hostile present");
+		if (actor != 0)
+		{
+			Tile *actorTile = battle.getTile(actorPos);
+			expect(actor->getPosition() == actorPos, "actor position on scenario grid");
+			expect(actorTile != 0 && actorTile->getUnit() == actor, "actor occupies expected tile");
+		}
+		if (hostile != 0)
+		{
+			Tile *hostileTile = battle.getTile(hostilePos);
+			expect(hostile->getPosition() == hostilePos, "hostile position on scenario grid");
+			expect(hostileTile != 0 && hostileTile->getUnit() == hostile, "hostile occupies expected tile");
+		}
+		assertNoStaleTileUnitReferences();
+	}
+
+	void assertNoStaleTileUnitReferences()
+	{
+		for (int y = 0; y < 6; ++y)
+		{
+			for (int x = 0; x < 6; ++x)
+			{
+				Tile *tile = battle.getTile(Position(x, y, 0));
+				if (tile == 0)
+				{
+					continue;
+				}
+				BattleUnit *occupant = tile->getUnit();
+				if (occupant == 0)
+				{
+					continue;
+				}
+				expect(wp10UnitListedOnBattle(battle, occupant),
+					"map tile occupant listed in battle unit roster");
+			}
+		}
 	}
 
 	Soldier *addRosterSoldier(int soldierId)
@@ -273,7 +391,7 @@ struct Wp10RelayHarness
 		{
 			unit->getBaseStats()->psiStrength = 90;
 		}
-		wireUnitTile(&battle, unit, pos);
+		expect(wp10WireUnitTile(&battle, unit, pos), "actor tile wiring on add");
 		return unit;
 	}
 
@@ -344,11 +462,12 @@ struct Wp10RelayHarness
 		const Position hostilePos(3, 1, 0);
 		actor = addActor(1, actorPos, actorTu, actorPsiSkill);
 		hostile = wp10MakeVisibleHostile(battle, 100042, hostilePos, hostileBravery, hostilePsiStr);
-		wireUnitTile(&battle, actor, actorPos);
-		wireUnitTile(&battle, hostile, hostilePos);
+		expect(wp10WireUnitTile(&battle, actor, actorPos), "actor tile wiring succeeded");
+		expect(wp10WireUnitTile(&battle, hostile, hostilePos), "hostile tile wiring succeeded");
 		battle.setSelectedUnit(actor);
 		psiAmp = equipPsiAmp(battle, mod, actor, "STR_LEFT_HAND");
 		psiAmpBattleItemId = psiAmp->getId();
+		assertScenarioTileOccupancy();
 	}
 
 	std::string psiPanicCommandJson(
@@ -435,11 +554,11 @@ struct Wp10RelayHarness
 	{
 		if (actor != 0)
 		{
-			wireUnitTile(&battle, actor, actor->getPosition());
+			wp10WireUnitTile(&battle, actor, actor->getPosition());
 		}
 		if (hostile != 0)
 		{
-			wireUnitTile(&battle, hostile, hostile->getPosition());
+			wp10WireUnitTile(&battle, hostile, hostile->getPosition());
 		}
 	}
 
@@ -654,6 +773,18 @@ static void runPsiRelayHiddenHostileRejected()
 
 } // namespace
 
+static void runPsiRelayFixtureTileOccupancyRegression()
+{
+	Wp10RelayHarness &h = wp10RelayHarness();
+	h.resetScenario();
+	h.setupPanicScenario(80, 90, 10, 5);
+	h.resetScenario();
+	h.setupPanicScenario(80, 50, 100, 100);
+	h.actor->getBaseStats()->psiStrength = 1;
+	h.actor->getBaseStats()->psiSkill = 1;
+	h.assertScenarioTileOccupancy();
+}
+
 static void runPsiRelayDuplicateIdempotent()
 {
 	Wp10RelayHarness &h = wp10RelayHarness();
@@ -677,6 +808,7 @@ static void runPsiRelayDuplicateIdempotent()
 
 static void runPsiPanicRelayE2eSuite()
 {
+	runPsiRelayFixtureTileOccupancyRegression();
 	runPsiRelayCompletedSuccess();
 	runPsiRelayCompletedFailedRoll();
 	runPsiRelayInsufficientTuRejected();
@@ -932,6 +1064,7 @@ static void runMcRelayDuplicateIdempotent()
 
 static void runPsiMindControlRelayE2eSuite()
 {
+	runPsiRelayFixtureTileOccupancyRegression();
 	runMcRelayCompletedSuccess();
 	runMcRelayCompletedFailedRoll();
 	runMcRelayInsufficientTuRejected();
