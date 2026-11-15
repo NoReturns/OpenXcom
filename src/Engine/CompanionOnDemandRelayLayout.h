@@ -60,6 +60,8 @@ bool computeBaseViewportBarLayout(int viewportX, int viewportY, int viewportWidt
 bool computeBattlescapeTopBarLayout(int screenWidth, int screenHeight, CompactBarLayout *out);
 bool compactBarFitsBaseViewport(int viewportWidth);
 bool compactBarFitsBattlescapeTop(int screenWidth, int topReservedRightPx);
+/// Geoscape hides SEND/RETRIEVE/status chrome; relay reconciliation still runs via overlay tick.
+bool suppressRelayChromeForInterface(const char *interfaceId);
 
 } // namespace CompanionOnDemandRelayLayout
 

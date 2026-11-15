@@ -28,6 +28,7 @@ struct Ui
 	TextButton *btnAutoIntervalLess;
 	TextButton *btnAutoIntervalMore;
 	Text *txtAutoInterval;
+	bool suppressRelayChrome;
 };
 
 void createUi(State *parent, Ui *out, const char *interfaceId);

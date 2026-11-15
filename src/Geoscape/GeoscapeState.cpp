@@ -35,8 +35,6 @@
 #include "../Interface/TextButton.h"
 #include "../Engine/Timer.h"
 #include "../Savegame/GameTime.h"
-#include "../Engine/CompanionGithubQuotaHudOverlay.h"
-#include "../Engine/CompanionGithubQuotaHudCore.h"
 #include "../Engine/CompanionRulesReferenceExport.h"
 #include "../Engine/CompanionBaseIntelligenceExport.h"
 #include "../Engine/CompanionOnDemandRelayOverlay.h"
@@ -178,8 +176,6 @@ GeoscapeState::GeoscapeState() : _pause(false), _zoomInEffectDone(false), _zoomO
 	_dogfightTimer = new Timer(Options::dogfightSpeed);
 
 	_txtDebug = new Text(200, 32, 0, 0);
-	_txtGithubQuota = CompanionGithubQuotaHudOverlay::createHudText(
-		CompanionGithubQuotaHudCore::computeHudAnchorY(screenHeight, 4));
 
 	// Set palette
 	setInterface("geoscape");
@@ -227,7 +223,6 @@ GeoscapeState::GeoscapeState() : _pause(false), _zoomInEffectDone(false), _zoomO
 	add(_txtYear, "text", "geoscape");
 
 	add(_txtDebug, "text", "geoscape");
-	add(_txtGithubQuota, "text", "geoscape");
 
 	// Set up objects
 	Surface *geobord = _game->getMod()->getSurface("GEOBORD.SCR");
@@ -529,7 +524,6 @@ void GeoscapeState::init()
 		_globe->getX(),
 		_globe->getY(),
 		_globe->getWidth());
-	CompanionGithubQuotaHudOverlay::layoutHudText(_txtGithubQuota, Options::baseYGeoscape, 4);
 	timeDisplay();
 
 	_globe->onMouseClick((ActionHandler)&GeoscapeState::globeClick);
@@ -582,7 +576,6 @@ void GeoscapeState::think()
 {
 	State::think();
 
-	CompanionGithubQuotaHudOverlay::tick(_txtGithubQuota);
 	CompanionOnDemandRelayOverlay::tick(&_companionRelayUi);
 
 	_zoomInEffectTimer->think(this, 0);

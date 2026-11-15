@@ -685,6 +685,14 @@ static void testCompactBarLayoutDimensions()
 		"battlescape manual notice below status");
 }
 
+static void testGeoscapeRelayChromeSuppressed()
+{
+	expect(suppressRelayChromeForInterface("geoscape"), "geoscape suppresses relay HUD chrome");
+	expect(!suppressRelayChromeForInterface("basescape"), "basescape keeps relay HUD chrome");
+	expect(!suppressRelayChromeForInterface("battlescape"), "battlescape keeps relay HUD chrome");
+	expect(!suppressRelayChromeForInterface(0), "null interface id does not suppress");
+}
+
 static void testReconcileSupersededBriefing(const std::string &root)
 {
 	const std::string snapshotPath = root + "/tactical-live.yaml";
@@ -1459,6 +1467,7 @@ int main()
 	testLegacyStatusJsonWithoutOptionalFields();
 	testRelayStatusStaleAndPersistence();
 	testCompactBarLayoutDimensions();
+	testGeoscapeRelayChromeSuppressed();
 	testRelayHitTestRequiresVisibleButtons(root);
 	testRelayHitTargetUsesCompactBounds(root);
 	testReconcileSupersededBriefing(root);

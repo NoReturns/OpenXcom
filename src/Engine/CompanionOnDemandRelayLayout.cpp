@@ -5,6 +5,7 @@
 #include "CompanionManualUploadHudCore.h"
 #include "CompanionOnDemandRelayCore.h"
 #include <algorithm>
+#include <string>
 
 namespace OpenXcom
 {
@@ -115,6 +116,11 @@ bool computeBattlescapeTopBarLayout(int screenWidth, int screenHeight, CompactBa
 	out->autoIntervalPlusX = out->autoIntervalTextX + AUTO_RETRIEVE_INTERVAL_TEXT_WIDTH + AUTO_RETRIEVE_ROW_GAP;
 	out->autoRowHeight = COMPACT_BUTTON_HEIGHT;
 	return true;
+}
+
+bool suppressRelayChromeForInterface(const char *interfaceId)
+{
+	return interfaceId != 0 && std::string(interfaceId) == "geoscape";
 }
 
 } // namespace CompanionOnDemandRelayLayout

@@ -363,6 +363,7 @@ void createUi(State *parent, Ui *out, const char *interfaceId)
 	out->btnAutoIntervalLess = 0;
 	out->btnAutoIntervalMore = 0;
 	out->txtAutoInterval = 0;
+	out->suppressRelayChrome = CompanionOnDemandRelayLayout::suppressRelayChromeForInterface(interfaceId);
 	const std::string iface = interfaceId != 0 ? std::string(interfaceId) : std::string();
 	g_hasAutoRetrieveUi = iface == "battlescape";
 	g_hideRetrieveUi = iface == "basescape" || iface == "geoscape";
@@ -438,6 +439,27 @@ void setControlsVisible(Ui *ui, bool visible)
 	{
 		return;
 	}
+	if (ui->suppressRelayChrome)
+	{
+		if (ui->btnSend != 0)
+		{
+			ui->btnSend->setVisible(false);
+		}
+		if (ui->btnRetrieve != 0)
+		{
+			ui->btnRetrieve->setVisible(false);
+		}
+		if (ui->txtStatus != 0)
+		{
+			ui->txtStatus->setVisible(false);
+		}
+		if (ui->txtManualNotice != 0)
+		{
+			ui->txtManualNotice->setVisible(false);
+		}
+		setAutoRetrieveControlsVisible(ui, false);
+		return;
+	}
 	if (ui->btnSend != 0)
 	{
 		ui->btnSend->setVisible(visible);
@@ -492,13 +514,16 @@ void tick(Ui *ui)
 	{
 		ui->txtStatus->setText(label);
 		g_lastStatusLabel = label;
-		if (label.empty())
+		if (!ui->suppressRelayChrome)
 		{
-			ui->txtStatus->setVisible(false);
-		}
-		else
-		{
-			ui->txtStatus->setVisible(true);
+			if (label.empty())
+			{
+				ui->txtStatus->setVisible(false);
+			}
+			else
+			{
+				ui->txtStatus->setVisible(true);
+			}
 		}
 	}
 	if (ui->txtManualNotice != 0)
