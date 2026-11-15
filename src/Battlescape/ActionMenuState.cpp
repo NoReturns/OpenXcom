@@ -28,6 +28,7 @@
 #include "ActionMenuItem.h"
 #include "PrimeGrenadeState.h"
 #include "MedikitState.h"
+#include "../Engine/CompanionMedikitExecutionCore.h"
 #include "ScannerState.h"
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/SavedBattleGame.h"
@@ -263,31 +264,8 @@ void ActionMenuState::btnActionMenuItemClick(Action *action)
 		}
 		else if (_action->type == BA_USE && weapon->getBattleType() == BT_MEDIKIT)
 		{
-			BattleUnit *targetUnit = NULL;
-			std::vector<BattleUnit*> *const units (_game->getSavedGame()->getSavedBattle()->getUnits());
-			for (std::vector<BattleUnit*>::const_iterator i = units->begin(); i != units->end() && !targetUnit; ++i)
-			{
-				// we can heal a unit that is at the same position, unconscious and healable(=woundable)
-				if ((*i)->getPosition() == _action->actor->getPosition() && *i != _action->actor && (*i)->getStatus() == STATUS_UNCONSCIOUS && (*i)->isWoundable())
-				{
-					targetUnit = *i;
-				}
-			}
-			if (!targetUnit)
-			{
-				if (_game->getSavedGame()->getSavedBattle()->getTileEngine()->validMeleeRange(
-					_action->actor->getPosition(),
-					_action->actor->getDirection(),
-					_action->actor,
-					0, &_action->target, false))
-				{
-					Tile * tile (_game->getSavedGame()->getSavedBattle()->getTile(_action->target));
-					if (tile != 0 && tile->getUnit() && tile->getUnit()->isWoundable())
-					{
-						targetUnit = tile->getUnit();
-					}
-				}
-			}
+			SavedBattleGame *battle = _game->getSavedGame()->getSavedBattle();
+			BattleUnit *targetUnit = CompanionMedikitExecutionCore::resolveNativeMedikitTarget(battle, _action->actor);
 			if (targetUnit)
 			{
 				_game->popState();

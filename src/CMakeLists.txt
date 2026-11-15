@@ -159,6 +159,7 @@ set ( engine_src
 	Engine/CompanionSoldierControlPublishCore.cpp
 	Engine/CompanionDropGroundPlacementCore.cpp
 	Engine/CompanionPsiExecutionCore.cpp
+	Engine/CompanionMedikitExecutionCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
 	Engine/CompanionBaseIntelligenceExportCore.cpp

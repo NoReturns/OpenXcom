@@ -606,6 +606,10 @@ bool TileEngine::canTargetUnit(Position *originVoxel, Tile *tile, Position *scan
 			int test = calculateLine(*originVoxel, *scanVoxel, false, &_trajectory, excludeUnit, true, false);
 			if (test == V_UNIT)
 			{
+				if (_trajectory.empty())
+				{
+					continue;
+				}
 				for (int x = 0; x <= targetSize; ++x)
 				{
 					for (int y = 0; y <= targetSize; ++y)
