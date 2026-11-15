@@ -24,6 +24,9 @@ public:
 		bool testFullRevealGeometry = false);
 
 	static std::string serializeSnapshotYaml(const YAML::Node &root);
+
+	/// Tactical logs + roster unit terminal fields for battle AAR phase A (no terrain).
+	static YAML::Node buildAarTacticalTerminal(SavedBattleGame *battle, SavedGame *campaign);
 };
 
 } // namespace OpenXcom

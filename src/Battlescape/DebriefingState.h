@@ -56,8 +56,11 @@ struct RecoveryItem { std::string name; int value; };
  * Debriefing screen shown after a Battlescape
  * mission that displays the results.
  */
+class CompanionBattleAarDebriefAccess;
+
 class DebriefingState : public State
 {
+	friend class CompanionBattleAarDebriefAccess;
 private:
 	typedef std::pair<std::string, UnitStats> SoldierStatsEntry;
 

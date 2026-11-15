@@ -1058,6 +1058,40 @@ void appendPerceptionLog(YAML::Node &root, const CompanionPerceptionLog &log, Sa
 	root["perceptionLog"] = perceptionLog;
 }
 
+void appendTacticalIntelligenceFields(YAML::Node &root, SavedBattleGame *battle, SavedGame *campaign)
+{
+	Mod *mod = modFromBattle(battle);
+	CompanionSnapshotMissionContext::appendMissionContext(root, battle, mod);
+
+	YAML::Node units = YAML::Node(YAML::NodeType::Sequence);
+	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin(); i != battle->getUnits()->end(); ++i)
+	{
+		BattleUnit *unit = *i;
+		if (!CompanionSnapshotUnitState::shouldIncludeUnitInSnapshot(unit, campaign))
+		{
+			continue;
+		}
+		appendUnit(units, battle, campaign, unit);
+	}
+	root["units"] = units;
+	appendEventLog(root, battle->getCompanionEventLog());
+	appendPerceptionLog(root, battle->getCompanionPerceptionLog(), battle, campaign);
+	CompanionSnapshotGroundItems::appendGroundItems(root, battle, campaign);
+}
+
+YAML::Node buildAarTacticalTerminalYaml(SavedBattleGame *battle, SavedGame *campaign)
+{
+	YAML::Node root;
+	if (battle == 0)
+	{
+		return root;
+	}
+	root["turn"] = battle->getTurn();
+	root["side"] = static_cast<int>(battle->getSide());
+	appendTacticalIntelligenceFields(root, battle, campaign);
+	return root;
+}
+
 YAML::Node buildSnapshotImpl(SavedBattleGame *battle, SavedGame *campaign, int schemaVersion, bool includeTerrain,
 	bool testFullRevealGeometry)
 {
@@ -1075,11 +1109,9 @@ YAML::Node buildSnapshotImpl(SavedBattleGame *battle, SavedGame *campaign, int s
 	map["depth"] = battle->getMapSizeZ();
 	root["map"] = map;
 
-	Mod *mod = modFromBattle(battle);
-	CompanionSnapshotMissionContext::appendMissionContext(root, battle, mod);
-
 	if (includeTerrain)
 	{
+		Mod *mod = modFromBattle(battle);
 		const int mapW = battle->getMapSizeX();
 		const int mapH = battle->getMapSizeY();
 		const int mapD = battle->getMapSizeZ();
@@ -1090,20 +1122,7 @@ YAML::Node buildSnapshotImpl(SavedBattleGame *battle, SavedGame *campaign, int s
 			testFullRevealGeometry);
 	}
 
-	YAML::Node units = YAML::Node(YAML::NodeType::Sequence);
-	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin(); i != battle->getUnits()->end(); ++i)
-	{
-		BattleUnit *unit = *i;
-		if (!CompanionSnapshotUnitState::shouldIncludeUnitInSnapshot(unit, campaign))
-		{
-			continue;
-		}
-		appendUnit(units, battle, campaign, unit);
-	}
-	root["units"] = units;
-	appendEventLog(root, battle->getCompanionEventLog());
-	appendPerceptionLog(root, battle->getCompanionPerceptionLog(), battle, campaign);
-	CompanionSnapshotGroundItems::appendGroundItems(root, battle, campaign);
+	appendTacticalIntelligenceFields(root, battle, campaign);
 	return root;
 }
 
@@ -1131,6 +1150,20 @@ YAML::Node CompanionSnapshotBuild::buildSnapshot(
 std::string CompanionSnapshotBuild::serializeSnapshotYaml(const YAML::Node &root)
 {
 	return CompanionSnapshotExportCore::serializeSnapshotYaml(root);
+}
+
+YAML::Node CompanionSnapshotBuild::buildAarTacticalTerminal(SavedBattleGame *battle, SavedGame *campaign)
+{
+	if (battle == 0)
+	{
+		return YAML::Node();
+	}
+	SavedGame *resolvedCampaign = campaign;
+	if (resolvedCampaign == 0)
+	{
+		resolvedCampaign = campaignFromBattle(battle);
+	}
+	return buildAarTacticalTerminalYaml(battle, resolvedCampaign);
 }
 
 bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256)

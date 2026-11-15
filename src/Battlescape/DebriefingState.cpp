@@ -17,6 +17,7 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "DebriefingState.h"
+#include "../Engine/CompanionBattleAarCapture.h"
 #include <algorithm>
 #include <functional>
 #include "CannotReequipState.h"
@@ -628,6 +629,8 @@ void DebriefingState::init()
 	}
 	_promotions = _game->getSavedGame()->handlePromotions(participants);
 
+	CompanionBattleAarDebriefAccess::tryFinalizeAndWrite(this, _game->getSavedGame());
+
 	_game->getSavedGame()->setBattleGame(0);
 
 	if (_positiveScore)
@@ -785,6 +788,10 @@ void ClearAlienBase::operator()(AlienMission *am) const
  */
 void DebriefingState::prepareDebriefing()
 {
+	if (_game->getSavedGame() != 0)
+	{
+		CompanionBattleAarCapture::capturePhaseA(_game->getSavedGame(), _game->getSavedGame()->getSavedBattle());
+	}
 	for (std::vector<std::string>::const_iterator i = _game->getMod()->getItemsList().begin(); i != _game->getMod()->getItemsList().end(); ++i)
 	{
 		RuleItem *rule = _game->getMod()->getItem(*i);

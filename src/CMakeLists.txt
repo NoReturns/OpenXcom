@@ -163,6 +163,8 @@ set ( engine_src
 	Engine/CompanionBaseIntelligenceExportCore.cpp
 	Engine/CompanionBaseIntelligencePurchaseCatalogCore.cpp
 	Engine/CompanionBaseIntelligenceExport.cpp
+	Engine/CompanionBattleAarCaptureCore.cpp
+	Engine/CompanionBattleAarCapture.cpp
   Engine/CrossPlatform.cpp
   Engine/FastLineClip.cpp
   Engine/FileMap.cpp
@@ -1173,6 +1175,23 @@ if ( OPENXCOM_BUILD_COMPANION_BASE_INTELLIGENCE_TESTS )
     target_link_libraries ( companion_base_intelligence_export_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_base_intelligence_export_test COMMAND companion_base_intelligence_export_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_BATTLE_AAR_CAPTURE_TESTS "Build companion battle AAR capture tests (M1 AAR)" ON )
+if ( OPENXCOM_BUILD_COMPANION_BATTLE_AAR_CAPTURE_TESTS )
+  add_executable ( companion_battle_aar_capture_test
+    test/companion_battle_aar_capture_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_battle_aar_capture_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_battle_aar_capture_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_battle_aar_capture_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_battle_aar_capture_test )
+  else ()
+    target_link_libraries ( companion_battle_aar_capture_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_battle_aar_capture_test COMMAND companion_battle_aar_capture_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_P5_FULL_REVEAL_STRESS_HARNESS "Build P4 step 5 direct battle generation stress harness" ON )
