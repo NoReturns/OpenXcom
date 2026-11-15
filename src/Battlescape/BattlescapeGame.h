@@ -89,6 +89,40 @@ private:
 	SavedGame *companionCampaignSaveForValidation() const;
 	void companionUpdateSoldierInfoIfUiPresent(bool checkFOV = false);
 
+	enum CompanionMedikitExecMode
+	{
+		COMPANION_MEDIKIT_PAINKILLER,
+		COMPANION_MEDIKIT_STIMULANT,
+		COMPANION_MEDIKIT_HEAL
+	};
+	bool companionMedikitActorAuthorized(BattleUnit *actor, std::string *rejectReason) const;
+	bool tryExecuteCompanionMedikitShared(
+		BattleUnit *actor,
+		BattleItem *medikit,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		CompanionMedikitExecMode mode,
+		int bodyPart,
+		std::string *rejectReason,
+		int *tuSpentOut,
+		bool *targetRevivedOut);
+	bool tryExecuteCompanionPsiAmpAttack(
+		BattleUnit *actor,
+		BattleItem *psiAmp,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		std::string *rejectReason,
+		int *tuSpentOut,
+		bool *psychicSucceededOut,
+		bool (*execute)(
+			BattlescapeGame *game,
+			BattleUnit *actor,
+			BattleItem *psiAmp,
+			BattleUnit *target,
+			std::string *rejectReason,
+			int *tuSpentOut,
+			bool *psychicSucceededOut));
+
 	/// Ends the turn.
 	void endTurn();
 	/// Picks the first soldier that is panicking.
@@ -244,6 +278,49 @@ public:
 		std::string *rejectReason);
 	/// Drop one carried item to ground on the actor tile (engine placement + ruleset TU via item slot getCost(STR_GROUND)).
 	bool tryExecuteCompanionDrop(BattleUnit *unit, BattleItem *item, std::string *rejectReason);
+	/// One native painkiller click (MedikitState parity); explicit target must match resolveNativeMedikitTarget.
+	bool tryExecuteCompanionMedikitPainKiller(
+		BattleUnit *actor,
+		BattleItem *medikit,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		std::string *rejectReason,
+		int *tuSpentOut = 0);
+	bool tryExecuteCompanionMedikitStimulant(
+		BattleUnit *actor,
+		BattleItem *medikit,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		std::string *rejectReason,
+		int *tuSpentOut = 0,
+		bool *targetRevivedOut = 0);
+	bool tryExecuteCompanionMedikitHeal(
+		BattleUnit *actor,
+		BattleItem *medikit,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		int bodyPart,
+		std::string *rejectReason,
+		int *tuSpentOut = 0,
+		bool *targetRevivedOut = 0);
+	/// One native panic attack through PsiAttackBState (M1-WP10 S2a).
+	bool tryExecuteCompanionPsiPanic(
+		BattleUnit *actor,
+		BattleItem *psiAmp,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		std::string *rejectReason,
+		int *tuSpentOut = 0,
+		bool *psychicSucceededOut = 0);
+	/// One native mind control attack through PsiAttackBState (M1-WP10 S2b).
+	bool tryExecuteCompanionPsiMindControl(
+		BattleUnit *actor,
+		BattleItem *psiAmp,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		std::string *rejectReason,
+		int *tuSpentOut = 0,
+		bool *psychicSucceededOut = 0);
 	/// Poll local tactical-command.json when executor enabled.
 	void tickCompanionCommand(bool battleInitialized);
 	/// F4A/F4B1: human-initiated tactical order admission (companion policy scope only).

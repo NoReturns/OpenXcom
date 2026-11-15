@@ -400,6 +400,113 @@ struct DropCommandParsed
 	std::string rejectCode;
 };
 
+struct MedikitCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	int medikitBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	int bodyPart;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct MedikitValidationInput : TacticalCommandBindingValidationInput
+{
+	int medikitBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	int bodyPart;
+	bool activeHandValid;
+	bool medikitResolved;
+	bool campaignResearchAvailable;
+	bool medikitBelongsToActor;
+	bool medikitInSpecifiedHand;
+	bool medikitIsMedikit;
+	bool medikitUsableEnvironment;
+	bool chargeAvailableForCommand;
+	bool targetResolved;
+	bool targetFriendlyRosterSoldier;
+	bool bodyPartValid;
+	bool insufficientTuForUse;
+};
+
+struct PsiPanicCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	int psiAmpBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct PsiPanicValidationInput : TacticalCommandBindingValidationInput
+{
+	int psiAmpBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	bool activeHandValid;
+	bool psiAmpResolved;
+	bool psiAmpBelongsToActor;
+	bool psiAmpInSpecifiedHand;
+	bool psiAmpIsPsiAmp;
+	bool actorHasPsiSkill;
+	bool targetResolved;
+	bool targetGenuineHostile;
+	bool targetFriendlyRosterSoldier;
+	bool targetVisible;
+	bool targetLineOfSightOk;
+	bool insufficientTuForPanic;
+};
+
+struct PsiMindControlCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	int psiAmpBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct PsiMindControlValidationInput : TacticalCommandBindingValidationInput
+{
+	int psiAmpBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	bool activeHandValid;
+	bool psiAmpResolved;
+	bool psiAmpBelongsToActor;
+	bool psiAmpInSpecifiedHand;
+	bool psiAmpIsPsiAmp;
+	bool actorHasPsiSkill;
+	bool targetResolved;
+	bool targetGenuineHostile;
+	bool targetFriendlyRosterSoldier;
+	bool targetVisible;
+	bool targetLineOfSightOk;
+	bool insufficientTuForMindControl;
+};
+
 struct PickupValidationInput : TacticalCommandBindingValidationInput
 {
 	int itemBattleItemId;
@@ -491,6 +598,9 @@ MoveValidationResult validateUnloadCommand(const UnloadValidationInput &input);
 MoveValidationResult validateInventoryMoveCommand(const InventoryMoveValidationInput &input);
 MoveValidationResult validatePickupCommand(const PickupValidationInput &input);
 MoveValidationResult validateDropCommand(const DropValidationInput &input);
+MoveValidationResult validateMedikitCommand(const MedikitValidationInput &input);
+MoveValidationResult validatePsiPanicCommand(const PsiPanicValidationInput &input);
+MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidationInput &input);
 CommandLifecycleStatus evaluateWalkTerminalStatus(const WalkCompletionInput &input);
 WalkStopDiagnostics resolveWalkStopDiagnostics(
 	CommandLifecycleStatus terminal,
@@ -513,6 +623,12 @@ bool parseUnloadCommandJson(const std::string &json, UnloadCommandParsed *out);
 bool parseInventoryMoveCommandJson(const std::string &json, InventoryMoveCommandParsed *out);
 bool parsePickupCommandJson(const std::string &json, PickupCommandParsed *out);
 bool parseDropCommandJson(const std::string &json, DropCommandParsed *out);
+bool parseMedikitCommandJson(const std::string &json, MedikitCommandParsed *out);
+bool isValidMedikitCommandType(const std::string &commandType);
+bool parsePsiPanicCommandJson(const std::string &json, PsiPanicCommandParsed *out);
+bool isValidPsiPanicCommandType(const std::string &commandType);
+bool parsePsiMindControlCommandJson(const std::string &json, PsiMindControlCommandParsed *out);
+bool isValidPsiMindControlCommandType(const std::string &commandType);
 bool isValidPrimeFuseTimerForBattleType(int fuseTimer, int battleType);
 bool isValidCommandIdFormat(const std::string &commandId);
 bool isValidSessionIdFormat(const std::string &sessionId);

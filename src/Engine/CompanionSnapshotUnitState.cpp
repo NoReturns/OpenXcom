@@ -176,7 +176,7 @@ void CompanionSnapshotUnitState::appendFacing(YAML::Node &entry, const BattleUni
 	entry["facing"] = facing;
 }
 
-void CompanionSnapshotUnitState::appendFriendlyCondition(YAML::Node &entry, BattleUnit *unit)
+void CompanionSnapshotUnitState::appendFriendlyCondition(YAML::Node &entry, BattleUnit *unit, const SavedGame *campaign)
 {
 	if (unit == 0)
 	{
@@ -187,6 +187,10 @@ void CompanionSnapshotUnitState::appendFriendlyCondition(YAML::Node &entry, Batt
 	if (unit->getBaseStats() != 0)
 	{
 		condition["maxEnergy"] = unit->getBaseStats()->stamina;
+		if (campaign != 0 && isLiveRosterFriendlyUnit(unit, campaign))
+		{
+			condition["maxHealth"] = unit->getBaseStats()->health;
+		}
 	}
 	condition["morale"] = unit->getMorale();
 	condition["stunLevel"] = unit->getStunlevel();
@@ -198,6 +202,23 @@ void CompanionSnapshotUnitState::appendFriendlyCondition(YAML::Node &entry, Batt
 	condition["movementTypeId"] = static_cast<int>(unit->getMovementType());
 	condition["movementType"] = movementTypeId(unit->getMovementType());
 	entry["condition"] = condition;
+}
+
+void CompanionSnapshotUnitState::appendLiveRosterFatalWounds(
+	YAML::Node &entry,
+	const BattleUnit *unit,
+	const SavedGame *campaign)
+{
+	if (unit == 0 || campaign == 0 || !isLiveRosterFriendlyUnit(unit, campaign))
+	{
+		return;
+	}
+	YAML::Node wounds(YAML::NodeType::Sequence);
+	for (int part = 0; part < 6; ++part)
+	{
+		wounds.push_back(unit->getFatalWound(part));
+	}
+	entry["fatalWounds"] = wounds;
 }
 
 namespace

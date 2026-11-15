@@ -17,6 +17,7 @@
 #include "../Mod/MapData.h"
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/Tile.h"
+#include "../Battlescape/BattlescapeGame.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionCommandCasualtySettlement.h"
 #include "../Engine/CompanionItemResearchEligibilityCore.h"
@@ -1223,6 +1224,233 @@ static void testV5SnapshotToleratesGroundInventoryField()
 	adoptGroundItemForBattleCleanup(fixture.battle, tile, clip);
 }
 
+static bool handActionUseTu(const YAML::Node &hand, int *outTu, int *outActionType)
+{
+	if (!hand.IsDefined() || !hand["actions"].IsDefined())
+	{
+		return false;
+	}
+	for (std::size_t i = 0; i < hand["actions"].size(); ++i)
+	{
+		const YAML::Node &row = hand["actions"][i];
+		if (row["id"].IsDefined() && row["id"].as<std::string>() == "use")
+		{
+			if (outTu != 0)
+			{
+				*outTu = row["tuCost"].as<int>();
+			}
+			if (outActionType != 0)
+			{
+				*outActionType = row["actionType"].as<int>();
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+static RuleItem &wp9FlatRateMedikitRules()
+{
+	static RuleItem rules("STR_WP9_MEDIKIT_FLAT");
+	static bool loaded = false;
+	if (!loaded)
+	{
+		YAML::Node m;
+		m["weight"] = 3;
+		m["battleType"] = static_cast<int>(BT_MEDIKIT);
+		m["heal"] = 1;
+		m["painKiller"] = 1;
+		m["stimulant"] = 1;
+		m["tuUse"] = 17;
+		m["flatRate"] = true;
+		m["invWidth"] = 1;
+		m["invHeight"] = 2;
+		rules.load(m, &fixtureMod(), 0);
+		loaded = true;
+	}
+	return rules;
+}
+
+static void equipItemInRightHand(SavedBattleGame *battle, BattleUnit *unit, BattleItem *item, RuleInventory &slot)
+{
+	item->moveToOwner(unit);
+	item->setSlot(&slot);
+	item->setSlotX(0);
+	item->setSlotY(0);
+	unit->getInventory()->push_back(item);
+	registerBattleItem(battle, item);
+}
+
+static void testWp9MedikitS0Observation()
+{
+	TacticalFixture woundedFixture;
+	Soldier *woundedSoldier = woundedFixture.addRosterSoldier(51);
+	BattleUnit *wounded = woundedFixture.addSoldierUnit(woundedSoldier, Position(0, 0, 0), 0);
+	placeUnitOnDiscoveredTile(woundedFixture, wounded, Position(0, 0, 0));
+	wounded->load(YAML::Load(
+		"health: 28\ntu: 45\nenergy: 40\nmorale: 55\nstunlevel: 0\nstatus: 0\n"
+		"armor: [0,0,0,0,0]\nfatalWounds: [0,2,0,1,0,3]\n"));
+	Wp8TestRules &R = wp8Rules();
+	BattleItem *mkHand = new BattleItem(&R.medikit, woundedFixture.battle->getCurrentItemId());
+	equipItemInRightHand(woundedFixture.battle, wounded, mkHand, R.rightHand);
+
+	const YAML::Node woundedEntry = findUnitById(buildParsedSnapshot(woundedFixture)["units"], 51);
+	expect(woundedEntry["fatalWounds"].IsDefined() && woundedEntry["fatalWounds"].size() == 6, "six fatal wound parts");
+	expect(woundedEntry["fatalWounds"][1].as<int>() == 2 && woundedEntry["fatalWounds"][3].as<int>() == 1,
+		"multi-part fatal wounds");
+	expect(woundedEntry["condition"]["maxHealth"].IsDefined(), "maxHealth on roster soldier");
+	expect(woundedEntry["condition"]["maxHealth"].as<int>() == wounded->getBaseStats()->health, "maxHealth from base stats");
+
+	int useTu = 0;
+	int actionType = -1;
+	expect(handActionUseTu(woundedEntry["actionCosts"]["hands"]["right"], &useTu, &actionType), "use action when medikit in hand");
+	expect(actionType == static_cast<int>(BA_USE), "BA_USE action type");
+	expect(useTu == wounded->getActionTUs(BA_USE, mkHand), "use tuCost from engine rules");
+
+	TacticalFixture cleanFixture;
+	Soldier *cleanSoldier = cleanFixture.addRosterSoldier(52);
+	BattleUnit *clean = cleanFixture.addSoldierUnit(cleanSoldier, Position(1, 0, 0), 0);
+	placeUnitOnDiscoveredTile(cleanFixture, clean, Position(1, 0, 0));
+	clean->load(YAML::Load(
+		"health: 50\ntu: 50\nenergy: 50\nmorale: 80\nstunlevel: 0\nstatus: 0\n"
+		"armor: [0,0,0,0,0]\nfatalWounds: [0,0,0,0,0,0]\n"));
+	const YAML::Node cleanEntry = findUnitById(buildParsedSnapshot(cleanFixture)["units"], 52);
+	expect(cleanEntry["fatalWounds"].IsDefined(), "fatalWounds exported when all zero");
+	for (std::size_t i = 0; i < 6; ++i)
+	{
+		expect(cleanEntry["fatalWounds"][static_cast<int>(i)].as<int>() == 0, "zero wound part");
+	}
+	expect(!handActionUseTu(cleanEntry["actionCosts"]["hands"]["right"], 0, 0), "no use without medikit");
+	placeEquippedItem(cleanFixture.battle, clean, new BattleItem(&R.medikit, cleanFixture.battle->getCurrentItemId()),
+		&R.backpack, 0, 0);
+	const YAML::Node backpackOnly = findUnitById(buildParsedSnapshot(cleanFixture)["units"], 52);
+	expect(!handActionUseTu(backpackOnly["actionCosts"]["hands"]["right"], 0, 0)
+		&& !handActionUseTu(backpackOnly["actionCosts"]["hands"]["left"], 0, 0),
+		"backpack medikit does not export hand use affordance");
+
+	TacticalFixture unconsciousFixture;
+	Soldier *injuredSoldier = unconsciousFixture.addRosterSoldier(53);
+	BattleUnit *unconscious = unconsciousFixture.addSoldierUnit(injuredSoldier, Position(2, 0, 0), 0);
+	placeUnitOnDiscoveredTile(unconsciousFixture, unconscious, Position(2, 0, 0));
+	unconscious->load(YAML::Load(
+		"status: 7\nstunlevel: 80\nhealth: 12\ntu: 0\nenergy: 0\nmorale: 20\n"
+		"armor: [0,0,0,0,0]\nfatalWounds: [1,0,0,0,0,0]\n"));
+	const YAML::Node unconsciousEntry = findUnitById(buildParsedSnapshot(unconsciousFixture)["units"], 53);
+	expect(unconsciousEntry["condition"]["conscious"].as<bool>() == false, "unconscious friendly");
+	expect(unconsciousEntry["fatalWounds"][0].as<int>() == 1, "unconscious roster fatal wound");
+
+	TacticalFixture flatTuFixture;
+	Soldier *flatSoldier = flatTuFixture.addRosterSoldier(54);
+	BattleUnit *flatActor = flatTuFixture.addSoldierUnit(flatSoldier, Position(3, 0, 0), 0);
+	placeUnitOnDiscoveredTile(flatTuFixture, flatActor, Position(3, 0, 0));
+	BattleItem *flatMk = new BattleItem(&wp9FlatRateMedikitRules(), flatTuFixture.battle->getCurrentItemId());
+	equipItemInRightHand(flatTuFixture.battle, flatActor, flatMk, R.rightHand);
+	const YAML::Node flatEntry = findUnitById(buildParsedSnapshot(flatTuFixture)["units"], 54);
+	int flatUseTu = 0;
+	expect(handActionUseTu(flatEntry["actionCosts"]["hands"]["right"], &flatUseTu, 0), "modded flat medikit use");
+	expect(flatUseTu == 17, "tuUse 17 flatRate from ruleset");
+
+	TacticalFixture hostileFixture;
+	BattleUnit *alien = hostileFixture.addAlienUnit(1000054, true, 0, true);
+	placeUnitOnDiscoveredTile(hostileFixture, alien, Position(2, 2, 0));
+	const YAML::Node hostileEntry = findUnitById(buildParsedSnapshot(hostileFixture)["units"], 1000054);
+	expect(!hostileEntry["fatalWounds"].IsDefined(), "hostile omits fatalWounds");
+	expect(!hostileEntry["condition"].IsDefined(), "hostile omits condition");
+}
+
+static void testWp10PsiSkillAndPanicActionCosts()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(51);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	unit->getBaseStats()->psiSkill = 77;
+	placeUnitOnDiscoveredTile(fixture, unit, Position(0, 0, 0));
+
+	RuleItem psiAmpRules("STR_WP10_TEST_PSI_AMP");
+	YAML::Node psiNode;
+	psiNode["weight"] = 3;
+	psiNode["battleType"] = static_cast<int>(BT_PSIAMP);
+	psiNode["tuUse"] = 25;
+	psiNode["flatRate"] = true;
+	psiNode["invWidth"] = 1;
+	psiNode["invHeight"] = 3;
+	psiAmpRules.load(psiNode, &fixtureMod(), 0);
+	BattleItem *amp = new BattleItem(&psiAmpRules, fixture.battle->getCurrentItemId());
+	placeEquippedItem(fixture.battle, unit, amp, &wp8Rules().leftHand, 0, 0);
+
+	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], 51);
+	expect(entry["psiSkill"].IsDefined() && entry["psiSkill"].as<int>() == 77, "roster soldier psiSkill exported");
+
+	bool foundPanic = false;
+	const YAML::Node actions = entry["actionCosts"]["hands"]["left"]["actions"];
+	for (std::size_t i = 0; i < actions.size(); ++i)
+	{
+		if (actions[i]["id"].as<std::string>() == "panic")
+		{
+			foundPanic = true;
+			expect(actions[i]["actionType"].as<int>() == static_cast<int>(BA_PANIC), "panic actionType BA_PANIC");
+			expect(actions[i]["tuCost"].as<int>() == 25, "panic flat tuCost 25");
+			break;
+		}
+	}
+	expect(foundPanic, "panic actionCosts when psi amp in hand");
+
+	bool foundMindControl = false;
+	for (std::size_t i = 0; i < actions.size(); ++i)
+	{
+		if (actions[i]["id"].as<std::string>() == "mindcontrol")
+		{
+			foundMindControl = true;
+			expect(actions[i]["actionType"].as<int>() == static_cast<int>(BA_MINDCONTROL), "mindcontrol actionType BA_MINDCONTROL");
+			expect(actions[i]["tuCost"].as<int>() == 25, "mindcontrol flat tuCost 25");
+			break;
+		}
+	}
+	expect(foundMindControl, "mindcontrol actionCosts when psi amp in hand");
+}
+
+static void testWp10PsiSkillZeroOmitsPanicAction()
+{
+	TacticalFixture fixture;
+	Soldier *soldier = fixture.addRosterSoldier(52);
+	BattleUnit *unit = fixture.addSoldierUnit(soldier, Position(0, 0, 0), 0);
+	unit->getBaseStats()->psiSkill = 0;
+	placeUnitOnDiscoveredTile(fixture, unit, Position(0, 0, 0));
+
+	RuleItem psiAmpRules("STR_WP10_TEST_PSI_AMP");
+	YAML::Node psiNode;
+	psiNode["battleType"] = static_cast<int>(BT_PSIAMP);
+	psiNode["tuUse"] = 25;
+	psiNode["flatRate"] = true;
+	psiNode["invWidth"] = 1;
+	psiNode["invHeight"] = 3;
+	psiAmpRules.load(psiNode, &fixtureMod(), 0);
+	BattleItem *amp = new BattleItem(&psiAmpRules, fixture.battle->getCurrentItemId());
+	placeEquippedItem(fixture.battle, unit, amp, &wp8Rules().leftHand, 0, 0);
+
+	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], 52);
+	if (entry["actionCosts"]["hands"]["left"].IsDefined())
+	{
+		const YAML::Node actions = entry["actionCosts"]["hands"]["left"]["actions"];
+		for (std::size_t i = 0; i < actions.size(); ++i)
+		{
+			const std::string id = actions[i]["id"].as<std::string>();
+			expect(id != "panic", "no panic action when psiSkill is zero");
+			expect(id != "mindcontrol", "no mindcontrol action when psiSkill is zero");
+		}
+	}
+}
+
+static void testWp10HostileOmitsPsiSkill()
+{
+	TacticalFixture fixture;
+	BattleUnit *alien = fixture.addAlienUnit(100123, true, 4, false);
+	alien->getBaseStats()->psiSkill = 50;
+	placeUnitOnDiscoveredTile(fixture, alien, Position(1, 1, 0));
+	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], 100123);
+	expect(!entry["psiSkill"].IsDefined(), "hostile omits psiSkill even when engine stats exist");
+}
+
 static void testWp8MedikitChargesAndCarriedWeight()
 {
 	TacticalFixture fixture;
@@ -2339,6 +2567,10 @@ int main(int argc, char **argv)
 	SNAPSHOT_TEST_STEP(testRemoteGroundItemNotInActorGroundInventory);
 	SNAPSHOT_TEST_STEP(testTwoSoldiersSameTileEachGroundInventoryListsSharedGround);
 	SNAPSHOT_TEST_STEP(testV5SnapshotToleratesGroundInventoryField);
+	SNAPSHOT_TEST_STEP(testWp9MedikitS0Observation);
+	SNAPSHOT_TEST_STEP(testWp10PsiSkillAndPanicActionCosts);
+	SNAPSHOT_TEST_STEP(testWp10PsiSkillZeroOmitsPanicAction);
+	SNAPSHOT_TEST_STEP(testWp10HostileOmitsPsiSkill);
 	SNAPSHOT_TEST_STEP(testWp8MedikitChargesAndCarriedWeight);
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionWhenTileInFriendlySight);
 	SNAPSHOT_TEST_STEP(testHostileDeathPerceptionOmitsWhenTileNotInSight);

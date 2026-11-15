@@ -1322,6 +1322,305 @@ bool parseDropCommandJson(const std::string &json, DropCommandParsed *out)
 	return true;
 }
 
+bool isValidMedikitCommandType(const std::string &commandType)
+{
+	return commandType == "HEAL" || commandType == "STIMULANT" || commandType == "PAINKILLER";
+}
+
+bool parseMedikitCommandJson(const std::string &json, MedikitCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	MedikitCommandParsed parsed = {};
+	parsed.valid = false;
+	parsed.bodyPart = -1;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    !isValidMedikitCommandType(parsed.commandType))
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "target_unit_id", &parsed.targetUnitId) ||
+	    parsed.targetUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "medikit_battle_item_id", &parsed.medikitBattleItemId) ||
+	    parsed.medikitBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_MEDIKIT_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (parsed.commandType == "HEAL")
+	{
+		if (!CompanionJsonLite::extractJsonIntField(json, "body_part", &parsed.bodyPart) ||
+		    parsed.bodyPart < 0 || parsed.bodyPart > 5)
+		{
+			parsed.rejectCode = "INVALID_BODY_PART";
+			*out = parsed;
+			return false;
+		}
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool isValidPsiPanicCommandType(const std::string &commandType)
+{
+	return commandType == "PSI_PANIC";
+}
+
+bool parsePsiPanicCommandJson(const std::string &json, PsiPanicCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	PsiPanicCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    !isValidPsiPanicCommandType(parsed.commandType))
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "target_unit_id", &parsed.targetUnitId) ||
+	    parsed.targetUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "psi_amp_battle_item_id", &parsed.psiAmpBattleItemId) ||
+	    parsed.psiAmpBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_PSI_AMP_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool isValidPsiMindControlCommandType(const std::string &commandType)
+{
+	return commandType == "PSI_MIND_CONTROL";
+}
+
+bool parsePsiMindControlCommandJson(const std::string &json, PsiMindControlCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	PsiMindControlCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    !isValidPsiMindControlCommandType(parsed.commandType))
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "target_unit_id", &parsed.targetUnitId) ||
+	    parsed.targetUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "psi_amp_battle_item_id", &parsed.psiAmpBattleItemId) ||
+	    parsed.psiAmpBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_PSI_AMP_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
 MoveValidationResult validateTacticalCommandBinding(const TacticalCommandBindingValidationInput &input)
 {
 	MoveValidationResult result = {};
@@ -2271,6 +2570,264 @@ MoveValidationResult validateDropCommand(const DropValidationInput &input)
 	{
 		result.rejectCode = "INSUFFICIENT_TU";
 		result.publicReason = "Not enough time units for ground drop.";
+		return result;
+	}
+
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validateMedikitCommand(const MedikitValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+
+	if (!input.campaignResearchAvailable)
+	{
+		result.rejectCode = "RESEARCH_CONTEXT_UNAVAILABLE";
+		result.publicReason = "Campaign save unavailable for research validation.";
+		return result;
+	}
+	if (!input.activeHandValid)
+	{
+		result.rejectCode = "INVALID_ACTIVE_HAND";
+		result.publicReason = "Active hand must be STR_LEFT_HAND or STR_RIGHT_HAND.";
+		return result;
+	}
+	if (!input.medikitResolved)
+	{
+		result.rejectCode = "INVALID_MEDIKIT_INSTANCE";
+		result.publicReason = "Medikit battle item not found on actor.";
+		return result;
+	}
+	if (!input.medikitBelongsToActor)
+	{
+		result.rejectCode = "INVALID_MEDIKIT_INSTANCE";
+		result.publicReason = "Medikit does not belong to the actor.";
+		return result;
+	}
+	if (!input.medikitInSpecifiedHand)
+	{
+		result.rejectCode = "MEDIKIT_NOT_IN_HAND";
+		result.publicReason = "Medikit is not equipped in the specified hand.";
+		return result;
+	}
+	if (!input.medikitIsMedikit)
+	{
+		result.rejectCode = "UNSUPPORTED_ITEM";
+		result.publicReason = "Item is not a medikit.";
+		return result;
+	}
+	if (!input.medikitUsableEnvironment)
+	{
+		result.rejectCode = "ITEM_NOT_USABLE";
+		result.publicReason = "Medikit is not usable in current battlescape conditions.";
+		return result;
+	}
+	if (!input.chargeAvailableForCommand)
+	{
+		result.rejectCode = "MEDIKIT_CHARGE_DEPLETED";
+		result.publicReason = "No medikit charges remaining for this application.";
+		return result;
+	}
+	if (!input.targetResolved)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target unit not found.";
+		return result;
+	}
+	if (!input.targetFriendlyRosterSoldier)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target must be a friendly roster soldier.";
+		return result;
+	}
+	if (!input.bodyPartValid)
+	{
+		result.rejectCode = "INVALID_BODY_PART";
+		result.publicReason = "body_part must be 0..5 for HEAL.";
+		return result;
+	}
+	if (input.insufficientTuForUse)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for medikit application.";
+		return result;
+	}
+
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validatePsiPanicCommand(const PsiPanicValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+
+	if (!input.activeHandValid)
+	{
+		result.rejectCode = "INVALID_ACTIVE_HAND";
+		result.publicReason = "Active hand must be STR_LEFT_HAND or STR_RIGHT_HAND.";
+		return result;
+	}
+	if (!input.psiAmpResolved)
+	{
+		result.rejectCode = "INVALID_PSI_AMP_INSTANCE";
+		result.publicReason = "Psi-Amp battle item not found on actor.";
+		return result;
+	}
+	if (!input.psiAmpBelongsToActor)
+	{
+		result.rejectCode = "INVALID_PSI_AMP_INSTANCE";
+		result.publicReason = "Psi-Amp does not belong to the actor.";
+		return result;
+	}
+	if (!input.psiAmpInSpecifiedHand)
+	{
+		result.rejectCode = "PSI_AMP_NOT_IN_HAND";
+		result.publicReason = "Psi-Amp is not equipped in the specified hand.";
+		return result;
+	}
+	if (!input.psiAmpIsPsiAmp)
+	{
+		result.rejectCode = "UNSUPPORTED_ITEM";
+		result.publicReason = "Item is not a Psi-Amp.";
+		return result;
+	}
+	if (!input.actorHasPsiSkill)
+	{
+		result.rejectCode = "ZERO_PSI_SKILL";
+		result.publicReason = "Actor has no psionic skill.";
+		return result;
+	}
+	if (!input.targetResolved)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target unit not found.";
+		return result;
+	}
+	if (input.targetFriendlyRosterSoldier)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target is not eligible for panic.";
+		return result;
+	}
+	if (!input.targetGenuineHostile)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target must be a genuine hostile unit.";
+		return result;
+	}
+	if (!input.targetVisible)
+	{
+		result.rejectCode = "TARGET_NOT_VISIBLE";
+		result.publicReason = "Target is not visible.";
+		return result;
+	}
+	if (!input.targetLineOfSightOk)
+	{
+		result.rejectCode = "NO_LINE_OF_SIGHT";
+		result.publicReason = "No line of sight to target.";
+		return result;
+	}
+	if (input.insufficientTuForPanic)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for panic attack.";
+		return result;
+	}
+
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+
+	if (!input.activeHandValid)
+	{
+		result.rejectCode = "INVALID_ACTIVE_HAND";
+		result.publicReason = "Active hand must be STR_LEFT_HAND or STR_RIGHT_HAND.";
+		return result;
+	}
+	if (!input.psiAmpResolved)
+	{
+		result.rejectCode = "INVALID_PSI_AMP_INSTANCE";
+		result.publicReason = "Psi-Amp battle item not found on actor.";
+		return result;
+	}
+	if (!input.psiAmpBelongsToActor)
+	{
+		result.rejectCode = "INVALID_PSI_AMP_INSTANCE";
+		result.publicReason = "Psi-Amp does not belong to the actor.";
+		return result;
+	}
+	if (!input.psiAmpInSpecifiedHand)
+	{
+		result.rejectCode = "PSI_AMP_NOT_IN_HAND";
+		result.publicReason = "Psi-Amp is not equipped in the specified hand.";
+		return result;
+	}
+	if (!input.psiAmpIsPsiAmp)
+	{
+		result.rejectCode = "UNSUPPORTED_ITEM";
+		result.publicReason = "Item is not a Psi-Amp.";
+		return result;
+	}
+	if (!input.actorHasPsiSkill)
+	{
+		result.rejectCode = "ZERO_PSI_SKILL";
+		result.publicReason = "Actor has no psionic skill.";
+		return result;
+	}
+	if (!input.targetResolved)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target unit not found.";
+		return result;
+	}
+	if (input.targetFriendlyRosterSoldier)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target is not eligible for mind control.";
+		return result;
+	}
+	if (!input.targetGenuineHostile)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target must be a genuine hostile unit.";
+		return result;
+	}
+	if (!input.targetVisible)
+	{
+		result.rejectCode = "TARGET_NOT_VISIBLE";
+		result.publicReason = "Target is not visible.";
+		return result;
+	}
+	if (!input.targetLineOfSightOk)
+	{
+		result.rejectCode = "NO_LINE_OF_SIGHT";
+		result.publicReason = "No line of sight to target.";
+		return result;
+	}
+	if (input.insufficientTuForMindControl)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for mind control attack.";
 		return result;
 	}
 

@@ -36,6 +36,16 @@ private:
 	BattleUnit *_unit, *_target;
 	BattleItem *_item;
 	bool _initialized;
+
+	static bool companionExecutePsiAttack(
+		BattlescapeGame *parent,
+		BattleAction action,
+		BattleActionType actionType,
+		const char *invalidActionLabel,
+		std::string *rejectReason,
+		int *tuSpentOut,
+		bool *psychicSucceededOut);
+
 public:
 	/// Creates a new PsiAttack state.
 	PsiAttackBState(BattlescapeGame *parent, BattleAction action);
@@ -47,6 +57,25 @@ public:
 	void think();
 	/// Attempts a panic or mind control action.
 	void psiAttack();
+
+	/**
+	 * Headless Companion panic (M1-WP10): preflight, native psiAttack, TU spend.
+	 * psychicSucceededOut is set from native outcome; never leaks hidden alien stats.
+	 */
+	static bool companionExecutePanic(
+		BattlescapeGame *parent,
+		BattleAction action,
+		std::string *rejectReason,
+		int *tuSpentOut,
+		bool *psychicSucceededOut);
+
+	/// Headless Companion mind control (M1-WP10 S2b): same preflight/TU path as panic.
+	static bool companionExecuteMindControl(
+		BattlescapeGame *parent,
+		BattleAction action,
+		std::string *rejectReason,
+		int *tuSpentOut,
+		bool *psychicSucceededOut);
 
 };
 

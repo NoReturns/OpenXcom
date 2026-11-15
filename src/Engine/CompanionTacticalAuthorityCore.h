@@ -59,6 +59,9 @@ bool isStaleRelayAiAfterCampaignHumanAssignment(
 /// Living geoscape-linked player soldier on the active campaign roster (companion policy scope).
 bool isLiveCampaignPlayerSoldierUnit(const BattleUnit *unit, const SavedGame *campaign);
 
+/// Friendly roster soldier identity for medikit targets (matches Node isFriendlyRosterSoldier).
+bool isCompanionFriendlyRosterSoldierTarget(const BattleUnit *unit);
+
 /// True when companion human/AI order policy applies (campaign roster identity only; relay optional).
 bool shouldApplyCompanionHumanOrderPolicy(const BattleUnit *unit, const SavedGame *campaign);
 

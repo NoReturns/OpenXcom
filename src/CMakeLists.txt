@@ -158,6 +158,7 @@ set ( engine_src
 	Engine/CompanionOwnershipHandoffCore.cpp
 	Engine/CompanionSoldierControlPublishCore.cpp
 	Engine/CompanionDropGroundPlacementCore.cpp
+	Engine/CompanionPsiExecutionCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
 	Engine/CompanionBaseIntelligenceExportCore.cpp
@@ -1192,6 +1193,73 @@ if ( OPENXCOM_BUILD_COMPANION_BASE_INTELLIGENCE_TESTS )
     target_link_libraries ( companion_base_intelligence_export_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_base_intelligence_export_test COMMAND companion_base_intelligence_export_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_PSI_PANIC_ENGINE_TEST "Build companion psi panic engine integration test (M1-WP10 S2a)" ON )
+if ( OPENXCOM_BUILD_COMPANION_PSI_PANIC_ENGINE_TEST )
+  add_executable ( companion_psi_panic_engine_test
+    test/companion_psi_panic_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_psi_panic_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_psi_panic_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_psi_panic_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_psi_panic_engine_test )
+  else ()
+    target_link_libraries ( companion_psi_panic_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_psi_panic_engine_test COMMAND companion_psi_panic_engine_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_PSI_MIND_CONTROL_ENGINE_TEST "Build companion psi mind control engine integration test (M1-WP10 S2b)" ON )
+if ( OPENXCOM_BUILD_COMPANION_PSI_MIND_CONTROL_ENGINE_TEST )
+  add_executable ( companion_psi_mind_control_engine_test
+    test/companion_psi_mind_control_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_psi_mind_control_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_psi_mind_control_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_psi_mind_control_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_psi_mind_control_engine_test )
+  else ()
+    target_link_libraries ( companion_psi_mind_control_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_psi_mind_control_engine_test COMMAND companion_psi_mind_control_engine_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_MEDIKIT_ENGINE_TEST "Build companion medikit engine integration test (M1-WP9 S2)" ON )
+if ( OPENXCOM_BUILD_COMPANION_MEDIKIT_ENGINE_TEST )
+  add_executable ( companion_medikit_engine_test
+    test/companion_medikit_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_medikit_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_medikit_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_medikit_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_medikit_engine_test )
+  else ()
+    target_link_libraries ( companion_medikit_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_medikit_engine_test COMMAND companion_medikit_engine_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_MEDIKIT_RELEASE_SMOKE_TEST "Build WP9 medikit Release smoke (manual; not a default gate)" ON )
+if ( OPENXCOM_BUILD_COMPANION_MEDIKIT_RELEASE_SMOKE_TEST )
+  add_executable ( companion_medikit_release_smoke_test
+    test/companion_medikit_release_smoke_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_medikit_release_smoke_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_medikit_release_smoke_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_medikit_release_smoke_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_medikit_release_smoke_test )
+  else ()
+    target_link_libraries ( companion_medikit_release_smoke_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_BATTLE_AAR_CAPTURE_TESTS "Build companion battle AAR capture tests (M1 AAR)" ON )

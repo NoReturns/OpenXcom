@@ -21,6 +21,7 @@
 #include "../Savegame/BattleItem.h"
 #include "../Savegame/Tile.h"
 #include <vector>
+#include <algorithm>
 #include "../Mod/RuleItem.h"
 #include "../Mod/RuleInventory.h"
 #include "../Savegame/Soldier.h"
@@ -1245,6 +1246,270 @@ void rejectPickupCommand(const std::string &resultPath,
 	writeResultFile(resultPath, json);
 }
 
+std::string buildMedikitResultJson(const CompanionCommandCore::MedikitCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	Position pos,
+	int remainingTu,
+	bool kneeled,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256,
+	int tuSpent,
+	bool includeTargetRevived,
+	bool targetRevived)
+{
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
+	     << "  \"command_type\": \"" << cmd.commandType << "\",\n"
+	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
+	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
+	     << "  \"turn\": " << cmd.turn << ",\n"
+	     << "  \"actor_unit_id\": " << cmd.actorUnitId << ",\n"
+	     << "  \"medikit_battle_item_id\": " << cmd.medikitBattleItemId << ",\n"
+	     << "  \"active_hand\": \"" << cmd.activeHand << "\",\n"
+	     << "  \"target_unit_id\": " << cmd.targetUnitId << ",\n";
+	if (cmd.commandType == "HEAL" && cmd.bodyPart >= 0)
+	{
+		json << "  \"body_part\": " << cmd.bodyPart << ",\n";
+	}
+	if (!publicReason.empty())
+	{
+		json << "  \"public_reason\": \"" << publicReason << "\",\n";
+	}
+	if (status == CompanionCommandCore::CMD_EXECUTING ||
+	    status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"starting_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"final_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n"
+		     << "  \"remaining_tu\": " << remainingTu << ",\n"
+		     << "  \"kneeled\": " << (kneeled ? "true" : "false") << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED && tuSpent >= 0)
+	{
+		json << "  \"tu_spent\": " << tuSpent << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED && includeTargetRevived)
+	{
+		json << "  \"target_revived\": " << (targetRevived ? "true" : "false") << ",\n";
+	}
+	if (!snapshotSha256.empty())
+	{
+		json << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n";
+	}
+	if (!inboxSha256.empty())
+	{
+		json << "  \"inbox_sha256\": \"" << inboxSha256 << "\",\n";
+	}
+	json << "  \"completed_at\": \"engine-local\"\n"
+	     << "}\n";
+	return json.str();
+}
+
+void rejectMedikitCommand(const std::string &resultPath, const CompanionCommandCore::MedikitCommandParsed &parsed,
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+{
+	CompanionCommandCore::MedikitCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "HEAL";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+		cmd.medikitBattleItemId = 0;
+		cmd.targetUnitId = 0;
+		cmd.activeHand = "STR_RIGHT_HAND";
+		cmd.bodyPart = -1;
+	}
+	if (cmd.commandType.empty())
+	{
+		cmd.commandType = "HEAL";
+	}
+	const std::string json = buildMedikitResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
+		std::string(), inboxSha256, -1, false, false);
+	writeResultFile(resultPath, json);
+}
+
+std::string buildPsiPanicResultJson(const CompanionCommandCore::PsiPanicCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	Position pos,
+	int remainingTu,
+	bool kneeled,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256,
+	int tuSpent)
+{
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
+	     << "  \"command_type\": \"PSI_PANIC\",\n"
+	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
+	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
+	     << "  \"turn\": " << cmd.turn << ",\n"
+	     << "  \"actor_unit_id\": " << cmd.actorUnitId << ",\n"
+	     << "  \"psi_amp_battle_item_id\": " << cmd.psiAmpBattleItemId << ",\n"
+	     << "  \"active_hand\": \"" << cmd.activeHand << "\",\n"
+	     << "  \"target_unit_id\": " << cmd.targetUnitId << ",\n";
+	if (!publicReason.empty())
+	{
+		json << "  \"public_reason\": \"" << publicReason << "\",\n";
+	}
+	if (status == CompanionCommandCore::CMD_EXECUTING ||
+	    status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"starting_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"final_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n"
+		     << "  \"remaining_tu\": " << remainingTu << ",\n"
+	     << "  \"kneeled\": " << (kneeled ? "true" : "false") << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED && tuSpent >= 0)
+	{
+		json << "  \"tu_spent\": " << tuSpent << ",\n";
+	}
+	if (!snapshotSha256.empty())
+	{
+		json << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n";
+	}
+	if (!inboxSha256.empty())
+	{
+		json << "  \"inbox_sha256\": \"" << inboxSha256 << "\",\n";
+	}
+	json << "  \"completed_at\": \"engine-local\"\n"
+	     << "}\n";
+	return json.str();
+}
+
+void rejectPsiPanicCommand(const std::string &resultPath, const CompanionCommandCore::PsiPanicCommandParsed &parsed,
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+{
+	CompanionCommandCore::PsiPanicCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "PSI_PANIC";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+		cmd.psiAmpBattleItemId = 0;
+		cmd.targetUnitId = 0;
+		cmd.activeHand = "STR_RIGHT_HAND";
+	}
+	if (cmd.commandType.empty())
+	{
+		cmd.commandType = "PSI_PANIC";
+	}
+	const std::string json = buildPsiPanicResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
+		std::string(), inboxSha256, -1);
+	writeResultFile(resultPath, json);
+}
+
+std::string buildPsiMindControlResultJson(const CompanionCommandCore::PsiMindControlCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	Position pos,
+	int remainingTu,
+	bool kneeled,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256,
+	int tuSpent)
+{
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
+	     << "  \"command_type\": \"PSI_MIND_CONTROL\",\n"
+	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
+	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
+	     << "  \"turn\": " << cmd.turn << ",\n"
+	     << "  \"actor_unit_id\": " << cmd.actorUnitId << ",\n"
+	     << "  \"psi_amp_battle_item_id\": " << cmd.psiAmpBattleItemId << ",\n"
+	     << "  \"active_hand\": \"" << cmd.activeHand << "\",\n"
+	     << "  \"target_unit_id\": " << cmd.targetUnitId << ",\n";
+	if (!publicReason.empty())
+	{
+		json << "  \"public_reason\": \"" << publicReason << "\",\n";
+	}
+	if (status == CompanionCommandCore::CMD_EXECUTING ||
+	    status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"starting_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"final_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n"
+		     << "  \"remaining_tu\": " << remainingTu << ",\n"
+	     << "  \"kneeled\": " << (kneeled ? "true" : "false") << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED && tuSpent >= 0)
+	{
+		json << "  \"tu_spent\": " << tuSpent << ",\n";
+	}
+	if (!snapshotSha256.empty())
+	{
+		json << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n";
+	}
+	if (!inboxSha256.empty())
+	{
+		json << "  \"inbox_sha256\": \"" << inboxSha256 << "\",\n";
+	}
+	json << "  \"completed_at\": \"engine-local\"\n"
+	     << "}\n";
+	return json.str();
+}
+
+void rejectPsiMindControlCommand(const std::string &resultPath,
+	const CompanionCommandCore::PsiMindControlCommandParsed &parsed,
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+{
+	CompanionCommandCore::PsiMindControlCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "PSI_MIND_CONTROL";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+		cmd.psiAmpBattleItemId = 0;
+		cmd.targetUnitId = 0;
+		cmd.activeHand = "STR_RIGHT_HAND";
+	}
+	if (cmd.commandType.empty())
+	{
+		cmd.commandType = "PSI_MIND_CONTROL";
+	}
+	const std::string json = buildPsiMindControlResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
+		std::string(), inboxSha256, -1);
+	writeResultFile(resultPath, json);
+}
+
 void rejectDropCommand(const std::string &resultPath,
 	const CompanionCommandCore::DropCommandParsed &parsed,
 	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
@@ -1283,14 +1548,32 @@ static bool rejectUnreadableCommandJournal(
 	const CompanionCommandCore::UnloadCommandParsed *unloadRejectTemplate,
 	const CompanionCommandCore::InventoryMoveCommandParsed *inventoryMoveRejectTemplate,
 	const CompanionCommandCore::PickupCommandParsed *pickupRejectTemplate,
-	const CompanionCommandCore::DropCommandParsed *dropRejectTemplate)
+	const CompanionCommandCore::DropCommandParsed *dropRejectTemplate,
+	const CompanionCommandCore::MedikitCommandParsed *medikitRejectTemplate,
+	const CompanionCommandCore::PsiPanicCommandParsed *psiPanicRejectTemplate = 0,
+	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0)
 {
 	if (CompanionCommandJournalCore::classifyExistingJournalJson(journalJson) !=
 		CompanionCommandJournalCore::JOURNAL_UNREADABLE)
 	{
 		return false;
 	}
-	if (reloadRejectTemplate != 0)
+	if (psiMindControlRejectTemplate != 0)
+	{
+		rejectPsiMindControlCommand(resultPath, *psiMindControlRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
+	else if (psiPanicRejectTemplate != 0)
+	{
+		rejectPsiPanicCommand(resultPath, *psiPanicRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
+	else if (medikitRejectTemplate != 0)
+	{
+		rejectMedikitCommand(resultPath, *medikitRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
+	else if (reloadRejectTemplate != 0)
 	{
 		rejectReloadCommand(resultPath, *reloadRejectTemplate, "JOURNAL_MALFORMED",
 			"Tactical command journal is unreadable.", inboxDigest);
@@ -1365,7 +1648,10 @@ bool applyDuplicateInboxDecision(
 	const CompanionCommandCore::UnloadCommandParsed *unloadRejectTemplate,
 	const CompanionCommandCore::InventoryMoveCommandParsed *inventoryMoveRejectTemplate,
 	const CompanionCommandCore::PickupCommandParsed *pickupRejectTemplate,
-	const CompanionCommandCore::DropCommandParsed *dropRejectTemplate)
+	const CompanionCommandCore::DropCommandParsed *dropRejectTemplate,
+	const CompanionCommandCore::MedikitCommandParsed *medikitRejectTemplate,
+	const CompanionCommandCore::PsiPanicCommandParsed *psiPanicRejectTemplate = 0,
+	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0)
 {
 	switch (duplicateDecision)
 	{
@@ -1403,7 +1689,19 @@ bool applyDuplicateInboxDecision(
 		return true;
 	}
 	case CompanionCommandRuntimeSupport::DUPLICATE_INBOX_REJECT:
-		if (reloadRejectTemplate != 0)
+		if (psiMindControlRejectTemplate != 0)
+		{
+			rejectPsiMindControlCommand(resultPath, *psiMindControlRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
+		}
+		else if (psiPanicRejectTemplate != 0)
+		{
+			rejectPsiPanicCommand(resultPath, *psiPanicRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
+		}
+		else if (medikitRejectTemplate != 0)
+		{
+			rejectMedikitCommand(resultPath, *medikitRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
+		}
+		else if (reloadRejectTemplate != 0)
 		{
 			rejectReloadCommand(resultPath, *reloadRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
 		}
@@ -2497,6 +2795,227 @@ void fillDropValidationInput(
 	const int moveTu = input->transferCostTu;
 	input->insufficientTuForDrop =
 		moveTu > 0 && (actor == 0 || !game->checkReservedTU(actor, moveTu, true));
+}
+
+void fillMedikitValidationInput(
+	CompanionCommandCore::MedikitValidationInput *input,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &sessionId,
+	const CompanionCommandCore::MedikitCommandParsed &parsed,
+	int actorUnitId,
+	bool actorIsPlayerSoldier,
+	bool actorAlive,
+	bool actorAiControlled,
+	bool humanOverrideRevoked,
+	BattleUnit *actor)
+{
+	fillBindingValidationInput(
+		input,
+		game,
+		battle,
+		battleInitialized,
+		sessionId,
+		parsed.snapshotSha256,
+		parsed.sessionId,
+		parsed.turn,
+		parsed.stateVersion,
+		actorUnitId,
+		actorIsPlayerSoldier,
+		actorAlive,
+		actorAiControlled,
+		humanOverrideRevoked);
+	input->medikitBattleItemId = parsed.medikitBattleItemId;
+	input->activeHand = parsed.activeHand;
+	input->targetUnitId = parsed.targetUnitId;
+	input->bodyPart = parsed.bodyPart;
+	input->activeHandValid = parsed.activeHand == "STR_LEFT_HAND" || parsed.activeHand == "STR_RIGHT_HAND";
+	input->campaignResearchAvailable = campaign != 0;
+
+	BattleItem *medikit = findBattleItemByIdOnUnit(actor, parsed.medikitBattleItemId);
+	input->medikitResolved = medikit != 0;
+	input->medikitBelongsToActor = medikit != 0 && medikit->getOwner() == actor;
+	input->medikitInSpecifiedHand =
+		medikit != 0 &&
+		medikit->getSlot() != 0 &&
+		medikit->getSlot()->getId() == parsed.activeHand &&
+		medikit->getSlot()->getType() == INV_HAND;
+	input->medikitIsMedikit =
+		medikit != 0 && medikit->getRules() != 0 && medikit->getRules()->getBattleType() == BT_MEDIKIT;
+	input->medikitUsableEnvironment =
+		medikit != 0 && battle != 0 && battle->getItemUsable(medikit).empty();
+
+	input->chargeAvailableForCommand = false;
+	if (medikit != 0)
+	{
+		if (parsed.commandType == "HEAL")
+		{
+			input->chargeAvailableForCommand = medikit->getHealQuantity() > 0;
+		}
+		else if (parsed.commandType == "STIMULANT")
+		{
+			input->chargeAvailableForCommand = medikit->getStimulantQuantity() > 0;
+		}
+		else if (parsed.commandType == "PAINKILLER")
+		{
+			input->chargeAvailableForCommand = medikit->getPainKillerQuantity() > 0;
+		}
+	}
+
+	BattleUnit *target = findUnitById(battle, parsed.targetUnitId);
+	input->targetResolved = target != 0;
+	input->targetFriendlyRosterSoldier =
+		target != 0 && CompanionTacticalAuthorityCore::isCompanionFriendlyRosterSoldierTarget(target);
+
+	input->bodyPartValid = parsed.commandType != "HEAL" || (parsed.bodyPart >= 0 && parsed.bodyPart <= 5);
+
+	const int useTu = actor != 0 && medikit != 0 ? actor->getActionTUs(BA_USE, medikit) : 0;
+	input->insufficientTuForUse = actor == 0 || medikit == 0 || useTu <= 0 ||
+		!game->checkReservedTU(actor, useTu, true);
+}
+
+void fillPsiPanicValidationInput(
+	CompanionCommandCore::PsiPanicValidationInput *input,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &sessionId,
+	const CompanionCommandCore::PsiPanicCommandParsed &parsed,
+	int actorUnitId,
+	bool actorIsPlayerSoldier,
+	bool actorAlive,
+	bool actorAiControlled,
+	bool humanOverrideRevoked,
+	BattleUnit *actor)
+{
+	fillBindingValidationInput(
+		input,
+		game,
+		battle,
+		battleInitialized,
+		sessionId,
+		parsed.snapshotSha256,
+		parsed.sessionId,
+		parsed.turn,
+		parsed.stateVersion,
+		actorUnitId,
+		actorIsPlayerSoldier,
+		actorAlive,
+		actorAiControlled,
+		humanOverrideRevoked);
+	input->psiAmpBattleItemId = parsed.psiAmpBattleItemId;
+	input->activeHand = parsed.activeHand;
+	input->targetUnitId = parsed.targetUnitId;
+	input->activeHandValid = parsed.activeHand == "STR_LEFT_HAND" || parsed.activeHand == "STR_RIGHT_HAND";
+
+	BattleItem *psiAmp = findBattleItemByIdOnUnit(actor, parsed.psiAmpBattleItemId);
+	input->psiAmpResolved = psiAmp != 0;
+	input->psiAmpBelongsToActor = psiAmp != 0 && psiAmp->getOwner() == actor;
+	input->psiAmpInSpecifiedHand =
+		psiAmp != 0 &&
+		psiAmp->getSlot() != 0 &&
+		psiAmp->getSlot()->getId() == parsed.activeHand &&
+		psiAmp->getSlot()->getType() == INV_HAND;
+	input->psiAmpIsPsiAmp =
+		psiAmp != 0 && psiAmp->getRules() != 0 && psiAmp->getRules()->getBattleType() == BT_PSIAMP;
+	input->actorHasPsiSkill =
+		actor != 0 && actor->getBaseStats() != 0 && actor->getBaseStats()->psiSkill > 0;
+
+	BattleUnit *target = findUnitById(battle, parsed.targetUnitId);
+	input->targetResolved = target != 0;
+	input->targetFriendlyRosterSoldier =
+		target != 0 && CompanionTacticalAuthorityCore::isCompanionFriendlyRosterSoldierTarget(target);
+	input->targetGenuineHostile =
+		target != 0 &&
+		target->getOriginalFaction() == FACTION_HOSTILE &&
+		target->getFaction() == FACTION_HOSTILE;
+	input->targetVisible = target != 0 && target->getVisible();
+	input->targetLineOfSightOk = true;
+	if (psiAmp != 0 && psiAmp->getRules() != 0 && psiAmp->getRules()->isLOSRequired() &&
+	    actor != 0 && target != 0)
+	{
+		std::vector<BattleUnit *> *visible = actor->getVisibleUnits();
+		input->targetLineOfSightOk = visible != 0 &&
+			std::find(visible->begin(), visible->end(), target) != visible->end();
+	}
+
+	const int panicTu = actor != 0 && psiAmp != 0 ? actor->getActionTUs(BA_PANIC, psiAmp) : 0;
+	input->insufficientTuForPanic = actor == 0 || psiAmp == 0 || panicTu <= 0 ||
+		!game->checkReservedTU(actor, panicTu, true);
+}
+
+void fillPsiMindControlValidationInput(
+	CompanionCommandCore::PsiMindControlValidationInput *input,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &sessionId,
+	const CompanionCommandCore::PsiMindControlCommandParsed &parsed,
+	int actorUnitId,
+	bool actorIsPlayerSoldier,
+	bool actorAlive,
+	bool actorAiControlled,
+	bool humanOverrideRevoked,
+	BattleUnit *actor)
+{
+	fillBindingValidationInput(
+		input,
+		game,
+		battle,
+		battleInitialized,
+		sessionId,
+		parsed.snapshotSha256,
+		parsed.sessionId,
+		parsed.turn,
+		parsed.stateVersion,
+		actorUnitId,
+		actorIsPlayerSoldier,
+		actorAlive,
+		actorAiControlled,
+		humanOverrideRevoked);
+	input->psiAmpBattleItemId = parsed.psiAmpBattleItemId;
+	input->activeHand = parsed.activeHand;
+	input->targetUnitId = parsed.targetUnitId;
+	input->activeHandValid = parsed.activeHand == "STR_LEFT_HAND" || parsed.activeHand == "STR_RIGHT_HAND";
+
+	BattleItem *psiAmp = findBattleItemByIdOnUnit(actor, parsed.psiAmpBattleItemId);
+	input->psiAmpResolved = psiAmp != 0;
+	input->psiAmpBelongsToActor = psiAmp != 0 && psiAmp->getOwner() == actor;
+	input->psiAmpInSpecifiedHand =
+		psiAmp != 0 &&
+		psiAmp->getSlot() != 0 &&
+		psiAmp->getSlot()->getId() == parsed.activeHand &&
+		psiAmp->getSlot()->getType() == INV_HAND;
+	input->psiAmpIsPsiAmp =
+		psiAmp != 0 && psiAmp->getRules() != 0 && psiAmp->getRules()->getBattleType() == BT_PSIAMP;
+	input->actorHasPsiSkill =
+		actor != 0 && actor->getBaseStats() != 0 && actor->getBaseStats()->psiSkill > 0;
+
+	BattleUnit *target = findUnitById(battle, parsed.targetUnitId);
+	input->targetResolved = target != 0;
+	input->targetFriendlyRosterSoldier =
+		target != 0 && CompanionTacticalAuthorityCore::isCompanionFriendlyRosterSoldierTarget(target);
+	input->targetGenuineHostile =
+		target != 0 &&
+		target->getOriginalFaction() == FACTION_HOSTILE &&
+		target->getFaction() == FACTION_HOSTILE;
+	input->targetVisible = target != 0 && target->getVisible();
+	input->targetLineOfSightOk = true;
+	if (psiAmp != 0 && psiAmp->getRules() != 0 && psiAmp->getRules()->isLOSRequired() &&
+	    actor != 0 && target != 0)
+	{
+		std::vector<BattleUnit *> *visible = actor->getVisibleUnits();
+		input->targetLineOfSightOk = visible != 0 &&
+			std::find(visible->begin(), visible->end(), target) != visible->end();
+	}
+
+	const int mindControlTu = actor != 0 && psiAmp != 0 ? actor->getActionTUs(BA_MINDCONTROL, psiAmp) : 0;
+	input->insufficientTuForMindControl = actor == 0 || psiAmp == 0 || mindControlTu <= 0 ||
+		!game->checkReservedTU(actor, mindControlTu, true);
 }
 
 bool shouldReadCommandInboxNow(const std::string &commandPath)
@@ -3735,7 +4254,9 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "PRIME" && inboxCommandType != "THROW" && inboxCommandType != "GUIDED_LAUNCH" &&
 	    inboxCommandType != "RELOAD" &&
 	    inboxCommandType != "UNLOAD" && inboxCommandType != "INVENTORY_MOVE" &&
-	    inboxCommandType != "PICKUP" && inboxCommandType != "DROP")
+	    inboxCommandType != "PICKUP" && inboxCommandType != "DROP" &&
+	    inboxCommandType != "HEAL" && inboxCommandType != "STIMULANT" && inboxCommandType != "PAINKILLER" &&
+	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL")
 	{
 		std::string inboxDigest;
 		CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
@@ -3770,7 +4291,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(primeParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -3784,7 +4305,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, primeParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, primeParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -3891,7 +4412,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(reloadParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -3905,7 +4426,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, reloadParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, reloadParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4011,7 +4532,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0, 0))
 		{
 			logRejectOnce(unloadParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4025,7 +4546,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, unloadParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, unloadParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4130,7 +4651,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0, 0))
 		{
 			logRejectOnce(invParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4144,7 +4665,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, invParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, invParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0, 0))
 		{
 			return;
 		}
@@ -4263,7 +4784,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0, 0))
 		{
 			logRejectOnce(pickupParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4277,7 +4798,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, pickupParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, pickupParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0, 0))
 		{
 			return;
 		}
@@ -4404,7 +4925,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed, 0))
 		{
 			logRejectOnce(dropParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4418,7 +4939,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, dropParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, dropParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed, 0))
 		{
 			return;
 		}
@@ -4518,6 +5039,455 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		return;
 	}
 
+	if (inboxCommandType == "PSI_PANIC")
+	{
+		CompanionCommandCore::PsiPanicCommandParsed psiParsed = {};
+		if (!CompanionCommandCore::parsePsiPanicCommandJson(commandJson, &psiParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectPsiPanicCommand(resultPath, psiParsed, psiParsed.rejectCode, psiParsed.rejectCode, inboxDigest);
+			logRejectOnce(psiParsed.commandId.empty() ? "unknown" : psiParsed.commandId, psiParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(psiParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &psiParsed))
+		{
+			logRejectOnce(psiParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, psiParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, psiParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, psiParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &psiParsed))
+		{
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, psiParsed.actorUnitId);
+		const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+			tacticalAuthorityForActor(campaign, battle, actor, controlJson, sessionId);
+		const bool liveActor = isCompanionMoveActor(actor, campaign);
+		const std::set<int> &tacticalAiIds = battle->getCompanionTacticalAiSoldierIds();
+		const CompanionTacticalAuthorityCore::TacticalAuthorityInput authorityInput =
+			CompanionTacticalAuthorityCore::buildTacticalAuthorityInput(
+				campaign != 0,
+				tacticalAiIds,
+				liveActor,
+				psiParsed.actorUnitId,
+				controlJson,
+				sessionId,
+				campaign != 0 ? campaign->getCompanionCampaignId() : std::string(),
+				battle->getCompanionTacticalBattleId());
+
+		CompanionCommandCore::PsiPanicValidationInput psiInput = {};
+		fillPsiPanicValidationInput(
+			&psiInput,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			sessionId,
+			psiParsed,
+			psiParsed.actorUnitId,
+			liveActor,
+			actor != 0 && !actor->isOut(),
+			authority.aiCommandPermitted,
+			CompanionTacticalAuthorityCore::isStaleRelayAiAfterCampaignHumanAssignment(
+				authorityInput, controlJson, sessionId),
+			actor);
+
+		const CompanionCommandCore::MoveValidationResult psiVerdict =
+			CompanionCommandCore::validatePsiPanicCommand(psiInput);
+		if (!psiVerdict.accepted)
+		{
+			rejectPsiPanicCommand(resultPath, psiParsed, psiVerdict.rejectCode, psiVerdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, psiParsed.commandId);
+			logRejectOnce(psiParsed.commandId, psiVerdict.rejectCode);
+			maybeLogNotAiControlledReject(
+				psiVerdict.rejectCode,
+				psiParsed.commandId,
+				psiParsed.actorUnitId,
+				campaign,
+				battle,
+				controlJson,
+				controlReadOk,
+				sessionId);
+			return;
+		}
+
+		logCommandDiagnostic("accepted command_id=" + psiParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(psiParsed.actorUnitId));
+		BattleItem *psiAmp = findBattleItemByIdOnUnit(actor, psiParsed.psiAmpBattleItemId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		if (actor != 0 && actor->getActiveHand() != psiParsed.activeHand)
+		{
+			actor->setActiveHand(psiParsed.activeHand);
+		}
+
+		const int tuBefore = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string rejectReason;
+		int tuSpent = 0;
+		const bool executed = game->tryExecuteCompanionPsiPanic(
+			actor, psiAmp, psiParsed.activeHand, psiParsed.targetUnitId, &rejectReason, &tuSpent, 0);
+
+		if (!executed)
+		{
+			rejectPsiPanicCommand(resultPath, psiParsed, "PSI_PANIC_APPLICATION_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, psiParsed.commandId);
+			logRejectOnce(psiParsed.commandId, "PSI_PANIC_APPLICATION_FAILED");
+			return;
+		}
+
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		if (tuSpent < 0)
+		{
+			tuSpent = tuBefore - tuAfter;
+		}
+		if (tuSpent < 0)
+		{
+			rejectPsiPanicCommand(resultPath, psiParsed, "PSI_PANIC_APPLICATION_FAILED",
+				"Inconsistent TU accounting after panic attack.", inboxDigest);
+			appendJournalEntry(journalPath, psiParsed.commandId);
+			logRejectOnce(psiParsed.commandId, "PSI_PANIC_APPLICATION_FAILED");
+			return;
+		}
+
+		const std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildPsiPanicResultJson(psiParsed, CompanionCommandCore::CMD_COMPLETED, std::string(),
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256, inboxDigest, tuSpent));
+		logTerminalOnce(psiParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		appendJournalEntry(journalPath, psiParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "PSI_MIND_CONTROL")
+	{
+		CompanionCommandCore::PsiMindControlCommandParsed psiParsed = {};
+		if (!CompanionCommandCore::parsePsiMindControlCommandJson(commandJson, &psiParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectPsiMindControlCommand(resultPath, psiParsed, psiParsed.rejectCode, psiParsed.rejectCode, inboxDigest);
+			logRejectOnce(psiParsed.commandId.empty() ? "unknown" : psiParsed.commandId, psiParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(psiParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &psiParsed))
+		{
+			logRejectOnce(psiParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, psiParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, psiParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, psiParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &psiParsed))
+		{
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, psiParsed.actorUnitId);
+		const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+			tacticalAuthorityForActor(campaign, battle, actor, controlJson, sessionId);
+		const bool liveActor = isCompanionMoveActor(actor, campaign);
+		const std::set<int> &tacticalAiIds = battle->getCompanionTacticalAiSoldierIds();
+		const CompanionTacticalAuthorityCore::TacticalAuthorityInput authorityInput =
+			CompanionTacticalAuthorityCore::buildTacticalAuthorityInput(
+				campaign != 0,
+				tacticalAiIds,
+				liveActor,
+				psiParsed.actorUnitId,
+				controlJson,
+				sessionId,
+				campaign != 0 ? campaign->getCompanionCampaignId() : std::string(),
+				battle->getCompanionTacticalBattleId());
+
+		CompanionCommandCore::PsiMindControlValidationInput psiInput = {};
+		fillPsiMindControlValidationInput(
+			&psiInput,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			sessionId,
+			psiParsed,
+			psiParsed.actorUnitId,
+			liveActor,
+			actor != 0 && !actor->isOut(),
+			authority.aiCommandPermitted,
+			CompanionTacticalAuthorityCore::isStaleRelayAiAfterCampaignHumanAssignment(
+				authorityInput, controlJson, sessionId),
+			actor);
+
+		const CompanionCommandCore::MoveValidationResult psiVerdict =
+			CompanionCommandCore::validatePsiMindControlCommand(psiInput);
+		if (!psiVerdict.accepted)
+		{
+			rejectPsiMindControlCommand(resultPath, psiParsed, psiVerdict.rejectCode, psiVerdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, psiParsed.commandId);
+			logRejectOnce(psiParsed.commandId, psiVerdict.rejectCode);
+			maybeLogNotAiControlledReject(
+				psiVerdict.rejectCode,
+				psiParsed.commandId,
+				psiParsed.actorUnitId,
+				campaign,
+				battle,
+				controlJson,
+				controlReadOk,
+				sessionId);
+			return;
+		}
+
+		logCommandDiagnostic("accepted command_id=" + psiParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(psiParsed.actorUnitId));
+		BattleItem *psiAmp = findBattleItemByIdOnUnit(actor, psiParsed.psiAmpBattleItemId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		if (actor != 0 && actor->getActiveHand() != psiParsed.activeHand)
+		{
+			actor->setActiveHand(psiParsed.activeHand);
+		}
+
+		const int tuBefore = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string rejectReason;
+		int tuSpent = 0;
+		const bool executed = game->tryExecuteCompanionPsiMindControl(
+			actor, psiAmp, psiParsed.activeHand, psiParsed.targetUnitId, &rejectReason, &tuSpent, 0);
+
+		if (!executed)
+		{
+			rejectPsiMindControlCommand(resultPath, psiParsed, "PSI_MIND_CONTROL_APPLICATION_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, psiParsed.commandId);
+			logRejectOnce(psiParsed.commandId, "PSI_MIND_CONTROL_APPLICATION_FAILED");
+			return;
+		}
+
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		if (tuSpent < 0)
+		{
+			tuSpent = tuBefore - tuAfter;
+		}
+		if (tuSpent < 0)
+		{
+			rejectPsiMindControlCommand(resultPath, psiParsed, "PSI_MIND_CONTROL_APPLICATION_FAILED",
+				"Inconsistent TU accounting after mind control attack.", inboxDigest);
+			appendJournalEntry(journalPath, psiParsed.commandId);
+			logRejectOnce(psiParsed.commandId, "PSI_MIND_CONTROL_APPLICATION_FAILED");
+			return;
+		}
+
+		const std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildPsiMindControlResultJson(psiParsed, CompanionCommandCore::CMD_COMPLETED, std::string(),
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256, inboxDigest, tuSpent));
+		logTerminalOnce(psiParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		appendJournalEntry(journalPath, psiParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "HEAL" || inboxCommandType == "STIMULANT" || inboxCommandType == "PAINKILLER")
+	{
+		CompanionCommandCore::MedikitCommandParsed medikitParsed = {};
+		if (!CompanionCommandCore::parseMedikitCommandJson(commandJson, &medikitParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectMedikitCommand(resultPath, medikitParsed, medikitParsed.rejectCode, medikitParsed.rejectCode, inboxDigest);
+			logRejectOnce(medikitParsed.commandId.empty() ? "unknown" : medikitParsed.commandId, medikitParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(medikitParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &medikitParsed))
+		{
+			logRejectOnce(medikitParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, medikitParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, medikitParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, medikitParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &medikitParsed))
+		{
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, medikitParsed.actorUnitId);
+		const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+			tacticalAuthorityForActor(campaign, battle, actor, controlJson, sessionId);
+		const bool liveActor = isCompanionMoveActor(actor, campaign);
+		const std::set<int> &tacticalAiIds = battle->getCompanionTacticalAiSoldierIds();
+		const CompanionTacticalAuthorityCore::TacticalAuthorityInput authorityInput =
+			CompanionTacticalAuthorityCore::buildTacticalAuthorityInput(
+				campaign != 0,
+				tacticalAiIds,
+				liveActor,
+				medikitParsed.actorUnitId,
+				controlJson,
+				sessionId,
+				campaign != 0 ? campaign->getCompanionCampaignId() : std::string(),
+				battle->getCompanionTacticalBattleId());
+
+		CompanionCommandCore::MedikitValidationInput medikitInput = {};
+		fillMedikitValidationInput(
+			&medikitInput,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			sessionId,
+			medikitParsed,
+			medikitParsed.actorUnitId,
+			liveActor,
+			actor != 0 && !actor->isOut(),
+			authority.aiCommandPermitted,
+			CompanionTacticalAuthorityCore::isStaleRelayAiAfterCampaignHumanAssignment(
+				authorityInput, controlJson, sessionId),
+			actor);
+
+		const CompanionCommandCore::MoveValidationResult medikitVerdict =
+			CompanionCommandCore::validateMedikitCommand(medikitInput);
+		if (!medikitVerdict.accepted)
+		{
+			rejectMedikitCommand(resultPath, medikitParsed, medikitVerdict.rejectCode, medikitVerdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, medikitParsed.commandId);
+			logRejectOnce(medikitParsed.commandId, medikitVerdict.rejectCode);
+			maybeLogNotAiControlledReject(
+				medikitVerdict.rejectCode,
+				medikitParsed.commandId,
+				medikitParsed.actorUnitId,
+				campaign,
+				battle,
+				controlJson,
+				controlReadOk,
+				sessionId);
+			return;
+		}
+
+		logCommandDiagnostic("accepted command_id=" + medikitParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(medikitParsed.actorUnitId));
+		BattleItem *medikit = findBattleItemByIdOnUnit(actor, medikitParsed.medikitBattleItemId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		if (actor != 0 && actor->getActiveHand() != medikitParsed.activeHand)
+		{
+			actor->setActiveHand(medikitParsed.activeHand);
+		}
+
+		const int tuBefore = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string rejectReason;
+		int tuSpent = 0;
+		bool targetRevived = false;
+		bool executed = false;
+		if (medikitParsed.commandType == "HEAL")
+		{
+			executed = game->tryExecuteCompanionMedikitHeal(
+				actor, medikit, medikitParsed.activeHand, medikitParsed.targetUnitId, medikitParsed.bodyPart,
+				&rejectReason, &tuSpent, &targetRevived);
+		}
+		else if (medikitParsed.commandType == "STIMULANT")
+		{
+			executed = game->tryExecuteCompanionMedikitStimulant(
+				actor, medikit, medikitParsed.activeHand, medikitParsed.targetUnitId,
+				&rejectReason, &tuSpent, &targetRevived);
+		}
+		else if (medikitParsed.commandType == "PAINKILLER")
+		{
+			executed = game->tryExecuteCompanionMedikitPainKiller(
+				actor, medikit, medikitParsed.activeHand, medikitParsed.targetUnitId,
+				&rejectReason, &tuSpent);
+		}
+
+		if (!executed)
+		{
+			rejectMedikitCommand(resultPath, medikitParsed, "MEDIKIT_APPLICATION_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, medikitParsed.commandId);
+			logRejectOnce(medikitParsed.commandId, "MEDIKIT_APPLICATION_FAILED");
+			return;
+		}
+
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		if (tuSpent < 0)
+		{
+			tuSpent = tuBefore - tuAfter;
+		}
+		if (tuSpent < 0)
+		{
+			rejectMedikitCommand(resultPath, medikitParsed, "MEDIKIT_APPLICATION_FAILED",
+				"Inconsistent TU accounting after medikit application.", inboxDigest);
+			appendJournalEntry(journalPath, medikitParsed.commandId);
+			logRejectOnce(medikitParsed.commandId, "MEDIKIT_APPLICATION_FAILED");
+			return;
+		}
+
+		const bool includeRevived = medikitParsed.commandType == "HEAL" || medikitParsed.commandType == "STIMULANT";
+		const std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildMedikitResultJson(medikitParsed, CompanionCommandCore::CMD_COMPLETED, std::string(),
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256, inboxDigest, tuSpent, includeRevived, targetRevived));
+		logTerminalOnce(medikitParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		appendJournalEntry(journalPath, medikitParsed.commandId);
+		return;
+	}
+
 	if (inboxCommandType == "THROW")
 	{
 		CompanionCommandCore::ThrowCommandParsed throwParsed = {};
@@ -4540,7 +5510,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(throwParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4554,7 +5524,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, throwParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, throwParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4674,7 +5644,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
 		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0,
-			&guidedLaunchParsed, 0, 0, 0, 0, 0))
+			&guidedLaunchParsed, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(guidedLaunchParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4688,7 +5658,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, guidedLaunchParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, guidedLaunchParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, &guidedLaunchParsed, 0, 0, 0, 0, 0))
+			existingResultJson, 0, 0, 0, 0, 0, &guidedLaunchParsed, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4819,7 +5789,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(snapParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4833,7 +5803,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, snapParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, snapParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4994,7 +5964,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(standParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -5008,7 +5978,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, standParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, standParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -5128,7 +6098,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(kneelParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -5142,7 +6112,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, kneelParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, kneelParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -5261,7 +6231,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 	std::string journalJson;
 	readTextFile(journalPath, &journalJson);
-	if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+	if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 	{
 		logRejectOnce(parsed.commandId, "JOURNAL_MALFORMED");
 		return;
@@ -5275,7 +6245,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			duplicate, parsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 	if (applyDuplicateInboxDecision(
 			duplicateDecision, parsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 	{
 		return;
 	}

@@ -779,6 +779,18 @@ void appendHandActionCosts(YAML::Node &handCosts, SavedBattleGame *battle, Battl
 		appendActionEntry(actions, battle, unit, weapon, BA_HIT, "melee", envOk && companionResearchUsable(battle, weapon, BA_HIT));
 	}
 
+	if (rules->getBattleType() == BT_MEDIKIT)
+	{
+		const bool researchOk = envOk && companionResearchUsable(battle, weapon, BA_USE);
+		appendActionEntry(actions, battle, unit, weapon, BA_USE, "use", researchOk);
+	}
+
+	if (rules->getBattleType() == BT_PSIAMP && unit->getBaseStats()->psiSkill > 0)
+	{
+		appendActionEntry(actions, battle, unit, weapon, BA_PANIC, "panic", envOk);
+		appendActionEntry(actions, battle, unit, weapon, BA_MINDCONTROL, "mindcontrol", envOk);
+	}
+
 	handCosts["actions"] = actions;
 }
 
@@ -829,13 +841,18 @@ void appendUnit(YAML::Node &units, SavedBattleGame *battle, SavedGame *campaign,
 		entry["name"] = friendlySoldierDisplayName(unit);
 		entry["health"] = unit->getHealth();
 		entry["timeUnits"] = unit->getTimeUnits();
+		if (unit->getGeoscapeSoldier() != 0)
+		{
+			entry["psiSkill"] = unit->getBaseStats()->psiSkill;
+		}
 		appendFriendlyEquipment(entry, battle, campaign, unit);
 		if (!unit->isOut())
 		{
 			appendFriendlyActionCosts(entry, battle, unit);
 		}
 		CompanionSnapshotUnitState::appendFacing(entry, unit);
-		CompanionSnapshotUnitState::appendFriendlyCondition(entry, unit);
+		CompanionSnapshotUnitState::appendFriendlyCondition(entry, unit, campaign);
+		CompanionSnapshotUnitState::appendLiveRosterFatalWounds(entry, unit, campaign);
 		CompanionSnapshotUnitState::appendFriendlyReadiness(entry, unit, campaign);
 	}
 	else

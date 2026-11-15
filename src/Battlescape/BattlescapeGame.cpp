@@ -67,6 +67,8 @@
 #include "../Engine/CompanionOnDemandRelayCore.h"
 #include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
+#include "../Engine/CompanionMedikitExecutionCore.h"
+#include "../Engine/CompanionPsiExecutionCore.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionGroundInventoryCore.h"
 #include "../Savegame/BattleUnitStatistics.h"
@@ -1174,6 +1176,7 @@ void BattlescapeGame::popState()
 		case BA_LAUNCH:
 		case BA_USE:
 		case BA_PRIME:
+		case BA_PANIC:
 			CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
 			break;
 		default:
@@ -4406,6 +4409,506 @@ bool BattlescapeGame::tryExecuteCompanionLaunch(
 	_states.push_back(new ProjectileFlyBState(this, _currentAction));
 	statePushFront(new UnitTurnBState(this, _currentAction));
 	return true;
+}
+
+static BattleUnit *companionFindUnitById(SavedBattleGame *save, int unitId)
+{
+	if (save == 0 || unitId <= 0)
+	{
+		return 0;
+	}
+	for (std::vector<BattleUnit *>::iterator i = save->getUnits()->begin(); i != save->getUnits()->end(); ++i)
+	{
+		if ((*i)->getId() == unitId)
+		{
+			return *i;
+		}
+	}
+	return 0;
+}
+
+bool BattlescapeGame::companionMedikitActorAuthorized(BattleUnit *actor, std::string *rejectReason) const
+{
+	if (actor == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	SavedGame *campaign = companionCampaignSaveForValidation();
+	const std::set<int> &tacticalAi = _save->getCompanionTacticalAiSoldierIds();
+	if (campaign == 0)
+	{
+		return true;
+	}
+	if (tacticalAi.find(actor->getId()) == tacticalAi.end())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor not authorized for companion medikit commands.";
+		}
+		return false;
+	}
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionMedikitShared(
+	BattleUnit *actor,
+	BattleItem *medikit,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	CompanionMedikitExecMode mode,
+	int bodyPart,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *targetRevivedOut)
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (targetRevivedOut != 0)
+	{
+		*targetRevivedOut = false;
+	}
+	if (actor == 0 || actor->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (medikit == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Medikit missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!companionMedikitActorAuthorized(actor, rejectReason))
+	{
+		return false;
+	}
+	RuleItem *rules = medikit->getRules();
+	if (rules == 0 || rules->getBattleType() != BT_MEDIKIT)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item is not a medikit.";
+		}
+		return false;
+	}
+	if (medikit->getOwner() != actor)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Medikit does not belong to the actor.";
+		}
+		return false;
+	}
+	if (!companionWeaponIsHeldInLeftOrRightHand(medikit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Medikit must be in STR_LEFT_HAND or STR_RIGHT_HAND.";
+		}
+		return false;
+	}
+	if (medikit->getSlot() == 0 || medikit->getSlot()->getId() != activeHandSlotId)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Medikit is not equipped in the specified hand.";
+		}
+		return false;
+	}
+	if (_save->getItemUsable(medikit).empty() == false)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Medikit is not usable in current battlescape conditions.";
+		}
+		return false;
+	}
+	BattleUnit *requestedTarget = companionFindUnitById(_save, targetUnitId);
+	if (requestedTarget == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target unit not found.";
+		}
+		return false;
+	}
+	if (!CompanionTacticalAuthorityCore::isCompanionFriendlyRosterSoldierTarget(requestedTarget))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target must be a friendly roster soldier.";
+		}
+		return false;
+	}
+	BattleUnit *nativeTarget = CompanionMedikitExecutionCore::resolveNativeMedikitTarget(_save, actor);
+	if (nativeTarget == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No legal medikit target for actor facing and position.";
+		}
+		return false;
+	}
+	if (nativeTarget->getId() != targetUnitId)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Requested target does not match native medikit target selection.";
+		}
+		return false;
+	}
+	if (mode == COMPANION_MEDIKIT_HEAL && (bodyPart < 0 || bodyPart > 5))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid body part.";
+		}
+		return false;
+	}
+
+	const int applicationTu = actor->getActionTUs(BA_USE, medikit);
+	if (applicationTu <= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Medikit use TU unavailable.";
+		}
+		return false;
+	}
+
+	int chargeBefore = 0;
+	switch (mode)
+	{
+	case COMPANION_MEDIKIT_PAINKILLER:
+		chargeBefore = medikit->getPainKillerQuantity();
+		break;
+	case COMPANION_MEDIKIT_STIMULANT:
+		chargeBefore = medikit->getStimulantQuantity();
+		break;
+	case COMPANION_MEDIKIT_HEAL:
+		chargeBefore = medikit->getHealQuantity();
+		break;
+	default:
+		break;
+	}
+	if (chargeBefore <= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No medikit charges remaining for this application.";
+		}
+		return false;
+	}
+
+	const int tuBefore = actor->getTimeUnits();
+
+	CompanionMedikitExecutionCore::MedikitApplicationResult applyResult;
+	switch (mode)
+	{
+	case COMPANION_MEDIKIT_PAINKILLER:
+		applyResult = CompanionMedikitExecutionCore::applyPainKiller(actor, medikit, requestedTarget, applicationTu, tuSpentOut);
+		break;
+	case COMPANION_MEDIKIT_STIMULANT:
+		applyResult = CompanionMedikitExecutionCore::applyStimulant(
+			actor, medikit, requestedTarget, applicationTu, tuSpentOut, targetRevivedOut);
+		break;
+	case COMPANION_MEDIKIT_HEAL:
+		applyResult = CompanionMedikitExecutionCore::applyHeal(
+			actor, medikit, requestedTarget, bodyPart, applicationTu, tuSpentOut, targetRevivedOut);
+		break;
+	default:
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unknown medikit application mode.";
+		}
+		return false;
+	}
+
+	if (applyResult == CompanionMedikitExecutionCore::MEDIKIT_NO_CHARGE)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No medikit charges remaining for this application.";
+		}
+		if (actor->getTimeUnits() != tuBefore)
+		{
+			actor->setTimeUnits(tuBefore);
+		}
+		switch (mode)
+		{
+		case COMPANION_MEDIKIT_PAINKILLER:
+			medikit->setPainKillerQuantity(chargeBefore);
+			break;
+		case COMPANION_MEDIKIT_STIMULANT:
+			medikit->setStimulantQuantity(chargeBefore);
+			break;
+		case COMPANION_MEDIKIT_HEAL:
+			medikit->setHealQuantity(chargeBefore);
+			break;
+		default:
+			break;
+		}
+		return false;
+	}
+	if (applyResult == CompanionMedikitExecutionCore::MEDIKIT_INSUFFICIENT_TU)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for medikit application.";
+		}
+		if (actor->getTimeUnits() != tuBefore)
+		{
+			actor->setTimeUnits(tuBefore);
+		}
+		switch (mode)
+		{
+		case COMPANION_MEDIKIT_PAINKILLER:
+			medikit->setPainKillerQuantity(chargeBefore);
+			break;
+		case COMPANION_MEDIKIT_STIMULANT:
+			medikit->setStimulantQuantity(chargeBefore);
+			break;
+		case COMPANION_MEDIKIT_HEAL:
+			medikit->setHealQuantity(chargeBefore);
+			break;
+		default:
+			break;
+		}
+		return false;
+	}
+
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+		CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	}
+	return true;
+}
+
+static bool companionIsGenuineHostileTarget(const BattleUnit *unit)
+{
+	return unit != 0
+		&& unit->getOriginalFaction() == FACTION_HOSTILE
+		&& unit->getFaction() == FACTION_HOSTILE;
+}
+
+bool BattlescapeGame::tryExecuteCompanionPsiAmpAttack(
+	BattleUnit *actor,
+	BattleItem *psiAmp,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *psychicSucceededOut,
+	bool (*execute)(
+		BattlescapeGame *game,
+		BattleUnit *actor,
+		BattleItem *psiAmp,
+		BattleUnit *target,
+		std::string *rejectReason,
+		int *tuSpentOut,
+		bool *psychicSucceededOut))
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (psychicSucceededOut != 0)
+	{
+		*psychicSucceededOut = false;
+	}
+	if (actor == 0 || actor->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (psiAmp == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Psi-Amp missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!companionMedikitActorAuthorized(actor, rejectReason))
+	{
+		return false;
+	}
+	RuleItem *rules = psiAmp->getRules();
+	if (rules == 0 || rules->getBattleType() != BT_PSIAMP)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item is not a Psi-Amp.";
+		}
+		return false;
+	}
+	if (psiAmp->getOwner() != actor)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Psi-Amp does not belong to the actor.";
+		}
+		return false;
+	}
+	if (!companionWeaponIsHeldInLeftOrRightHand(psiAmp))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Psi-Amp must be in STR_LEFT_HAND or STR_RIGHT_HAND.";
+		}
+		return false;
+	}
+	if (psiAmp->getSlot() == 0 || psiAmp->getSlot()->getId() != activeHandSlotId)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Psi-Amp is not equipped in the specified hand.";
+		}
+		return false;
+	}
+	if (actor->getBaseStats()->psiSkill <= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor has no psionic skill.";
+		}
+		return false;
+	}
+	BattleUnit *target = companionFindUnitById(_save, targetUnitId);
+	if (target == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target unit not found.";
+		}
+		return false;
+	}
+	if (!companionIsGenuineHostileTarget(target))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target must be a genuine hostile unit.";
+		}
+		return false;
+	}
+
+	return execute(this, actor, psiAmp, target, rejectReason, tuSpentOut, psychicSucceededOut);
+}
+
+bool BattlescapeGame::tryExecuteCompanionPsiPanic(
+	BattleUnit *actor,
+	BattleItem *psiAmp,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *psychicSucceededOut)
+{
+	if (!tryExecuteCompanionPsiAmpAttack(
+		actor, psiAmp, activeHandSlotId, targetUnitId, rejectReason, tuSpentOut, psychicSucceededOut,
+		CompanionPsiExecutionCore::executePanic))
+	{
+		return false;
+	}
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionPsiMindControl(
+	BattleUnit *actor,
+	BattleItem *psiAmp,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *psychicSucceededOut)
+{
+	if (!tryExecuteCompanionPsiAmpAttack(
+		actor, psiAmp, activeHandSlotId, targetUnitId, rejectReason, tuSpentOut, psychicSucceededOut,
+		CompanionPsiExecutionCore::executeMindControl))
+	{
+		return false;
+	}
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionMedikitPainKiller(
+	BattleUnit *actor,
+	BattleItem *medikit,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	std::string *rejectReason,
+	int *tuSpentOut)
+{
+	return tryExecuteCompanionMedikitShared(
+		actor, medikit, activeHandSlotId, targetUnitId, COMPANION_MEDIKIT_PAINKILLER, -1, rejectReason, tuSpentOut, 0);
+}
+
+bool BattlescapeGame::tryExecuteCompanionMedikitStimulant(
+	BattleUnit *actor,
+	BattleItem *medikit,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *targetRevivedOut)
+{
+	return tryExecuteCompanionMedikitShared(
+		actor, medikit, activeHandSlotId, targetUnitId, COMPANION_MEDIKIT_STIMULANT, -1, rejectReason, tuSpentOut, targetRevivedOut);
+}
+
+bool BattlescapeGame::tryExecuteCompanionMedikitHeal(
+	BattleUnit *actor,
+	BattleItem *medikit,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	int bodyPart,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *targetRevivedOut)
+{
+	return tryExecuteCompanionMedikitShared(
+		actor, medikit, activeHandSlotId, targetUnitId, COMPANION_MEDIKIT_HEAL, bodyPart, rejectReason, tuSpentOut, targetRevivedOut);
 }
 
 bool BattlescapeGame::humanPlayerOrderPermitted(BattleUnit *unit) const

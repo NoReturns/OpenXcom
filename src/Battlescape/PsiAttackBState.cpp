@@ -35,6 +35,7 @@
 #include "../Savegame/BattleUnitStatistics.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Savegame/Soldier.h"
+#include <algorithm>
 
 namespace OpenXcom
 {
@@ -148,7 +149,8 @@ void PsiAttackBState::psiAttack()
 	if (Options::allowPsiStrengthImprovement) _target->addPsiStrengthExp();
 	if (attackStrength > defenseStrength)
 	{
-		Game *game = _parent->getSave()->getBattleState()->getGame();
+		BattlescapeState *battleState = _parent->getSave()->getBattleState();
+		Game *game = battleState != 0 ? battleState->getGame() : 0;
 		_action.actor->addPsiSkillExp();
 		_action.actor->addPsiSkillExp();
 
@@ -158,7 +160,8 @@ void PsiAttackBState::psiAttack()
 		killStat.weapon = _action.weapon->getRules()->getName();
 		killStat.weaponAmmo = _action.weapon->getRules()->getName(); //Psi weapons got no ammo, just filling up the field
 		killStat.faction = _target->getFaction();
-		killStat.mission = _parent->getSave()->getGeoscapeSave()->getMissionStatistics()->size();
+		SavedGame *geoscape = _parent->getSave()->getGeoscapeSave();
+		killStat.mission = geoscape != 0 ? geoscape->getMissionStatistics()->size() : 0;
 		killStat.id = _target->getId();
 
 		if (_action.type == BA_PANIC)
@@ -175,7 +178,10 @@ void PsiAttackBState::psiAttack()
 			}
 			if (_parent->getSave()->getSide() == FACTION_PLAYER)
 			{
-				game->pushState(new InfoboxState(game->getLanguage()->getString("STR_MORALE_ATTACK_SUCCESSFUL")));
+				if (game != 0)
+				{
+					game->pushState(new InfoboxState(game->getLanguage()->getString("STR_MORALE_ATTACK_SUCCESSFUL")));
+				}
 				SavedGame *campaign = _parent->getSave()->getGeoscapeSave();
 				std::string rosterDisplayName;
 				Soldier *targetSoldier = _target->getGeoscapeSoldier();
@@ -234,8 +240,14 @@ void PsiAttackBState::psiAttack()
 				{
 					_parent->autoEndBattle();
 				}
-				game->pushState(new InfoboxState(game->getLanguage()->getString("STR_MIND_CONTROL_SUCCESSFUL")));
-				_parent->getSave()->getBattleState()->updateSoldierInfo();
+				if (game != 0)
+				{
+					game->pushState(new InfoboxState(game->getLanguage()->getString("STR_MIND_CONTROL_SUCCESSFUL")));
+					if (battleState != 0)
+					{
+						battleState->updateSoldierInfo();
+					}
+				}
 				_parent->getSave()->getCompanionPerceptionLog().tryRecordPsychologicalUiNotification(
 					_parent->getSave(),
 					_target,
@@ -248,7 +260,10 @@ void PsiAttackBState::psiAttack()
 			else
 			{
 				// show a little infobox with the name of the unit and "... is under alien control"
-				game->pushState(new InfoboxState(game->getLanguage()->getString("STR_IS_UNDER_ALIEN_CONTROL", _target->getGender()).arg(_target->getName(game->getLanguage()))));
+				if (game != 0)
+				{
+					game->pushState(new InfoboxState(game->getLanguage()->getString("STR_IS_UNDER_ALIEN_CONTROL", _target->getGender()).arg(_target->getName(game->getLanguage()))));
+				}
 				_parent->getSave()->getCompanionPerceptionLog().tryRecordPsychologicalUiNotification(
 					_parent->getSave(),
 					_target,
@@ -267,6 +282,180 @@ void PsiAttackBState::psiAttack()
 			_target->addPsiStrengthExp();
 		}
 	}
+}
+
+bool PsiAttackBState::companionExecutePsiAttack(
+	BattlescapeGame *parent,
+	BattleAction action,
+	BattleActionType actionType,
+	const char *invalidActionLabel,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *psychicSucceededOut)
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (psychicSucceededOut != 0)
+	{
+		*psychicSucceededOut = false;
+	}
+	if (parent == 0 || action.actor == 0 || action.weapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = invalidActionLabel;
+		}
+		return false;
+	}
+	SavedBattleGame *save = parent->getSave();
+	if (save == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle unavailable.";
+		}
+		return false;
+	}
+	Tile *targetTile = save->getTile(action.target);
+	if (targetTile == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid target position.";
+		}
+		return false;
+	}
+	BattleUnit *target = targetTile->getUnit();
+	if (target == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target unit not found.";
+		}
+		return false;
+	}
+	if (action.actor->getBaseStats()->psiSkill <= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor has no psionic skill.";
+		}
+		return false;
+	}
+	if (action.TU <= 0)
+	{
+		action.TU = action.actor->getActionTUs(actionType, action.weapon);
+	}
+	if (action.actor->getTimeUnits() < action.TU)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units.";
+		}
+		return false;
+	}
+	if (action.weapon->getRules() == 0 || action.weapon->getRules()->getBattleType() != BT_PSIAMP)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon is not a Psi-Amp.";
+		}
+		return false;
+	}
+	if (target->getFaction() == action.actor->getFaction())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target is not hostile.";
+		}
+		return false;
+	}
+	if (!target->getVisible())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target is not visible.";
+		}
+		return false;
+	}
+	if (action.weapon->getRules()->isLOSRequired())
+	{
+		std::vector<BattleUnit *> *visible = action.actor->getVisibleUnits();
+		if (visible == 0 ||
+		    std::find(visible->begin(), visible->end(), target) == visible->end())
+		{
+			if (rejectReason != 0)
+			{
+				*rejectReason = "No line of sight.";
+			}
+			return false;
+		}
+	}
+
+	const int moraleBefore = target->getMorale();
+	const UnitFaction factionBefore = target->getFaction();
+	const UnitFaction originalFactionBefore = target->getOriginalFaction();
+	const int controllerBefore = target->getMindControllerId();
+	PsiAttackBState state(parent, action);
+	state._unit = action.actor;
+	state._target = target;
+	state._item = action.weapon;
+	state._action = action;
+	state._initialized = true;
+	state.psiAttack();
+
+	if (!action.actor->spendTimeUnits(action.TU))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units.";
+		}
+		return false;
+	}
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = action.TU;
+	}
+	if (psychicSucceededOut != 0)
+	{
+		if (actionType == BA_PANIC)
+		{
+			*psychicSucceededOut = target->getMorale() < moraleBefore
+				|| (target->getMindControllerId() != controllerBefore && target->getMindControllerId() == action.actor->getId());
+		}
+		else if (actionType == BA_MINDCONTROL)
+		{
+			*psychicSucceededOut = target->getFaction() == action.actor->getFaction()
+				&& target->getOriginalFaction() == originalFactionBefore
+				&& factionBefore != target->getFaction()
+				&& target->getMindControllerId() == action.actor->getId();
+		}
+	}
+	return true;
+}
+
+bool PsiAttackBState::companionExecutePanic(
+	BattlescapeGame *parent,
+	BattleAction action,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *psychicSucceededOut)
+{
+	return companionExecutePsiAttack(
+		parent, action, BA_PANIC, "Invalid panic action.", rejectReason, tuSpentOut, psychicSucceededOut);
+}
+
+bool PsiAttackBState::companionExecuteMindControl(
+	BattlescapeGame *parent,
+	BattleAction action,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *psychicSucceededOut)
+{
+	return companionExecutePsiAttack(
+		parent, action, BA_MINDCONTROL, "Invalid mind control action.", rejectReason, tuSpentOut, psychicSucceededOut);
 }
 
 }

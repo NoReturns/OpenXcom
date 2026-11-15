@@ -1705,6 +1705,254 @@ static void testParseReloadCommandJson()
 	expect(parsed.valid && parsed.weaponBattleItemId == 10 && parsed.ammoBattleItemId == 20, "reload item ids parsed");
 }
 
+static MedikitValidationInput validMedikitInput()
+{
+	MedikitValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.medikitBattleItemId = 701;
+	input.activeHand = "STR_RIGHT_HAND";
+	input.targetUnitId = 2;
+	input.bodyPart = 1;
+	input.activeHandValid = true;
+	input.medikitResolved = true;
+	input.campaignResearchAvailable = true;
+	input.medikitBelongsToActor = true;
+	input.medikitInSpecifiedHand = true;
+	input.medikitIsMedikit = true;
+	input.medikitUsableEnvironment = true;
+	input.chargeAvailableForCommand = true;
+	input.targetResolved = true;
+	input.targetFriendlyRosterSoldier = true;
+	input.bodyPartValid = true;
+	input.insufficientTuForUse = false;
+	return input;
+}
+
+static void testMedikitAuthorizedAccepted()
+{
+	expect(validateMedikitCommand(validMedikitInput()).accepted, "authorized medikit accepted");
+}
+
+static void testMedikitProhibitedTargetRejected()
+{
+	MedikitValidationInput input = validMedikitInput();
+	input.targetFriendlyRosterSoldier = false;
+	const MoveValidationResult result = validateMedikitCommand(input);
+	expect(!result.accepted && result.rejectCode == "PROHIBITED_TARGET", "non-roster target rejects medikit");
+}
+
+static void testMedikitChargeDepletedRejected()
+{
+	MedikitValidationInput input = validMedikitInput();
+	input.chargeAvailableForCommand = false;
+	const MoveValidationResult result = validateMedikitCommand(input);
+	expect(!result.accepted && result.rejectCode == "MEDIKIT_CHARGE_DEPLETED", "depleted charge rejects");
+}
+
+static PsiPanicValidationInput validPsiPanicInput()
+{
+	PsiPanicValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.psiAmpBattleItemId = 801;
+	input.activeHand = "STR_LEFT_HAND";
+	input.targetUnitId = 100042;
+	input.activeHandValid = true;
+	input.psiAmpResolved = true;
+	input.psiAmpBelongsToActor = true;
+	input.psiAmpInSpecifiedHand = true;
+	input.psiAmpIsPsiAmp = true;
+	input.actorHasPsiSkill = true;
+	input.targetResolved = true;
+	input.targetGenuineHostile = true;
+	input.targetFriendlyRosterSoldier = false;
+	input.targetVisible = true;
+	input.targetLineOfSightOk = true;
+	input.insufficientTuForPanic = false;
+	return input;
+}
+
+static void testPsiPanicAuthorizedAccepted()
+{
+	expect(validatePsiPanicCommand(validPsiPanicInput()).accepted, "authorized psi panic accepted");
+}
+
+static void testPsiPanicZeroSkillRejected()
+{
+	PsiPanicValidationInput input = validPsiPanicInput();
+	input.actorHasPsiSkill = false;
+	const MoveValidationResult result = validatePsiPanicCommand(input);
+	expect(!result.accepted && result.rejectCode == "ZERO_PSI_SKILL", "zero psi skill rejects");
+}
+
+static void testPsiPanicHiddenTargetRejected()
+{
+	PsiPanicValidationInput input = validPsiPanicInput();
+	input.targetVisible = false;
+	const MoveValidationResult result = validatePsiPanicCommand(input);
+	expect(!result.accepted && result.rejectCode == "TARGET_NOT_VISIBLE", "invisible target rejects");
+}
+
+static PsiMindControlValidationInput validPsiMindControlInput()
+{
+	PsiMindControlValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.psiAmpBattleItemId = 801;
+	input.activeHand = "STR_LEFT_HAND";
+	input.targetUnitId = 100043;
+	input.activeHandValid = true;
+	input.psiAmpResolved = true;
+	input.psiAmpBelongsToActor = true;
+	input.psiAmpInSpecifiedHand = true;
+	input.psiAmpIsPsiAmp = true;
+	input.actorHasPsiSkill = true;
+	input.targetResolved = true;
+	input.targetGenuineHostile = true;
+	input.targetFriendlyRosterSoldier = false;
+	input.targetVisible = true;
+	input.targetLineOfSightOk = true;
+	input.insufficientTuForMindControl = false;
+	return input;
+}
+
+static void testPsiMindControlAuthorizedAccepted()
+{
+	expect(validatePsiMindControlCommand(validPsiMindControlInput()).accepted, "authorized psi mc accepted");
+}
+
+static void testPsiMindControlHiddenTargetRejected()
+{
+	PsiMindControlValidationInput input = validPsiMindControlInput();
+	input.targetVisible = false;
+	const MoveValidationResult result = validatePsiMindControlCommand(input);
+	expect(!result.accepted && result.rejectCode == "TARGET_NOT_VISIBLE", "mc invisible target rejects");
+}
+
+static void testParsePsiMindControlCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"psi-mc-relay-1\",\n"
+		"  \"command_type\": \"PSI_MIND_CONTROL\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"target_unit_id\": 100043,\n"
+		"  \"psi_amp_battle_item_id\": 801,\n"
+		"  \"active_hand\": \"STR_LEFT_HAND\",\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	PsiMindControlCommandParsed parsed = {};
+	expect(parsePsiMindControlCommandJson(json, &parsed), "psi mc parse must succeed");
+	expect(parsed.valid && parsed.commandType == "PSI_MIND_CONTROL" && parsed.psiAmpBattleItemId == 801,
+		"psi mc amp id parsed");
+}
+
+static void testParsePsiPanicCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"psi-panic-relay-1\",\n"
+		"  \"command_type\": \"PSI_PANIC\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"target_unit_id\": 100042,\n"
+		"  \"psi_amp_battle_item_id\": 801,\n"
+		"  \"active_hand\": \"STR_LEFT_HAND\",\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	PsiPanicCommandParsed parsed = {};
+	expect(parsePsiPanicCommandJson(json, &parsed), "psi panic parse must succeed");
+	expect(parsed.valid && parsed.commandType == "PSI_PANIC" && parsed.psiAmpBattleItemId == 801,
+		"psi_amp_battle_item_id parsed");
+}
+
+static void testParseMedikitHealCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"heal-relay-1\",\n"
+		"  \"command_type\": \"HEAL\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"target_unit_id\": 2,\n"
+		"  \"medikit_battle_item_id\": 701,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"body_part\": 1,\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	MedikitCommandParsed parsed = {};
+	expect(parseMedikitCommandJson(json, &parsed), "heal parse must succeed");
+	expect(parsed.valid && parsed.commandType == "HEAL" && parsed.bodyPart == 1, "heal body_part parsed");
+}
+
 static UnloadValidationInput validUnloadInput()
 {
 	UnloadValidationInput input = {};
@@ -1864,6 +2112,12 @@ static void testP2UiRefreshCompanionPollBlockedWhenBattleBusy()
 	const MoveValidationResult invBusy = validateInventoryMoveCommand(inv);
 	expect(!invBusy.accepted && invBusy.rejectCode == "BATTLE_BUSY",
 		"P2: INVENTORY_MOVE preflight rejected while battle busy");
+
+	MedikitValidationInput medikit = validMedikitInput();
+	medikit.battleBusy = true;
+	const MoveValidationResult medikitBusy = validateMedikitCommand(medikit);
+	expect(!medikitBusy.accepted && medikitBusy.rejectCode == "BATTLE_BUSY",
+		"WP9 medikit preflight rejected while battle busy");
 }
 
 static void testInventoryMoveAuthorizedAccepted()
@@ -2360,6 +2614,17 @@ int main()
 	testReloadNoCampaignResearchRejected();
 	testReloadWeaponAlreadyLoadedRejected();
 	testParseReloadCommandJson();
+	testMedikitAuthorizedAccepted();
+	testMedikitProhibitedTargetRejected();
+	testMedikitChargeDepletedRejected();
+	testParseMedikitHealCommandJson();
+	testPsiPanicAuthorizedAccepted();
+	testPsiPanicZeroSkillRejected();
+	testPsiPanicHiddenTargetRejected();
+	testParsePsiPanicCommandJson();
+	testPsiMindControlAuthorizedAccepted();
+	testPsiMindControlHiddenTargetRejected();
+	testParsePsiMindControlCommandJson();
 	testP2UiRefreshCompanionPollBlockedWhenBattleBusy();
 	testUnloadAuthorizedAccepted();
 	testUnloadNoMagazineRejected();

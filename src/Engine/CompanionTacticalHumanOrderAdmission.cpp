@@ -41,6 +41,19 @@ bool readTextFile(const std::string &path, std::string *out)
 
 } // namespace
 
+bool isCompanionFriendlyRosterSoldierTarget(const BattleUnit *unit)
+{
+	if (unit == 0)
+	{
+		return false;
+	}
+	if (unit->getOriginalFaction() != FACTION_PLAYER || unit->getFaction() != FACTION_PLAYER)
+	{
+		return false;
+	}
+	return unit->getId() > 0 && unit->getId() < BattleUnit::MAX_SOLDIER_ID;
+}
+
 bool isLiveCampaignPlayerSoldierUnit(const BattleUnit *unit, const SavedGame *campaign)
 {
 	if (unit == 0 || campaign == 0 || unit->isOut())

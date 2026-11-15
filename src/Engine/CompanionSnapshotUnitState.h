@@ -35,7 +35,8 @@ public:
 	static bool shouldExportFacing(const BattleUnit *unit);
 
 	static void appendFacing(YAML::Node &entry, const BattleUnit *unit);
-	static void appendFriendlyCondition(YAML::Node &entry, BattleUnit *unit);
+	static void appendFriendlyCondition(YAML::Node &entry, BattleUnit *unit, const SavedGame *campaign);
+	static void appendLiveRosterFatalWounds(YAML::Node &entry, const BattleUnit *unit, const SavedGame *campaign);
 	static void appendFriendlyReadiness(YAML::Node &entry, const BattleUnit *unit, const SavedGame *campaign);
 
 	/// Player-visible posture/orientation for visible non-friendly units only.
