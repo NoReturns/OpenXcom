@@ -59,7 +59,8 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 			KIND_SNAP_SHOT,
 			KIND_AUTO_SHOT,
 			KIND_AIMED_SHOT,
-			KIND_THROW
+			KIND_THROW,
+			KIND_GUIDED_LAUNCH
 		};
 
 		bool inFlight;
@@ -69,6 +70,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	CompanionCommandCore::MoveCommandParsed moveParsed;
 	CompanionCommandCore::SnapShotCommandParsed snapParsed;
 	CompanionCommandCore::ThrowCommandParsed throwParsed;
+	CompanionCommandCore::GuidedLaunchCommandParsed guidedLaunchParsed;
 	Position startPos;
 	bool snapProjectileLaunched;
 	std::string snapActionResult;
@@ -114,9 +116,19 @@ static bool isThrowKind(ActiveCommand::Kind kind)
 	return kind == ActiveCommand::KIND_THROW;
 }
 
+static bool isGuidedLaunchKind(ActiveCommand::Kind kind)
+{
+	return kind == ActiveCommand::KIND_GUIDED_LAUNCH;
+}
+
+static bool isThrowOrGuidedLaunchKind(ActiveCommand::Kind kind)
+{
+	return isThrowKind(kind) || isGuidedLaunchKind(kind);
+}
+
 static bool isAsyncProjectileKind(ActiveCommand::Kind kind)
 {
-	return isDirectedFireKind(kind) || isThrowKind(kind);
+	return isDirectedFireKind(kind) || isThrowOrGuidedLaunchKind(kind);
 }
 
 static BattleActionType battleActionTypeForDirectedFireKind(ActiveCommand::Kind kind)
@@ -594,6 +606,20 @@ std::string buildPrimeResultJson(const CompanionCommandCore::PrimeCommandParsed 
 }
 
 std::string buildThrowResultJson(const CompanionCommandCore::ThrowCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	Position startPos,
+	Position finalPos,
+	int remainingTu,
+	bool kneeled,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256)
+{
+	return buildResultJson(cmd.commandType, cmd.commandId, cmd.sessionId, cmd.turn, cmd.actorUnitId,
+		status, publicReason, startPos, finalPos, remainingTu, kneeled, false, snapshotSha256, inboxSha256);
+}
+
+std::string buildGuidedLaunchResultJson(const CompanionCommandCore::GuidedLaunchCommandParsed &cmd,
 	CompanionCommandCore::CommandLifecycleStatus status,
 	const std::string &publicReason,
 	Position startPos,
@@ -1139,6 +1165,30 @@ void rejectThrowCommand(const std::string &resultPath, const CompanionCommandCor
 	writeResultFile(resultPath, json);
 }
 
+void rejectGuidedLaunchCommand(const std::string &resultPath,
+	const CompanionCommandCore::GuidedLaunchCommandParsed &parsed,
+	const std::string &reasonCode,
+	const std::string &publicReason,
+	const std::string &inboxSha256)
+{
+	CompanionCommandCore::GuidedLaunchCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "GUIDED_LAUNCH";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+	}
+	if (cmd.commandType.empty())
+	{
+		cmd.commandType = "GUIDED_LAUNCH";
+	}
+	const std::string json = buildGuidedLaunchResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), Position(0, 0, 0), 0, false,
+		std::string(), inboxSha256);
+	writeResultFile(resultPath, json);
+}
+
 void rejectInventoryMoveCommand(const std::string &resultPath,
 	const CompanionCommandCore::InventoryMoveCommandParsed &parsed,
 	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
@@ -1228,6 +1278,7 @@ static bool rejectUnreadableCommandJournal(
 	const CompanionCommandCore::SnapShotCommandParsed *snapRejectTemplate,
 	const CompanionCommandCore::PrimeCommandParsed *primeRejectTemplate,
 	const CompanionCommandCore::ThrowCommandParsed *throwRejectTemplate,
+	const CompanionCommandCore::GuidedLaunchCommandParsed *guidedLaunchRejectTemplate,
 	const CompanionCommandCore::ReloadCommandParsed *reloadRejectTemplate,
 	const CompanionCommandCore::UnloadCommandParsed *unloadRejectTemplate,
 	const CompanionCommandCore::InventoryMoveCommandParsed *inventoryMoveRejectTemplate,
@@ -1269,6 +1320,11 @@ static bool rejectUnreadableCommandJournal(
 		rejectThrowCommand(resultPath, *throwRejectTemplate, "JOURNAL_MALFORMED",
 			"Tactical command journal is unreadable.", inboxDigest);
 	}
+	else if (guidedLaunchRejectTemplate != 0)
+	{
+		rejectGuidedLaunchCommand(resultPath, *guidedLaunchRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
 	else if (primeRejectTemplate != 0)
 	{
 		rejectPrimeCommand(resultPath, *primeRejectTemplate, "JOURNAL_MALFORMED",
@@ -1304,6 +1360,7 @@ bool applyDuplicateInboxDecision(
 	const CompanionCommandCore::SnapShotCommandParsed *snapRejectTemplate,
 	const CompanionCommandCore::PrimeCommandParsed *primeRejectTemplate,
 	const CompanionCommandCore::ThrowCommandParsed *throwRejectTemplate,
+	const CompanionCommandCore::GuidedLaunchCommandParsed *guidedLaunchRejectTemplate,
 	const CompanionCommandCore::ReloadCommandParsed *reloadRejectTemplate,
 	const CompanionCommandCore::UnloadCommandParsed *unloadRejectTemplate,
 	const CompanionCommandCore::InventoryMoveCommandParsed *inventoryMoveRejectTemplate,
@@ -1369,6 +1426,11 @@ bool applyDuplicateInboxDecision(
 		else if (throwRejectTemplate != 0)
 		{
 			rejectThrowCommand(resultPath, *throwRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
+		}
+		else if (guidedLaunchRejectTemplate != 0)
+		{
+			rejectGuidedLaunchCommand(resultPath, *guidedLaunchRejectTemplate, "DUPLICATE_COMMAND_ID",
+				"Command ID already used.", inboxDigest);
 		}
 		else if (primeRejectTemplate != 0)
 		{
@@ -1746,6 +1808,103 @@ void fillThrowValidationInput(
 	const int throwTu = actor != 0 && weapon != 0 ? actor->getActionTUs(BA_THROW, weapon) : 0;
 	input->insufficientTuForThrow = actor == 0 || weapon == 0 || throwTu <= 0 ||
 		!game->checkReservedTU(actor, throwTu, true);
+}
+
+static bool companionHandWeaponSupportsGuidedLaunch(BattleItem *weapon)
+{
+	if (weapon == 0 || weapon->getRules()->getBattleType() != BT_FIREARM)
+	{
+		return false;
+	}
+	RuleItem *rules = weapon->getRules();
+	if (rules->getWaypoints() != 0)
+	{
+		return true;
+	}
+	BattleItem *ammo = weapon->getAmmoItem();
+	return ammo != 0 && ammo->getRules()->getWaypoints() != 0;
+}
+
+static int companionHandGuidedLaunchWaypointLimit(BattleItem *weapon)
+{
+	if (weapon == 0)
+	{
+		return 0;
+	}
+	int maxWaypoints = weapon->getRules()->getWaypoints();
+	if (maxWaypoints == 0)
+	{
+		BattleItem *ammo = weapon->getAmmoItem();
+		if (ammo != 0)
+		{
+			maxWaypoints = ammo->getRules()->getWaypoints();
+		}
+	}
+	return maxWaypoints;
+}
+
+void fillGuidedLaunchValidationInput(
+	CompanionCommandCore::GuidedLaunchValidationInput *input,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	bool battleInitialized,
+	const std::string &sessionId,
+	const CompanionCommandCore::GuidedLaunchCommandParsed &parsed,
+	int actorUnitId,
+	bool actorIsPlayerSoldier,
+	bool actorAlive,
+	bool actorAiControlled,
+	bool humanOverrideRevoked,
+	BattleUnit *actor)
+{
+	fillBindingValidationInput(
+		input,
+		game,
+		battle,
+		battleInitialized,
+		sessionId,
+		parsed.snapshotSha256,
+		parsed.sessionId,
+		parsed.turn,
+		parsed.stateVersion,
+		actorUnitId,
+		actorIsPlayerSoldier,
+		actorAlive,
+		actorAiControlled,
+		humanOverrideRevoked);
+	input->mapSizeX = battle->getMapSizeX();
+	input->mapSizeY = battle->getMapSizeY();
+	input->mapSizeZ = battle->getMapSizeZ();
+	input->waypoints = parsed.waypoints;
+	input->activeHand = parsed.activeHand;
+	input->activeHandValid = true;
+	BattleItem *weapon = actor != 0 ? actor->getItem(parsed.activeHand) : 0;
+	input->weaponPresentInHand = weapon != 0;
+	input->weaponSupportsGuidedLaunch = companionHandWeaponSupportsGuidedLaunch(weapon);
+	input->weaponHasAmmo = snapWeaponHasAmmo(weapon);
+	input->weaponUsable = snapWeaponUsable(battle, weapon);
+	input->waypointOutOfBounds = false;
+	for (std::vector<Position>::const_iterator wp = parsed.waypoints.begin(); wp != parsed.waypoints.end(); ++wp)
+	{
+		if (wp->x < 0 || wp->y < 0 || wp->z < 0 ||
+		    wp->x >= input->mapSizeX || wp->y >= input->mapSizeY || wp->z >= input->mapSizeZ)
+		{
+			input->waypointOutOfBounds = true;
+			break;
+		}
+	}
+	input->waypointCountExceedsLimit = false;
+	if (!parsed.waypoints.empty() && weapon != 0 && input->weaponSupportsGuidedLaunch)
+	{
+		const int maxWaypoints = companionHandGuidedLaunchWaypointLimit(weapon);
+		if (maxWaypoints != -1 && static_cast<int>(parsed.waypoints.size()) > maxWaypoints)
+		{
+			input->waypointCountExceedsLimit = true;
+		}
+	}
+	const int launchTu = actor != 0 && weapon != 0 ? actor->getActionTUs(BA_LAUNCH, weapon) : 0;
+	input->insufficientTuForLaunch = actor == 0 || weapon == 0 || launchTu <= 0 ||
+		!game->checkReservedTU(actor, launchTu, true);
 }
 
 static BattleItem *findBattleItemByIdOnUnit(BattleUnit *actor, int battleItemId)
@@ -2537,6 +2696,19 @@ void interruptInFlightForBindingReset(const std::string &resultPath)
 			g_lastSnapshotSha256,
 			g_active.inboxDigest);
 	}
+	else if (isGuidedLaunchKind(g_active.kind))
+	{
+		json = buildGuidedLaunchResultJson(
+			g_active.guidedLaunchParsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			"Battle binding reset.",
+			g_active.startPos,
+			g_active.startPos,
+			0,
+			false,
+			g_lastSnapshotSha256,
+			g_active.inboxDigest);
+	}
 	else if (isDirectedFireKind(g_active.kind))
 	{
 		json = buildSnapShotResultJson(
@@ -2730,6 +2902,8 @@ static std::string activeInFlightCommandSessionId()
 		return g_active.snapParsed.sessionId;
 	case ActiveCommand::KIND_THROW:
 		return g_active.throwParsed.sessionId;
+	case ActiveCommand::KIND_GUIDED_LAUNCH:
+		return g_active.guidedLaunchParsed.sessionId;
 	default:
 		return std::string();
 	}
@@ -3065,6 +3239,8 @@ int getInFlightActorUnitId()
 		return g_active.snapParsed.actorUnitId;
 	case ActiveCommand::KIND_THROW:
 		return g_active.throwParsed.actorUnitId;
+	case ActiveCommand::KIND_GUIDED_LAUNCH:
+		return g_active.guidedLaunchParsed.actorUnitId;
 	default:
 		return -1;
 	}
@@ -3085,11 +3261,18 @@ void notifySnapShotProjectileLaunched(int actorUnitId)
 
 void notifyThrowProjectileLaunched(int actorUnitId)
 {
-	if (!g_active.inFlight || !isThrowKind(g_active.kind))
+	if (!g_active.inFlight || !isThrowOrGuidedLaunchKind(g_active.kind))
 	{
 		return;
 	}
-	if (actorUnitId != g_active.throwParsed.actorUnitId)
+	if (isThrowKind(g_active.kind))
+	{
+		if (actorUnitId != g_active.throwParsed.actorUnitId)
+		{
+			return;
+		}
+	}
+	else if (actorUnitId != g_active.guidedLaunchParsed.actorUnitId)
 	{
 		return;
 	}
@@ -3114,11 +3297,18 @@ void noteSnapShotBattleActionPop(int actorUnitId, const std::string &actionResul
 
 void noteThrowBattleActionPop(int actorUnitId, const std::string &actionResult)
 {
-	if (!g_active.inFlight || !isThrowKind(g_active.kind))
+	if (!g_active.inFlight || !isThrowOrGuidedLaunchKind(g_active.kind))
 	{
 		return;
 	}
-	if (actorUnitId != g_active.throwParsed.actorUnitId || g_active.snapProjectileLaunched)
+	if (isThrowKind(g_active.kind))
+	{
+		if (actorUnitId != g_active.throwParsed.actorUnitId || g_active.snapProjectileLaunched)
+		{
+			return;
+		}
+	}
+	else if (actorUnitId != g_active.guidedLaunchParsed.actorUnitId || g_active.snapProjectileLaunched)
 	{
 		return;
 	}
@@ -3289,9 +3479,12 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		{
 			return;
 		}
-		if (isThrowKind(g_active.kind))
+		if (isThrowOrGuidedLaunchKind(g_active.kind))
 		{
-			BattleUnit *unit = findUnitById(battle, g_active.throwParsed.actorUnitId);
+			const int actorUnitId = isThrowKind(g_active.kind)
+				? g_active.throwParsed.actorUnitId
+				: g_active.guidedLaunchParsed.actorUnitId;
+			BattleUnit *unit = findUnitById(battle, actorUnitId);
 			const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
 				tacticalAuthorityForActor(campaign, battle, unit, controlJson, sessionId);
 			const bool aiCommandPermitted = authority.aiCommandPermitted;
@@ -3306,8 +3499,9 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			done.projectileLaunched = g_active.snapProjectileLaunched;
 			done.actionResult = g_active.snapActionResult;
 
-			const CompanionCommandCore::CommandLifecycleStatus terminal =
-				CompanionCommandCore::evaluateThrowTerminalStatus(done);
+			const CompanionCommandCore::CommandLifecycleStatus terminal = isThrowKind(g_active.kind)
+				? CompanionCommandCore::evaluateThrowTerminalStatus(done)
+				: CompanionCommandCore::evaluateGuidedLaunchTerminalStatus(done);
 			if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
 			{
 				return;
@@ -3316,28 +3510,43 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			std::string publicReason;
 			if (terminal == CompanionCommandCore::CMD_INTERRUPTED)
 			{
-				publicReason = "Grenade throw interrupted or incomplete.";
+				publicReason = isThrowKind(g_active.kind)
+					? "Grenade throw interrupted or incomplete."
+					: "Guided launch interrupted or incomplete.";
 			}
 			else if (terminal == CompanionCommandCore::CMD_FAILED)
 			{
 				publicReason = !done.actionResult.empty()
 					? done.actionResult
-					: "Grenade throw did not resolve.";
+					: (isThrowKind(g_active.kind)
+						? "Grenade throw did not resolve."
+						: "Guided launch did not resolve.");
 			}
 
 			const std::string resultSnapshotSha256 =
 				snapshotSha256ForTerminalCommandResult(battle, terminal);
 			const Position finalPos = unit != 0 ? unit->getPosition() : g_active.startPos;
-			const std::string json = buildThrowResultJson(
-				g_active.throwParsed,
-				terminal,
-				publicReason,
-				g_active.startPos,
-				finalPos,
-				unit != 0 ? unit->getTimeUnits() : 0,
-				unit != 0 && unit->isKneeled(),
-				resultSnapshotSha256,
-				g_active.inboxDigest);
+			const std::string json = isThrowKind(g_active.kind)
+				? buildThrowResultJson(
+					g_active.throwParsed,
+					terminal,
+					publicReason,
+					g_active.startPos,
+					finalPos,
+					unit != 0 ? unit->getTimeUnits() : 0,
+					unit != 0 && unit->isKneeled(),
+					resultSnapshotSha256,
+					g_active.inboxDigest)
+				: buildGuidedLaunchResultJson(
+					g_active.guidedLaunchParsed,
+					terminal,
+					publicReason,
+					g_active.startPos,
+					finalPos,
+					unit != 0 ? unit->getTimeUnits() : 0,
+					unit != 0 && unit->isKneeled(),
+					resultSnapshotSha256,
+					g_active.inboxDigest);
 			writeResultFile(resultPath, json);
 			logTerminalOnce(g_active.commandId, terminal);
 			g_active.inFlight = false;
@@ -3523,7 +3732,8 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	if (!inboxCommandType.empty() && inboxCommandType != "MOVE" && inboxCommandType != "KNEEL" &&
 	    inboxCommandType != "STAND" &&
 	    inboxCommandType != "SNAP_SHOT" && inboxCommandType != "AUTO_SHOT" && inboxCommandType != "AIMED_SHOT" &&
-	    inboxCommandType != "PRIME" && inboxCommandType != "THROW" && inboxCommandType != "RELOAD" &&
+	    inboxCommandType != "PRIME" && inboxCommandType != "THROW" && inboxCommandType != "GUIDED_LAUNCH" &&
+	    inboxCommandType != "RELOAD" &&
 	    inboxCommandType != "UNLOAD" && inboxCommandType != "INVENTORY_MOVE" &&
 	    inboxCommandType != "PICKUP" && inboxCommandType != "DROP")
 	{
@@ -3560,7 +3770,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(primeParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -3574,7 +3784,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, primeParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, primeParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, 0, 0, &primeParsed, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -3681,7 +3891,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0))
 		{
 			logRejectOnce(reloadParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -3695,7 +3905,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, reloadParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, reloadParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, &reloadParsed, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -3801,7 +4011,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0))
 		{
 			logRejectOnce(unloadParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -3815,7 +4025,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, unloadParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, unloadParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, &unloadParsed, 0, 0, 0))
 		{
 			return;
 		}
@@ -3920,7 +4130,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0))
 		{
 			logRejectOnce(invParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -3934,7 +4144,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, invParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, invParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, &invParsed, 0, 0))
 		{
 			return;
 		}
@@ -4053,7 +4263,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0))
 		{
 			logRejectOnce(pickupParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4067,7 +4277,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, pickupParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, pickupParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, &pickupParsed, 0))
 		{
 			return;
 		}
@@ -4194,7 +4404,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed))
 		{
 			logRejectOnce(dropParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4208,7 +4418,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, dropParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, dropParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed))
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &dropParsed))
 		{
 			return;
 		}
@@ -4330,7 +4540,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(throwParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4344,7 +4554,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, throwParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, throwParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0))
+			existingResultJson, 0, 0, 0, 0, &throwParsed, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4439,6 +4649,149 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		return;
 	}
 
+	if (inboxCommandType == "GUIDED_LAUNCH")
+	{
+		CompanionCommandCore::GuidedLaunchCommandParsed guidedLaunchParsed = {};
+		if (!CompanionCommandCore::parseGuidedLaunchCommandJson(commandJson, &guidedLaunchParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectGuidedLaunchCommand(resultPath, guidedLaunchParsed, guidedLaunchParsed.rejectCode,
+				guidedLaunchParsed.rejectCode, inboxDigest);
+			logRejectOnce(guidedLaunchParsed.commandId.empty() ? "unknown" : guidedLaunchParsed.commandId,
+				guidedLaunchParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(guidedLaunchParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, 0, 0, 0,
+			&guidedLaunchParsed, 0, 0, 0, 0, 0))
+		{
+			logRejectOnce(guidedLaunchParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, guidedLaunchParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, guidedLaunchParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, guidedLaunchParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, 0, 0, 0, &guidedLaunchParsed, 0, 0, 0, 0, 0))
+		{
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, guidedLaunchParsed.actorUnitId);
+		const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+			tacticalAuthorityForActor(campaign, battle, actor, controlJson, sessionId);
+		const bool liveActor = isCompanionMoveActor(actor, campaign);
+		const std::set<int> &tacticalAiIds = battle->getCompanionTacticalAiSoldierIds();
+		const CompanionTacticalAuthorityCore::TacticalAuthorityInput authorityInput =
+			CompanionTacticalAuthorityCore::buildTacticalAuthorityInput(
+				campaign != 0,
+				tacticalAiIds,
+				liveActor,
+				guidedLaunchParsed.actorUnitId,
+				controlJson,
+				sessionId,
+				campaign != 0 ? campaign->getCompanionCampaignId() : std::string(),
+				battle->getCompanionTacticalBattleId());
+
+		CompanionCommandCore::GuidedLaunchValidationInput launchInput = {};
+		fillGuidedLaunchValidationInput(
+			&launchInput,
+			game,
+			battle,
+			battleInitialized,
+			sessionId,
+			guidedLaunchParsed,
+			guidedLaunchParsed.actorUnitId,
+			liveActor,
+			actor != 0 && !actor->isOut(),
+			authority.aiCommandPermitted,
+			CompanionTacticalAuthorityCore::isStaleRelayAiAfterCampaignHumanAssignment(
+				authorityInput, controlJson, sessionId),
+			actor);
+
+		const CompanionCommandCore::MoveValidationResult launchVerdict =
+			CompanionCommandCore::validateGuidedLaunchCommand(launchInput);
+		if (!launchVerdict.accepted)
+		{
+			rejectGuidedLaunchCommand(resultPath, guidedLaunchParsed, launchVerdict.rejectCode,
+				launchVerdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, guidedLaunchParsed.commandId);
+			logRejectOnce(guidedLaunchParsed.commandId, launchVerdict.rejectCode);
+			maybeLogNotAiControlledReject(
+				launchVerdict.rejectCode,
+				guidedLaunchParsed.commandId,
+				guidedLaunchParsed.actorUnitId,
+				campaign,
+				battle,
+				controlJson,
+				controlReadOk,
+				sessionId);
+			return;
+		}
+
+		logCommandDiagnostic("accepted command_id=" + guidedLaunchParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(guidedLaunchParsed.actorUnitId));
+
+		beginInFlightCommand();
+		g_active.kind = ActiveCommand::KIND_GUIDED_LAUNCH;
+		g_active.commandId = guidedLaunchParsed.commandId;
+		g_active.inboxDigest = inboxDigest;
+		g_active.guidedLaunchParsed = guidedLaunchParsed;
+		g_active.startPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		g_active.snapProjectileLaunched = false;
+		g_active.snapActionResult.clear();
+
+		BattleItem *weapon = actor->getItem(guidedLaunchParsed.activeHand);
+		if (actor != 0 && actor->getActiveHand() != guidedLaunchParsed.activeHand)
+		{
+			actor->setActiveHand(guidedLaunchParsed.activeHand);
+		}
+		std::string rejectReason;
+		if (!game->tryExecuteCompanionLaunch(actor, guidedLaunchParsed.waypoints, weapon, &rejectReason))
+		{
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			rejectGuidedLaunchCommand(resultPath, guidedLaunchParsed, "GUIDED_LAUNCH_START_FAILED",
+				rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, guidedLaunchParsed.commandId);
+			logRejectOnce(guidedLaunchParsed.commandId, "GUIDED_LAUNCH_START_FAILED");
+			return;
+		}
+
+		beginInFlightCommand();
+		g_active.kind = ActiveCommand::KIND_GUIDED_LAUNCH;
+
+		logSnapShotStartedOnce(guidedLaunchParsed.commandId, guidedLaunchParsed.actorUnitId);
+		writeResultFile(resultPath, buildGuidedLaunchResultJson(
+			guidedLaunchParsed,
+			CompanionCommandCore::CMD_EXECUTING,
+			std::string(),
+			g_active.startPos,
+			g_active.startPos,
+			actor->getTimeUnits(),
+			actor->isKneeled(),
+			g_lastSnapshotSha256,
+			inboxDigest));
+		appendJournalEntry(journalPath, guidedLaunchParsed.commandId);
+		return;
+	}
+
 	if (inboxCommandType == "SNAP_SHOT" || inboxCommandType == "AUTO_SHOT" || inboxCommandType == "AIMED_SHOT")
 	{
 		CompanionCommandCore::SnapShotCommandParsed snapParsed = {};
@@ -4466,7 +4819,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(snapParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4480,7 +4833,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, snapParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, snapParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, 0, &snapParsed, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4641,7 +4994,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(standParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4655,7 +5008,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, standParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, standParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, &standParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4775,7 +5128,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 		std::string journalJson;
 		readTextFile(journalPath, &journalJson);
-		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0))
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			logRejectOnce(kneelParsed.commandId, "JOURNAL_MALFORMED");
 			return;
@@ -4789,7 +5142,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 				duplicate, kneelParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 		if (applyDuplicateInboxDecision(
 			duplicateDecision, kneelParsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, 0, &kneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 		{
 			return;
 		}
@@ -4908,7 +5261,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 
 	std::string journalJson;
 	readTextFile(journalPath, &journalJson);
-	if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+	if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 	{
 		logRejectOnce(parsed.commandId, "JOURNAL_MALFORMED");
 		return;
@@ -4922,7 +5275,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			duplicate, parsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
 	if (applyDuplicateInboxDecision(
 			duplicateDecision, parsed.commandId, inboxDigest, resultPath, conflictPath,
-			existingResultJson, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+			existingResultJson, &parsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 	{
 		return;
 	}

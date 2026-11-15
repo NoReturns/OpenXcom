@@ -18,6 +18,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef main
 #undef main
@@ -880,6 +881,82 @@ static void testThrowNullWeaponRejected()
 	expect(reject == "No grenade in hand.", "null weapon throw reject");
 }
 
+static BattleItem *wp8ePlaceGuidedLauncher(Mod &mod, SavedBattleGame &battle, BattleUnit *unit, int ammoQty)
+{
+	mod.registerTestInventoryRule(makeHandInventory("STR_RIGHT_HAND"));
+	RuleItem *launcherRules = new RuleItem("STR_WP8E_BLASTER");
+	YAML::Node launcherNode;
+	launcherNode["weight"] = 10;
+	launcherNode["battleType"] = static_cast<int>(BT_FIREARM);
+	launcherNode["tuAimed"] = 60;
+	launcherNode["waypoints"] = 9;
+	launcherNode["clipSize"] = 1;
+	launcherNode["compatibleAmmo"] = YAML::Load("[STR_WP8E_BLASTER_BOMB]");
+	launcherNode["invWidth"] = 2;
+	launcherNode["invHeight"] = 3;
+	launcherRules->load(launcherNode, &mod, 0);
+	mod.registerTestItemRule(launcherRules);
+
+	RuleItem *bombRules = new RuleItem("STR_WP8E_BLASTER_BOMB");
+	YAML::Node bombNode;
+	bombNode["weight"] = 1;
+	bombNode["battleType"] = static_cast<int>(BT_AMMO);
+	bombNode["waypoints"] = 9;
+	bombNode["clipSize"] = 1;
+	bombNode["invWidth"] = 1;
+	bombNode["invHeight"] = 1;
+	bombRules->load(bombNode, &mod, 0);
+	mod.registerTestItemRule(bombRules);
+
+	BattleItem *launcher = new BattleItem(launcherRules, battle.getCurrentItemId());
+	BattleItem *bomb = new BattleItem(bombRules, battle.getCurrentItemId());
+	launcher->setAmmoItem(bomb);
+	bomb->setAmmoQuantity(ammoQty);
+	launcher->setSlot(mod.getInventory("STR_RIGHT_HAND", true));
+	launcher->setSlotX(0);
+	launcher->setSlotY(0);
+	launcher->moveToOwner(unit);
+	registerBattleItem(&battle, launcher);
+	registerBattleItem(&battle, bomb);
+	return launcher;
+}
+
+/** WP8E — GUIDED_LAUNCH preflight rejects out-of-bounds waypoints without TU or ammo mutation. */
+static void testGuidedLaunchWaypointOutOfBoundsRejected()
+{
+	Mod mod;
+	SavedBattleGame battle;
+	battle.setTestMod(&mod);
+	battle.initMap(4, 4, 1);
+	battle.initUtilities(&mod);
+
+	RuleSoldier rs("STR_SOLDIER");
+	Armor ar("STR_JUMPSUIT");
+	Soldier soldier(&rs, &ar, 40);
+	BattleUnit *unit = new BattleUnit(&soldier, 0);
+	unit->setPosition(Position(1, 1, 0));
+	battle.getUnits()->push_back(unit);
+	battle.setUnitPosition(unit, Position(1, 1, 0));
+	unit->getBaseStats()->tu = 60;
+	unit->setTimeUnits(100);
+
+	BattleItem *launcher = wp8ePlaceGuidedLauncher(mod, battle, unit, 1);
+	const int tuBefore = unit->getTimeUnits();
+	const int ammoBefore = launcher->getAmmoItem()->getAmmoQuantity();
+
+	std::vector<Position> waypoints;
+	waypoints.push_back(Position(99, 99, 0));
+
+	BattlescapeGame game(&battle, 0);
+	std::string reject;
+	const bool ok = game.tryExecuteCompanionLaunch(unit, waypoints, launcher, &reject);
+	expect(!ok, "guided launch must fail for OOB waypoint");
+	expect(reject.find("bounds") != std::string::npos, "OOB guided launch reject mentions bounds");
+	expect(unit->getTimeUnits() == tuBefore, "TU unchanged on guided launch precheck fail");
+	expect(launcher->getAmmoItem()->getAmmoQuantity() == ammoBefore, "ammo unchanged");
+	expect(!game.isBusy(), "no battle states queued on reject");
+}
+
 /** WP8D — unprimed grenade passes throwable precheck (fuse not checked before BattlescapeState). */
 static void testThrowUnprimedGrenadePassesPrecheckToOobReject()
 {
@@ -940,6 +1017,7 @@ int main()
 	testThrowNonGrenadeInHandRejected();
 	testThrowNullWeaponRejected();
 	testThrowUnprimedGrenadePassesPrecheckToOobReject();
+	testGuidedLaunchWaypointOutOfBoundsRejected();
 	testInventoryFiringAccuracyDisplayParity();
 	return g_failures != 0 ? 1 : 0;
 }

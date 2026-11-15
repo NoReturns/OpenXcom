@@ -2143,6 +2143,106 @@ static void testThrowTerminalLifecycle()
 	expect(evaluateThrowTerminalStatus(done) == CMD_COMPLETED, "throw completes when grenade released");
 }
 
+static GuidedLaunchValidationInput validGuidedLaunchInput()
+{
+	GuidedLaunchValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.mapSizeX = 10;
+	input.mapSizeY = 10;
+	input.mapSizeZ = 1;
+	input.activeHand = "STR_RIGHT_HAND";
+	input.activeHandValid = true;
+	input.weaponPresentInHand = true;
+	input.weaponSupportsGuidedLaunch = true;
+	input.weaponHasAmmo = true;
+	input.weaponUsable = true;
+	input.waypointOutOfBounds = false;
+	input.waypointCountExceedsLimit = false;
+	input.insufficientTuForLaunch = false;
+	input.waypoints.push_back(Position(5, 5, 0));
+	return input;
+}
+
+static void testParseGuidedLaunchCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"guided-launch-test-1\",\n"
+		"  \"command_type\": \"GUIDED_LAUNCH\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"waypoints\": [\n"
+		"    { \"x\": 2, \"y\": 2, \"z\": 0 },\n"
+		"    { \"x\": 3, \"y\": 3, \"z\": 0 }\n"
+		"  ],\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	GuidedLaunchCommandParsed parsed = {};
+	expect(parseGuidedLaunchCommandJson(json, &parsed), "guided launch parse must succeed");
+	expect(parsed.valid && parsed.waypoints.size() == 2 && parsed.waypoints[1].x == 3, "waypoints parsed in order");
+}
+
+static void testGuidedLaunchWaypointLimitRejected()
+{
+	GuidedLaunchValidationInput input = validGuidedLaunchInput();
+	input.waypointCountExceedsLimit = true;
+	const MoveValidationResult result = validateGuidedLaunchCommand(input);
+	expect(!result.accepted && result.rejectCode == "WAYPOINT_LIMIT_EXCEEDED", "waypoint cap rejected");
+}
+
+static void testGuidedLaunchWaypointOutOfBoundsRejected()
+{
+	GuidedLaunchValidationInput input = validGuidedLaunchInput();
+	input.waypointOutOfBounds = true;
+	const MoveValidationResult result = validateGuidedLaunchCommand(input);
+	expect(!result.accepted && result.rejectCode == "INVALID_WAYPOINT", "out of bounds waypoints rejected");
+}
+
+static void testGuidedLaunchTerminalLifecycle()
+{
+	SnapShotCompletionInput done = {};
+	done.battleBusy = false;
+	done.actorAlive = true;
+	done.actorStillAiControlled = true;
+	done.projectileLaunched = true;
+	expect(evaluateGuidedLaunchTerminalStatus(done) == CMD_COMPLETED, "guided launch completes when projectile released");
+}
+
+static void testGuidedLaunchLifecycleStaysExecutingWhileBusy()
+{
+	SnapShotCompletionInput mid = {};
+	mid.battleBusy = true;
+	mid.actorAlive = true;
+	mid.actorStillAiControlled = true;
+	mid.projectileLaunched = true;
+	expect(evaluateGuidedLaunchTerminalStatus(mid) == CMD_EXECUTING,
+		"guided launch stays EXECUTING while battle busy even after lift-off");
+}
+
 static void testPrimeFuseTimerBattleTypeRules()
 {
 	expect(isValidPrimeFuseTimerForBattleType(0, BT_GRENADE), "timed grenade fuse 0 ok");
@@ -2282,6 +2382,11 @@ int main()
 	testParseDropCommandJson();
 	testThrowOutOfRangeRejected();
 	testThrowTerminalLifecycle();
+	testParseGuidedLaunchCommandJson();
+	testGuidedLaunchWaypointLimitRejected();
+	testGuidedLaunchWaypointOutOfBoundsRejected();
+	testGuidedLaunchTerminalLifecycle();
+	testGuidedLaunchLifecycleStaysExecutingWhileBusy();
 	testPrimeFuseTimerBattleTypeRules();
 
 	if (g_failures != 0)

@@ -4,6 +4,7 @@
  */
 #include "../Battlescape/Position.h"
 #include <string>
+#include <vector>
 
 namespace OpenXcom
 {
@@ -176,6 +177,21 @@ struct ThrowCommandParsed
 	std::string rejectCode;
 };
 
+struct GuidedLaunchCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	std::string activeHand;
+	std::vector<Position> waypoints;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
 struct PrimeValidationInput : TacticalCommandBindingValidationInput
 {
 	std::string activeHand;
@@ -203,6 +219,23 @@ struct ThrowValidationInput : TacticalCommandBindingValidationInput
 	bool grenadeUsable;
 	bool targetOutOfThrowRange;
 	bool insufficientTuForThrow;
+};
+
+struct GuidedLaunchValidationInput : TacticalCommandBindingValidationInput
+{
+	int mapSizeX;
+	int mapSizeY;
+	int mapSizeZ;
+	std::vector<Position> waypoints;
+	std::string activeHand;
+	bool activeHandValid;
+	bool weaponPresentInHand;
+	bool weaponSupportsGuidedLaunch;
+	bool weaponHasAmmo;
+	bool weaponUsable;
+	bool waypointOutOfBounds;
+	bool waypointCountExceedsLimit;
+	bool insufficientTuForLaunch;
 };
 
 struct ReloadCommandParsed
@@ -452,6 +485,7 @@ MoveValidationResult validateAutoShotCommand(const SnapShotValidationInput &inpu
 MoveValidationResult validateAimedShotCommand(const SnapShotValidationInput &input);
 MoveValidationResult validatePrimeCommand(const PrimeValidationInput &input);
 MoveValidationResult validateThrowCommand(const ThrowValidationInput &input);
+MoveValidationResult validateGuidedLaunchCommand(const GuidedLaunchValidationInput &input);
 MoveValidationResult validateReloadCommand(const ReloadValidationInput &input);
 MoveValidationResult validateUnloadCommand(const UnloadValidationInput &input);
 MoveValidationResult validateInventoryMoveCommand(const InventoryMoveValidationInput &input);
@@ -463,6 +497,7 @@ WalkStopDiagnostics resolveWalkStopDiagnostics(
 	const WalkCompletionInput &input);
 CommandLifecycleStatus evaluateSnapShotTerminalStatus(const SnapShotCompletionInput &input);
 CommandLifecycleStatus evaluateThrowTerminalStatus(const SnapShotCompletionInput &input);
+CommandLifecycleStatus evaluateGuidedLaunchTerminalStatus(const SnapShotCompletionInput &input);
 
 bool parseMoveCommandJson(const std::string &json, MoveCommandParsed *out);
 bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out);
@@ -472,6 +507,7 @@ bool parseAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *ou
 bool parseAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parsePrimeCommandJson(const std::string &json, PrimeCommandParsed *out);
 bool parseThrowCommandJson(const std::string &json, ThrowCommandParsed *out);
+bool parseGuidedLaunchCommandJson(const std::string &json, GuidedLaunchCommandParsed *out);
 bool parseReloadCommandJson(const std::string &json, ReloadCommandParsed *out);
 bool parseUnloadCommandJson(const std::string &json, UnloadCommandParsed *out);
 bool parseInventoryMoveCommandJson(const std::string &json, InventoryMoveCommandParsed *out);

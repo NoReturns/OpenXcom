@@ -120,7 +120,7 @@ static bool companionInventoryOverlapItems(BattleUnit *unit, BattleItem *movingI
  * @param save Pointer to the save game.
  * @param parentState Pointer to the parent battlescape state.
  */
-BattlescapeGame::BattlescapeGame(SavedBattleGame *save, BattlescapeState *parentState) : _save(save), _parentState(parentState), _playerPanicHandled(true), _AIActionCounter(0), _AISecondMove(false), _playedAggroSound(false), _endTurnRequested(false), _endTurnProcessed(false), _companionBriefingPending(false)
+BattlescapeGame::BattlescapeGame(SavedBattleGame *save, BattlescapeState *parentState) : _save(save), _parentState(parentState), _companionProjectileHarnessMap(0), _playerPanicHandled(true), _AIActionCounter(0), _AISecondMove(false), _playedAggroSound(false), _endTurnRequested(false), _endTurnProcessed(false), _companionBriefingPending(false)
 {
 
 	_currentAction.actor = 0;
@@ -1131,7 +1131,8 @@ void BattlescapeGame::popState()
 	{
 		CompanionCommandRuntime::noteSnapShotBattleActionPop(action.actor->getId(), action.result);
 	}
-	if (action.actor != 0 && action.playerOrdered && action.type == BA_THROW)
+	if (action.actor != 0 && action.playerOrdered &&
+	    (action.type == BA_THROW || action.type == BA_LAUNCH))
 	{
 		CompanionCommandRuntime::noteThrowBattleActionPop(action.actor->getId(), action.result);
 	}
@@ -1981,7 +1982,11 @@ BattleUnit *BattlescapeGame::convertUnit(BattleUnit *unit)
  */
 Map *BattlescapeGame::getMap()
 {
-	return _parentState->getMap();
+	if (_parentState != 0)
+	{
+		return _parentState->getMap();
+	}
+	return _companionProjectileHarnessMap;
 }
 
 /**
@@ -4242,6 +4247,162 @@ bool BattlescapeGame::tryExecuteCompanionThrow(BattleUnit *unit, Position target
 
 	getMap()->setCursorType(CT_NONE);
 	_parentState->getGame()->getCursor()->setVisible(false);
+	_states.push_back(new ProjectileFlyBState(this, _currentAction));
+	statePushFront(new UnitTurnBState(this, _currentAction));
+	return true;
+}
+
+static bool companionWeaponSupportsGuidedLaunch(BattleItem *weapon)
+{
+	if (weapon == 0 || weapon->getRules()->getBattleType() != BT_FIREARM)
+	{
+		return false;
+	}
+	RuleItem *rules = weapon->getRules();
+	if (rules->getWaypoints() != 0)
+	{
+		return true;
+	}
+	BattleItem *ammo = weapon->getAmmoItem();
+	return ammo != 0 && ammo->getRules()->getWaypoints() != 0;
+}
+
+static int companionGuidedLaunchWaypointLimit(BattleItem *weapon)
+{
+	if (weapon == 0)
+	{
+		return 0;
+	}
+	int maxWaypoints = weapon->getRules()->getWaypoints();
+	if (maxWaypoints == 0)
+	{
+		BattleItem *ammo = weapon->getAmmoItem();
+		if (ammo != 0)
+		{
+			maxWaypoints = ammo->getRules()->getWaypoints();
+		}
+	}
+	return maxWaypoints;
+}
+
+bool BattlescapeGame::tryExecuteCompanionLaunch(
+	BattleUnit *unit,
+	const std::vector<Position> &waypoints,
+	BattleItem *weapon,
+	std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (weapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No weapon in hand.";
+		}
+		return false;
+	}
+	if (waypoints.empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No waypoints supplied.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!companionWeaponSupportsGuidedLaunch(weapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon does not support guided launch.";
+		}
+		return false;
+	}
+	if (!_save->getItemUsable(weapon).empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon is not usable.";
+		}
+		return false;
+	}
+	if (!companionFirearmHasAmmo(weapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Guided launcher has no ammunition loaded.";
+		}
+		return false;
+	}
+	const int maxWaypoints = companionGuidedLaunchWaypointLimit(weapon);
+	if (maxWaypoints != -1 && static_cast<int>(waypoints.size()) > maxWaypoints)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Waypoint count exceeds ruleset maximum.";
+		}
+		return false;
+	}
+	for (std::vector<Position>::const_iterator wp = waypoints.begin(); wp != waypoints.end(); ++wp)
+	{
+		if (wp->x < 0 || wp->y < 0 || wp->z < 0 ||
+		    wp->x >= _save->getMapSizeX() || wp->y >= _save->getMapSizeY() || wp->z >= _save->getMapSizeZ())
+		{
+			if (rejectReason != 0)
+			{
+				*rejectReason = "One or more waypoints are out of map bounds.";
+			}
+			return false;
+		}
+	}
+	const int launchTu = unit->getActionTUs(BA_LAUNCH, weapon);
+	if (launchTu <= 0 || !checkReservedTU(unit, launchTu, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units for guided launch.";
+		}
+		return false;
+	}
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+		_parentState->showLaunchButton(false);
+	}
+
+	_currentAction = BattleAction();
+	_currentAction.type = BA_LAUNCH;
+	_currentAction.actor = unit;
+	_currentAction.weapon = weapon;
+	_currentAction.waypoints.clear();
+	_currentAction.waypoints.insert(_currentAction.waypoints.end(), waypoints.begin(), waypoints.end());
+	_currentAction.TU = launchTu;
+	_currentAction.targeting = true;
+	_currentAction.playerOrdered = true;
+	_currentAction.target = waypoints.front();
+	if (_parentState != 0)
+	{
+		_currentAction.cameraPosition = getMap()->getCamera()->getMapOffset();
+		getMap()->getWaypoints()->clear();
+		_parentState->getGame()->getCursor()->setVisible(false);
+	}
+	getMap()->setCursorType(CT_NONE);
 	_states.push_back(new ProjectileFlyBState(this, _currentAction));
 	statePushFront(new UnitTurnBState(this, _currentAction));
 	return true;

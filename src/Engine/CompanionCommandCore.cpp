@@ -89,6 +89,96 @@ bool extractTargetCoords(const std::string &json, int *targetX, int *targetY, in
 	return extractCoordObject(json, "target", targetX, targetY, targetZ);
 }
 
+bool extractWaypointsFromJson(const std::string &json, std::vector<Position> *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	out->clear();
+	std::string::size_type valueStart = 0;
+	if (!CompanionJsonLite::findJsonKeyValueStart(json, "waypoints", &valueStart))
+	{
+		return false;
+	}
+	if (valueStart >= json.size() || json[valueStart] != '[')
+	{
+		return false;
+	}
+	std::string::size_type pos = valueStart + 1;
+	while (pos < json.size())
+	{
+		while (pos < json.size() &&
+		       (json[pos] == ' ' || json[pos] == '\n' || json[pos] == '\r' || json[pos] == '\t' || json[pos] == ','))
+		{
+			++pos;
+		}
+		if (pos >= json.size())
+		{
+			break;
+		}
+		if (json[pos] == ']')
+		{
+			return !out->empty();
+		}
+		if (json[pos] != '{')
+		{
+			return false;
+		}
+		const std::string::size_type objStart = pos;
+		int depth = 0;
+		do
+		{
+			const char c = json[pos];
+			if (c == '"')
+			{
+				++pos;
+				while (pos < json.size())
+				{
+					if (json[pos] == '\\')
+					{
+						pos += 2;
+						continue;
+					}
+					if (json[pos] == '"')
+					{
+						++pos;
+						break;
+					}
+					++pos;
+				}
+				continue;
+			}
+			if (c == '{')
+			{
+				++depth;
+			}
+			else if (c == '}')
+			{
+				--depth;
+			}
+			++pos;
+		}
+		while (pos < json.size() && depth > 0);
+		if (depth != 0)
+		{
+			return false;
+		}
+		const std::string waypointObject = json.substr(objStart, pos - objStart);
+		int x = 0;
+		int y = 0;
+		int z = 0;
+		if (!CompanionJsonLite::extractJsonIntField(waypointObject, "x", &x) ||
+		    !CompanionJsonLite::extractJsonIntField(waypointObject, "y", &y) ||
+		    !CompanionJsonLite::extractJsonIntField(waypointObject, "z", &z))
+		{
+			return false;
+		}
+		out->push_back(Position(x, y, z));
+	}
+	return !out->empty();
+}
+
 bool extractGroundPositionCoords(const std::string &json, int *groundX, int *groundY, int *groundZ)
 {
 	return extractCoordObject(json, "ground_position", groundX, groundY, groundZ);
@@ -603,6 +693,89 @@ bool parseThrowCommandJson(const std::string &json, ThrowCommandParsed *out)
 	    !isValidActiveHandSlot(parsed.activeHand))
 	{
 		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseGuidedLaunchCommandJson(const std::string &json, GuidedLaunchCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	GuidedLaunchCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "GUIDED_LAUNCH")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!extractWaypointsFromJson(json, &parsed.waypoints))
+	{
+		parsed.rejectCode = "INVALID_WAYPOINTS";
 		*out = parsed;
 		return false;
 	}
@@ -1543,6 +1716,66 @@ MoveValidationResult validateThrowCommand(const ThrowValidationInput &input)
 	return result;
 }
 
+MoveValidationResult validateGuidedLaunchCommand(const GuidedLaunchValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+	if (input.waypointOutOfBounds)
+	{
+		result.rejectCode = "INVALID_WAYPOINT";
+		result.publicReason = "One or more waypoints are out of map bounds.";
+		return result;
+	}
+	if (!input.activeHandValid)
+	{
+		result.rejectCode = "INVALID_ACTIVE_HAND";
+		result.publicReason = "Active hand must be STR_LEFT_HAND or STR_RIGHT_HAND.";
+		return result;
+	}
+	if (!input.weaponPresentInHand)
+	{
+		result.rejectCode = "WEAPON_NOT_IN_HAND";
+		result.publicReason = "No weapon in the selected hand.";
+		return result;
+	}
+	if (!input.weaponSupportsGuidedLaunch)
+	{
+		result.rejectCode = "UNSUPPORTED_WEAPON";
+		result.publicReason = "Weapon does not support guided launch.";
+		return result;
+	}
+	if (!input.weaponHasAmmo)
+	{
+		result.rejectCode = "NO_AMMUNITION";
+		result.publicReason = "Guided launcher has no ammunition loaded.";
+		return result;
+	}
+	if (!input.weaponUsable)
+	{
+		result.rejectCode = "UNSUPPORTED_WEAPON";
+		result.publicReason = "Weapon is not usable for guided launch.";
+		return result;
+	}
+	if (input.waypointCountExceedsLimit)
+	{
+		result.rejectCode = "WAYPOINT_LIMIT_EXCEEDED";
+		result.publicReason = "Waypoint count exceeds ruleset maximum.";
+		return result;
+	}
+	if (input.insufficientTuForLaunch)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for guided launch.";
+		return result;
+	}
+	result.accepted = true;
+	return result;
+}
+
 MoveValidationResult validateReloadCommand(const ReloadValidationInput &input)
 {
 	MoveValidationResult result = validateTacticalCommandBinding(input);
@@ -2190,6 +2423,11 @@ CommandLifecycleStatus evaluateSnapShotTerminalStatus(const SnapShotCompletionIn
 }
 
 CommandLifecycleStatus evaluateThrowTerminalStatus(const SnapShotCompletionInput &input)
+{
+	return evaluateSnapShotTerminalStatus(input);
+}
+
+CommandLifecycleStatus evaluateGuidedLaunchTerminalStatus(const SnapShotCompletionInput &input)
 {
 	return evaluateSnapShotTerminalStatus(input);
 }

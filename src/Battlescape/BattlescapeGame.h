@@ -34,6 +34,7 @@ class RuleInventory;
 class BattleState;
 class BattlescapeState;
 class Map;
+class Map;
 class TileEngine;
 class Pathfinding;
 class Mod;
@@ -76,6 +77,7 @@ class BattlescapeGame
 private:
 	SavedBattleGame *_save;
 	BattlescapeState *_parentState;
+	Map *_companionProjectileHarnessMap;
 	std::list<BattleState*> _states, _deleted;
 	bool _playerPanicHandled;
 	int _AIActionCounter;
@@ -221,6 +223,10 @@ public:
 	bool tryExecuteCompanionDirectedFire(BattleUnit *unit, Position target, BattleItem *weapon, BattleActionType actionType, std::string *rejectReason);
 	bool tryExecuteCompanionPrime(BattleUnit *unit, BattleItem *weapon, int fuseTimer, std::string *rejectReason);
 	bool tryExecuteCompanionThrow(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason);
+	/// Guided blaster-style launch through native BA_LAUNCH / ProjectileFlyBState (no manual trajectory).
+	bool tryExecuteCompanionLaunch(BattleUnit *unit, const std::vector<Position> &waypoints, BattleItem *weapon, std::string *rejectReason);
+	/// Headless companion tests: BattlescapeGame without BattlescapeState still needs Map for projectile states.
+	void setCompanionProjectileHarnessMap(Map *map) { _companionProjectileHarnessMap = map; }
 	/// Load an explicit compatible magazine into an empty-chamber hand-held firearm (same pathway as BattleUnit::checkAmmo / inventory reload, 15 TU).
 	bool tryExecuteCompanionReload(BattleUnit *unit, BattleItem *weapon, BattleItem *ammo, std::string *rejectReason);
 	/// Remove the inserted magazine from a hand-held firearm (mirrors Inventory::unload: 8 TU, ammo to STR_LEFT_HAND, weapon to STR_RIGHT_HAND).

@@ -70,6 +70,7 @@
 #include "../Engine/CompanionBattlescapeOwnershipCore.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
 #include "../Engine/CompanionSoldierOwnershipCore.h"
+#include "../Engine/CompanionRulesReferenceExport.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/Tile.h"
 #include "../Savegame/BattleUnit.h"
@@ -1647,6 +1648,18 @@ inline void BattlescapeState::handle(Action *action)
 		if (action->getDetails()->type == SDL_KEYUP && action->getDetails()->key.keysym.sym == SDLK_F6)
 		{
 			_briefingF6KeyHeld = false;
+			return;
+		}
+		if (action->getDetails()->type == SDL_KEYDOWN
+		    && (SDL_GetModState() & KMOD_CTRL) != 0
+		    && (SDL_GetModState() & KMOD_SHIFT) != 0
+		    && action->getDetails()->key.keysym.sym == SDLK_r)
+		{
+			SavedGame *campaignSave = _game->getSavedGame();
+			if (campaignSave != 0)
+			{
+				CompanionRulesReferenceExport::tryExport(campaignSave, _game->getMod());
+			}
 			return;
 		}
 

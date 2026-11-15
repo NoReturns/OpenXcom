@@ -477,7 +477,8 @@ bool ProjectileFlyBState::createNewProjectile()
 	{
 		CompanionCommandRuntime::notifySnapShotProjectileLaunched(_unit->getId());
 	}
-	if (_action.playerOrdered && _action.type == BA_THROW)
+	if (_action.playerOrdered &&
+	    (_action.type == BA_THROW || _action.type == BA_LAUNCH))
 	{
 		CompanionCommandRuntime::notifyThrowProjectileLaunched(_unit->getId());
 	}
