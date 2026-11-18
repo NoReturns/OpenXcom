@@ -68,6 +68,9 @@ RelayControlDiagnostics computeRelayControlDiagnostics(
 	bool soldierInTacticalAiSet);
 
 bool isExecutorEnabledFromEnvironment();
+
+/// Default off; must be exactly `1` to allow native `tryExecuteCompanionMeleeAttack` from relay (M1 melee S2b).
+bool isCompanionMeleeExecutionEnabledFromEnvironment();
 bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierControlDocument *out);
 SoldierControlMode controlModeForUnit(
 	const std::string &controlFileJson,

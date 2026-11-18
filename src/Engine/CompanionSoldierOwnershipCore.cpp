@@ -119,6 +119,12 @@ bool isExecutorEnabledFromEnvironment()
 	return flag != 0 && flag[0] == '1' && flag[1] == '\0';
 }
 
+bool isCompanionMeleeExecutionEnabledFromEnvironment()
+{
+	const char *flag = std::getenv("OPENXCOM_COMPANION_MELEE_EXECUTION");
+	return flag != 0 && flag[0] == '1' && flag[1] == '\0';
+}
+
 bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierControlDocument *out)
 {
 	if (out == 0)

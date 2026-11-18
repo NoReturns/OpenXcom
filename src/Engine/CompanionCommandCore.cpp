@@ -1621,6 +1621,102 @@ bool parsePsiMindControlCommandJson(const std::string &json, PsiMindControlComma
 	return true;
 }
 
+bool isValidMeleeAttackCommandType(const std::string &commandType)
+{
+	return commandType == "MELEE_ATTACK";
+}
+
+bool parseMeleeAttackCommandJson(const std::string &json, MeleeAttackCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	MeleeAttackCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    !isValidMeleeAttackCommandType(parsed.commandType))
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "target_unit_id", &parsed.targetUnitId) ||
+	    parsed.targetUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "melee_weapon_battle_item_id", &parsed.meleeWeaponBattleItemId) ||
+	    parsed.meleeWeaponBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_MELEE_WEAPON_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
 MoveValidationResult validateTacticalCommandBinding(const TacticalCommandBindingValidationInput &input)
 {
 	MoveValidationResult result = {};
@@ -2835,6 +2931,98 @@ MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidatio
 	return result;
 }
 
+MoveValidationResult validateMeleeAttackCommand(const MeleeAttackValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+
+	if (!input.activeHandValid)
+	{
+		result.rejectCode = "INVALID_ACTIVE_HAND";
+		result.publicReason = "Active hand must be STR_LEFT_HAND or STR_RIGHT_HAND.";
+		return result;
+	}
+	if (!input.meleeWeaponResolved)
+	{
+		result.rejectCode = "INVALID_MELEE_WEAPON_INSTANCE";
+		result.publicReason = "Melee weapon battle item not found on actor.";
+		return result;
+	}
+	if (!input.meleeWeaponBelongsToActor)
+	{
+		result.rejectCode = "INVALID_MELEE_WEAPON_INSTANCE";
+		result.publicReason = "Melee weapon does not belong to the actor.";
+		return result;
+	}
+	if (!input.meleeWeaponInSpecifiedHand)
+	{
+		result.rejectCode = "MELEE_WEAPON_NOT_IN_HAND";
+		result.publicReason = "Melee weapon is not equipped in the specified hand.";
+		return result;
+	}
+	if (!input.meleeWeaponIsMelee)
+	{
+		result.rejectCode = "UNSUPPORTED_ITEM";
+		result.publicReason = "Item is not a melee weapon.";
+		return result;
+	}
+	if (!input.meleeWeaponMatchesNativeSelection)
+	{
+		result.rejectCode = "MELEE_WEAPON_MISMATCH";
+		result.publicReason = "Weapon does not match the actor's native melee weapon selection.";
+		return result;
+	}
+	if (!input.meleeWeaponUsableEnvironment)
+	{
+		result.rejectCode = "WEAPON_NOT_USABLE";
+		result.publicReason = "Melee weapon is not usable in current battlescape conditions.";
+		return result;
+	}
+	if (!input.targetResolved)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target unit not found.";
+		return result;
+	}
+	if (input.targetFriendlyRosterSoldier)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target is not eligible for melee attack.";
+		return result;
+	}
+	if (!input.targetGenuineHostile)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target must be a genuine hostile unit.";
+		return result;
+	}
+	if (!input.targetVisible)
+	{
+		result.rejectCode = "TARGET_NOT_VISIBLE";
+		result.publicReason = "Target is not visible.";
+		return result;
+	}
+	if (!input.targetLineOfSightOk)
+	{
+		result.rejectCode = "NO_LINE_OF_SIGHT";
+		result.publicReason = "No line of sight to target.";
+		return result;
+	}
+	if (input.insufficientTuForMelee)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for melee attack.";
+		return result;
+	}
+
+	result.accepted = true;
+	return result;
+}
+
 CommandLifecycleStatus evaluateWalkTerminalStatus(const WalkCompletionInput &input)
 {
 	if (!input.actorAlive)
@@ -2987,6 +3175,27 @@ CommandLifecycleStatus evaluateThrowTerminalStatus(const SnapShotCompletionInput
 CommandLifecycleStatus evaluateGuidedLaunchTerminalStatus(const SnapShotCompletionInput &input)
 {
 	return evaluateSnapShotTerminalStatus(input);
+}
+
+CommandLifecycleStatus evaluateMeleeTerminalStatus(const MeleeCompletionInput &input)
+{
+	if (!input.actorAlive || !input.actorStillAiControlled)
+	{
+		return CMD_INTERRUPTED;
+	}
+	if (!input.actionResult.empty())
+	{
+		return CMD_FAILED;
+	}
+	if (input.battleBusy)
+	{
+		return CMD_EXECUTING;
+	}
+	if (!input.attackResolved)
+	{
+		return CMD_FAILED;
+	}
+	return CMD_COMPLETED;
 }
 
 const char *lifecycleStatusToString(CommandLifecycleStatus status)

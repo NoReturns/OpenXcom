@@ -159,6 +159,7 @@ set ( engine_src
 	Engine/CompanionSoldierControlPublishCore.cpp
 	Engine/CompanionDropGroundPlacementCore.cpp
 	Engine/CompanionPsiExecutionCore.cpp
+	Engine/CompanionMeleeExecutionCore.cpp
 	Engine/CompanionMedikitExecutionCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
@@ -1194,6 +1195,23 @@ if ( OPENXCOM_BUILD_COMPANION_BASE_INTELLIGENCE_TESTS )
     target_link_libraries ( companion_base_intelligence_export_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_base_intelligence_export_test COMMAND companion_base_intelligence_export_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_MELEE_ENGINE_TEST "Build companion melee engine integration test (M1 melee S2a)" ON )
+if ( OPENXCOM_BUILD_COMPANION_MELEE_ENGINE_TEST )
+  add_executable ( companion_melee_engine_test
+    test/companion_melee_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_melee_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_melee_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_melee_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_melee_engine_test )
+  else ()
+    target_link_libraries ( companion_melee_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_melee_engine_test COMMAND companion_melee_engine_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_PSI_PANIC_ENGINE_TEST "Build companion psi panic engine integration test (M1-WP10 S2a)" ON )

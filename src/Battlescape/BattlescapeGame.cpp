@@ -17,6 +17,7 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <sstream>
+#include <algorithm>
 #include "BattlescapeGame.h"
 #include "BattlescapeState.h"
 #include "Map.h"
@@ -69,6 +70,8 @@
 #include "../Engine/CompanionTacticalAuthorityCore.h"
 #include "../Engine/CompanionMedikitExecutionCore.h"
 #include "../Engine/CompanionPsiExecutionCore.h"
+#include "../Engine/CompanionMeleeExecutionCore.h"
+#include "../Engine/CompanionSoldierOwnershipCore.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionGroundInventoryCore.h"
 #include "../Savegame/BattleUnitStatistics.h"
@@ -1141,6 +1144,10 @@ void BattlescapeGame::popState()
 	if (action.actor != 0 && action.playerOrdered && action.type == BA_WALK)
 	{
 		CompanionCommandRuntime::noteWalkBattleActionPop(action.actor->getId(), action.result);
+	}
+	if (action.actor != 0 && action.playerOrdered && action.type == BA_HIT && action.companionRelayMelee)
+	{
+		CompanionCommandRuntime::noteMeleeBattleActionPop(action.actor->getId(), action.result);
 	}
 
 	if (action.actor && !action.result.empty() && action.actor->getFaction() == FACTION_PLAYER
@@ -4863,6 +4870,261 @@ bool BattlescapeGame::tryExecuteCompanionPsiMindControl(
 		CompanionPsiExecutionCore::executeMindControl))
 	{
 		return false;
+	}
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
+}
+
+static BattleItem *companionFindBattleItemById(BattleUnit *actor, int battleItemId)
+{
+	if (actor == 0 || battleItemId <= 0)
+	{
+		return 0;
+	}
+	BattleItem *rightHand = actor->getItem("STR_RIGHT_HAND");
+	if (rightHand != 0 && rightHand->getId() == battleItemId)
+	{
+		return rightHand;
+	}
+	BattleItem *leftHand = actor->getItem("STR_LEFT_HAND");
+	if (leftHand != 0 && leftHand->getId() == battleItemId)
+	{
+		return leftHand;
+	}
+	std::vector<BattleItem*> *inventory = actor->getInventory();
+	if (inventory != 0)
+	{
+		for (std::vector<BattleItem*>::iterator i = inventory->begin(); i != inventory->end(); ++i)
+		{
+			if (*i != 0 && (*i)->getId() == battleItemId)
+			{
+				return *i;
+			}
+		}
+	}
+	return 0;
+}
+
+bool BattlescapeGame::tryExecuteCompanionMeleeAttack(
+	BattleUnit *actor,
+	BattleItem *meleeWeapon,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	bool *meleeHitOut,
+	bool *targetUnconsciousOut,
+	bool *targetKilledOut)
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (meleeHitOut != 0)
+	{
+		*meleeHitOut = false;
+	}
+	if (targetUnconsciousOut != 0)
+	{
+		*targetUnconsciousOut = false;
+	}
+	if (targetKilledOut != 0)
+	{
+		*targetKilledOut = false;
+	}
+	if (!CompanionSoldierOwnershipCore::isCompanionMeleeExecutionEnabledFromEnvironment())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Companion melee strike execution is disabled on this runtime.";
+		}
+		return false;
+	}
+	if (actor == 0 || actor->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (meleeWeapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Melee weapon missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!companionMedikitActorAuthorized(actor, rejectReason))
+	{
+		return false;
+	}
+	RuleItem *rules = meleeWeapon->getRules();
+	if (rules == 0 || rules->getBattleType() != BT_MELEE)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item is not a melee weapon.";
+		}
+		return false;
+	}
+	if (meleeWeapon->getOwner() != actor)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Melee weapon does not belong to the actor.";
+		}
+		return false;
+	}
+	if (!companionWeaponIsHeldInLeftOrRightHand(meleeWeapon))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Melee weapon must be in STR_LEFT_HAND or STR_RIGHT_HAND.";
+		}
+		return false;
+	}
+	if (meleeWeapon->getSlot() == 0 || meleeWeapon->getSlot()->getId() != activeHandSlotId)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Melee weapon is not equipped in the specified hand.";
+		}
+		return false;
+	}
+	BattleItem *nativeMelee = actor->getMeleeWeapon();
+	if (nativeMelee == 0 || nativeMelee->getId() != meleeWeapon->getId())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Weapon does not match native melee weapon selection.";
+		}
+		return false;
+	}
+	if (!_save->getItemUsable(meleeWeapon).empty())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Melee weapon is not usable in current battlescape conditions.";
+		}
+		return false;
+	}
+	BattleUnit *target = companionFindUnitById(_save, targetUnitId);
+	if (target == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target unit not found.";
+		}
+		return false;
+	}
+	if (!companionIsGenuineHostileTarget(target))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target must be a genuine hostile unit.";
+		}
+		return false;
+	}
+	if (!target->getVisible())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target is not visible.";
+		}
+		return false;
+	}
+	std::vector<BattleUnit *> *visible = actor->getVisibleUnits();
+	if (visible == 0 ||
+	    std::find(visible->begin(), visible->end(), target) == visible->end())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No line of sight.";
+		}
+		return false;
+	}
+
+	if (_parentState != 0 && getMap() != 0)
+	{
+		Position meleeDest;
+		const int faceDir = actor->directionTo(target->getPosition());
+		if (!getTileEngine()->validMeleeRange(actor->getPosition(), faceDir, actor, target, &meleeDest))
+		{
+			if (rejectReason != 0)
+			{
+				*rejectReason = "Target is not in melee range.";
+			}
+			return false;
+		}
+		const int meleeTu = actor->getActionTUs(BA_HIT, meleeWeapon);
+		const int turnTu = CompanionMeleeExecutionCore::estimateMeleeTurnSteps(actor, target);
+		if (!checkReservedTU(actor, meleeTu + turnTu, true))
+		{
+			if (rejectReason != 0)
+			{
+				*rejectReason = "Not enough time units for melee.";
+			}
+			return false;
+		}
+
+		cancelCurrentAction();
+		_save->setSelectedUnit(actor);
+		_parentState->updateSoldierInfo();
+
+		_currentAction = BattleAction();
+		_currentAction.type = BA_HIT;
+		_currentAction.actor = actor;
+		_currentAction.weapon = meleeWeapon;
+		_currentAction.target = target->getPosition();
+		_currentAction.TU = meleeTu;
+		_currentAction.targeting = true;
+		_currentAction.playerOrdered = true;
+		_currentAction.companionRelayMelee = true;
+		_currentAction.companionRelayMeleeTargetUnitId = targetUnitId;
+		_currentAction.companionHeadlessMelee = false;
+
+		getMap()->setCursorType(CT_NONE);
+		_parentState->getGame()->getCursor()->setVisible(false);
+		_states.push_back(new MeleeAttackBState(this, _currentAction));
+		statePushFront(new UnitTurnBState(this, _currentAction));
+		return true;
+	}
+
+	CompanionMeleeExecutionCore::ExecutionOutcome outcome = {};
+	if (!CompanionMeleeExecutionCore::executeMelee(
+		this, actor, meleeWeapon, target, rejectReason, &outcome))
+	{
+		return false;
+	}
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = outcome.tuSpentMelee + outcome.tuSpentTurning;
+	}
+	if (meleeHitOut != 0)
+	{
+		*meleeHitOut = outcome.meleeHit;
+	}
+	if (targetUnconsciousOut != 0)
+	{
+		*targetUnconsciousOut = outcome.targetUnconscious;
+	}
+	if (targetKilledOut != 0)
+	{
+		*targetKilledOut = outcome.targetKilled;
 	}
 	if (_parentState != 0)
 	{

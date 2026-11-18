@@ -8,6 +8,7 @@ namespace OpenXcom
 {
 
 class BattlescapeGame;
+class BattleUnit;
 class SavedBattleGame;
 class SavedGame;
 
@@ -36,6 +37,12 @@ void noteThrowBattleActionPop(int actorUnitId, const std::string &actionResult);
 
 /// Records native walk abort result while companion MOVE is in flight.
 void noteWalkBattleActionPop(int actorUnitId, const std::string &actionResult);
+
+/// Records native melee resolution (RNG hit/miss) for companion MELEE_ATTACK in flight.
+void noteMeleeAttackResolved(int actorUnitId, BattleUnit *target, bool meleeHit);
+
+/// Records native pre-melee failure while companion MELEE_ATTACK is in flight.
+void noteMeleeBattleActionPop(int actorUnitId, const std::string &actionResult);
 
 /// Resets in-flight state when battle session/tactical scope changes; preserves terminal evidence.
 void onBattleCompanionBindingContext(SavedBattleGame *battle);

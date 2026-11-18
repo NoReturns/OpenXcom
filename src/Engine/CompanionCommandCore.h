@@ -507,6 +507,42 @@ struct PsiMindControlValidationInput : TacticalCommandBindingValidationInput
 	bool insufficientTuForMindControl;
 };
 
+struct MeleeAttackCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	int meleeWeaponBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct MeleeAttackValidationInput : TacticalCommandBindingValidationInput
+{
+	int meleeWeaponBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	bool activeHandValid;
+	bool meleeWeaponResolved;
+	bool meleeWeaponBelongsToActor;
+	bool meleeWeaponInSpecifiedHand;
+	bool meleeWeaponIsMelee;
+	bool meleeWeaponMatchesNativeSelection;
+	bool meleeWeaponUsableEnvironment;
+	bool targetResolved;
+	bool targetGenuineHostile;
+	bool targetFriendlyRosterSoldier;
+	bool targetVisible;
+	bool targetLineOfSightOk;
+	bool insufficientTuForMelee;
+};
+
 struct PickupValidationInput : TacticalCommandBindingValidationInput
 {
 	int itemBattleItemId;
@@ -601,6 +637,7 @@ MoveValidationResult validateDropCommand(const DropValidationInput &input);
 MoveValidationResult validateMedikitCommand(const MedikitValidationInput &input);
 MoveValidationResult validatePsiPanicCommand(const PsiPanicValidationInput &input);
 MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidationInput &input);
+MoveValidationResult validateMeleeAttackCommand(const MeleeAttackValidationInput &input);
 CommandLifecycleStatus evaluateWalkTerminalStatus(const WalkCompletionInput &input);
 WalkStopDiagnostics resolveWalkStopDiagnostics(
 	CommandLifecycleStatus terminal,
@@ -608,6 +645,17 @@ WalkStopDiagnostics resolveWalkStopDiagnostics(
 CommandLifecycleStatus evaluateSnapShotTerminalStatus(const SnapShotCompletionInput &input);
 CommandLifecycleStatus evaluateThrowTerminalStatus(const SnapShotCompletionInput &input);
 CommandLifecycleStatus evaluateGuidedLaunchTerminalStatus(const SnapShotCompletionInput &input);
+
+struct MeleeCompletionInput
+{
+	bool battleBusy;
+	bool actorAlive;
+	bool actorStillAiControlled;
+	bool attackResolved;
+	std::string actionResult;
+};
+
+CommandLifecycleStatus evaluateMeleeTerminalStatus(const MeleeCompletionInput &input);
 
 bool parseMoveCommandJson(const std::string &json, MoveCommandParsed *out);
 bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out);
@@ -629,6 +677,8 @@ bool parsePsiPanicCommandJson(const std::string &json, PsiPanicCommandParsed *ou
 bool isValidPsiPanicCommandType(const std::string &commandType);
 bool parsePsiMindControlCommandJson(const std::string &json, PsiMindControlCommandParsed *out);
 bool isValidPsiMindControlCommandType(const std::string &commandType);
+bool parseMeleeAttackCommandJson(const std::string &json, MeleeAttackCommandParsed *out);
+bool isValidMeleeAttackCommandType(const std::string &commandType);
 bool isValidPrimeFuseTimerForBattleType(int fuseTimer, int battleType);
 bool isValidCommandIdFormat(const std::string &commandId);
 bool isValidSessionIdFormat(const std::string &sessionId);

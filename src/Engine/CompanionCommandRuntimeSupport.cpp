@@ -374,6 +374,10 @@ const char *sessionBoundaryInterruptedPublicReasonForCommandType(const std::stri
 	{
 		return "Battle session changed; in-flight directed fire cannot resume after reload.";
 	}
+	if (commandType == "MELEE_ATTACK")
+	{
+		return "Battle session changed; in-flight melee attack cannot resume after reload.";
+	}
 	return "Battle session changed; in-flight command cannot resume after reload.";
 }
 
@@ -491,6 +495,51 @@ bool parseKneelParsedFromOpenResultJson(
 	{
 		return false;
 	}
+	out->valid = !out->commandId.empty() && !out->sessionId.empty();
+	return out->valid;
+}
+
+bool parseMeleeParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::MeleeAttackCommandParsed *out)
+{
+	if (out == 0 || resultJson.empty())
+	{
+		return false;
+	}
+	std::string status;
+	std::string commandType;
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "status", &status) ||
+	    !isOpenCompanionResultStatus(status) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "command_type", &commandType))
+	{
+		return false;
+	}
+	if (commandType != "MELEE_ATTACK")
+	{
+		return false;
+	}
+	out->valid = false;
+	out->commandType = commandType;
+	out->meleeWeaponBattleItemId = 0;
+	out->targetUnitId = 0;
+	out->activeHand.clear();
+	out->stateVersion = 0;
+	out->rejectCode.clear();
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "command_id", &out->commandId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "session_id", &out->sessionId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "snapshot_sha256", &out->snapshotSha256))
+	{
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(resultJson, "actor_unit_id", &out->actorUnitId) ||
+	    !CompanionJsonLite::extractJsonIntField(resultJson, "turn", &out->turn))
+	{
+		return false;
+	}
+	CompanionJsonLite::extractJsonIntField(resultJson, "melee_weapon_battle_item_id", &out->meleeWeaponBattleItemId);
+	CompanionJsonLite::extractJsonIntField(resultJson, "target_unit_id", &out->targetUnitId);
+	CompanionJsonLite::extractJsonStringField(resultJson, "active_hand", &out->activeHand);
 	out->valid = !out->commandId.empty() && !out->sessionId.empty();
 	return out->valid;
 }
@@ -645,6 +694,24 @@ std::string buildArchivedInboxFileName(
 	std::ostringstream name;
 	name << "tactical-command." << reasonToken << "-" << epochMillisUtc << "-" << idPrefix << ".json";
 	return name.str();
+}
+
+int shortestTurnStepsBetweenDirections(int fromDir, int toDir)
+{
+	if (fromDir < 0 || fromDir > 7 || toDir < 0 || toDir > 7)
+	{
+		return 0;
+	}
+	int a = toDir - fromDir;
+	if (a < 0)
+	{
+		a = -a;
+	}
+	if (a > 4)
+	{
+		a = 8 - a;
+	}
+	return a;
 }
 
 } // namespace CompanionCommandRuntimeSupport

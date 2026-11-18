@@ -6,6 +6,7 @@
 #include "Engine/CompanionWalkStopTokens.h"
 #include "Engine/CompanionSoldierOwnershipCore.h"
 #include "Engine/CompanionCommandRuntimeSupport.h"
+#include "Engine/CompanionSoldierOwnershipCore.h"
 #include "Engine/CompanionCommandCasualtySettlementCore.h"
 #include <iostream>
 #include <string>
@@ -173,6 +174,26 @@ static void testSessionOrphan01bPersistedCrossSessionRecoveryPolicy()
 	const char *reason = sessionBoundaryInterruptedPublicReasonForCommandType("AUTO_SHOT");
 	expect(reason != 0 && std::string(reason).find("directed fire") != std::string::npos,
 		"directed-fire session boundary reason is explicit");
+}
+
+static void testMeleeOpenResultParseAfterInboxQuarantine()
+{
+	using namespace CompanionCommandRuntimeSupport;
+	const std::string resultJson =
+		"{\"schema_version\":1,\"command_id\":\"melee-relay-live-01\","
+		"\"command_type\":\"MELEE_ATTACK\",\"status\":\"EXECUTING\","
+		"\"session_id\":\"112482ac508d5bc16dcde1470d197d09\",\"turn\":4,\"actor_unit_id\":28,"
+		"\"target_unit_id\":1000001,\"melee_weapon_battle_item_id\":515,"
+		"\"active_hand\":\"STR_RIGHT_HAND\","
+		"\"snapshot_sha256\":\"15f9c26f5435a30438d68fb69fe5269f08bb209860416b1d261693f0ea592c12\","
+		"\"inbox_sha256\":\"a5154a3afed19545d1e4feb326524187a7bcfa61f63fe815aec7ea56dc6a2ee5\"}";
+	CompanionCommandCore::MeleeAttackCommandParsed melee = {};
+	expect(parseMeleeParsedFromOpenResultJson(resultJson, &melee),
+		"open EXECUTING melee result supplies binding after inbox quarantine");
+	expect(melee.commandId == "melee-relay-live-01" && melee.actorUnitId == 28, "melee open-result fields");
+	const char *reason = sessionBoundaryInterruptedPublicReasonForCommandType("MELEE_ATTACK");
+	expect(reason != 0 && std::string(reason).find("melee") != std::string::npos,
+		"melee session boundary reason is explicit");
 }
 
 static void testSessionOrphan01bTerminalizeFromOpenResultAfterInboxQuarantine()
@@ -1887,6 +1908,170 @@ static void testPsiMindControlHiddenTargetRejected()
 	expect(!result.accepted && result.rejectCode == "TARGET_NOT_VISIBLE", "mc invisible target rejects");
 }
 
+static MeleeAttackValidationInput validMeleeAttackInput()
+{
+	MeleeAttackValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.meleeWeaponBattleItemId = 515;
+	input.activeHand = "STR_RIGHT_HAND";
+	input.targetUnitId = 100042;
+	input.activeHandValid = true;
+	input.meleeWeaponResolved = true;
+	input.meleeWeaponBelongsToActor = true;
+	input.meleeWeaponInSpecifiedHand = true;
+	input.meleeWeaponIsMelee = true;
+	input.meleeWeaponMatchesNativeSelection = true;
+	input.meleeWeaponUsableEnvironment = true;
+	input.targetResolved = true;
+	input.targetGenuineHostile = true;
+	input.targetFriendlyRosterSoldier = false;
+	input.targetVisible = true;
+	input.targetLineOfSightOk = true;
+	input.insufficientTuForMelee = false;
+	return input;
+}
+
+static void testMeleeAttackAuthorizedAccepted()
+{
+	expect(validateMeleeAttackCommand(validMeleeAttackInput()).accepted, "authorized melee accepted");
+}
+
+static void testMeleeAttackInsufficientTuRejected()
+{
+	MeleeAttackValidationInput input = validMeleeAttackInput();
+	input.insufficientTuForMelee = true;
+	const MoveValidationResult result = validateMeleeAttackCommand(input);
+	expect(!result.accepted && result.rejectCode == "INSUFFICIENT_TU", "insufficient TU rejects");
+}
+
+static void testMeleeAttackHiddenTargetRejected()
+{
+	MeleeAttackValidationInput input = validMeleeAttackInput();
+	input.targetVisible = false;
+	const MoveValidationResult result = validateMeleeAttackCommand(input);
+	expect(!result.accepted && result.rejectCode == "TARGET_NOT_VISIBLE", "invisible melee target rejects");
+}
+
+static void testMeleeAttackWeaponMismatchRejected()
+{
+	MeleeAttackValidationInput input = validMeleeAttackInput();
+	input.meleeWeaponMatchesNativeSelection = false;
+	const MoveValidationResult result = validateMeleeAttackCommand(input);
+	expect(!result.accepted && result.rejectCode == "MELEE_WEAPON_MISMATCH", "native weapon mismatch rejects");
+}
+
+static void testMeleeAttackWrongHandPreflightRejected()
+{
+	MeleeAttackValidationInput input = validMeleeAttackInput();
+	input.meleeWeaponInSpecifiedHand = false;
+	const MoveValidationResult result = validateMeleeAttackCommand(input);
+	expect(!result.accepted && result.rejectCode == "MELEE_WEAPON_NOT_IN_HAND", "wrong hand preflight rejects");
+}
+
+static void testMeleeAttackFriendlyTargetRejected()
+{
+	MeleeAttackValidationInput input = validMeleeAttackInput();
+	input.targetFriendlyRosterSoldier = true;
+	const MoveValidationResult result = validateMeleeAttackCommand(input);
+	expect(!result.accepted && result.rejectCode == "PROHIBITED_TARGET", "friendly roster target rejects");
+}
+
+static void testMeleeAttackNoLineOfSightRejected()
+{
+	MeleeAttackValidationInput input = validMeleeAttackInput();
+	input.targetLineOfSightOk = false;
+	const MoveValidationResult result = validateMeleeAttackCommand(input);
+	expect(!result.accepted && result.rejectCode == "NO_LINE_OF_SIGHT", "no LOS preflight rejects");
+}
+
+static void testMeleeTurnStepEstimate()
+{
+	expect(CompanionCommandRuntimeSupport::shortestTurnStepsBetweenDirections(0, 0) == 0, "same facing 0 turn steps");
+	expect(CompanionCommandRuntimeSupport::shortestTurnStepsBetweenDirections(0, 4) == 4, "opposite facing 4 steps");
+	expect(CompanionCommandRuntimeSupport::shortestTurnStepsBetweenDirections(1, 7) == 2, "wrap shortest arc");
+}
+
+static void testCompanionMeleeExecutionGateDefaultOff()
+{
+	expect(!CompanionSoldierOwnershipCore::isCompanionMeleeExecutionEnabledFromEnvironment(),
+		"melee execution env must default off in tests");
+}
+
+static void testMeleeTerminalLifecycleEvaluation()
+{
+	CompanionCommandCore::MeleeCompletionInput busy = {};
+	busy.battleBusy = true;
+	busy.actorAlive = true;
+	busy.actorStillAiControlled = true;
+	busy.attackResolved = false;
+	expect(CompanionCommandCore::evaluateMeleeTerminalStatus(busy) == CompanionCommandCore::CMD_EXECUTING,
+		"melee stays executing while battle busy");
+
+	CompanionCommandCore::MeleeCompletionInput done = busy;
+	done.battleBusy = false;
+	done.attackResolved = true;
+	expect(CompanionCommandCore::evaluateMeleeTerminalStatus(done) == CompanionCommandCore::CMD_COMPLETED,
+		"melee completes when resolved and idle");
+
+	CompanionCommandCore::MeleeCompletionInput orphan = busy;
+	orphan.battleBusy = false;
+	orphan.attackResolved = false;
+	expect(CompanionCommandCore::evaluateMeleeTerminalStatus(orphan) == CompanionCommandCore::CMD_FAILED,
+		"idle unresolved melee fails (orphan/reload) without duplicate strike");
+
+	CompanionCommandCore::MeleeCompletionInput missAuth = done;
+	missAuth.actorStillAiControlled = false;
+	expect(CompanionCommandCore::evaluateMeleeTerminalStatus(missAuth) == CompanionCommandCore::CMD_INTERRUPTED,
+		"melee interrupted when actor loses AI control");
+
+	CompanionCommandCore::MeleeCompletionInput failed = done;
+	failed.actionResult = "STR_NOT_ENOUGH_TIME_UNITS";
+	expect(CompanionCommandCore::evaluateMeleeTerminalStatus(failed) == CompanionCommandCore::CMD_FAILED,
+		"melee failed on action result");
+}
+
+static void testParseMeleeAttackCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"melee-relay-1\",\n"
+		"  \"command_type\": \"MELEE_ATTACK\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"target_unit_id\": 100042,\n"
+		"  \"melee_weapon_battle_item_id\": 515,\n"
+		"  \"active_hand\": \"STR_RIGHT_HAND\",\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	MeleeAttackCommandParsed parsed = {};
+	expect(parseMeleeAttackCommandJson(json, &parsed), "melee parse must succeed");
+	expect(parsed.valid && parsed.commandType == "MELEE_ATTACK" && parsed.meleeWeaponBattleItemId == 515,
+		"melee_weapon_battle_item_id parsed");
+}
+
 static void testParsePsiMindControlCommandJson()
 {
 	const std::string json =
@@ -2519,6 +2704,7 @@ int main()
 	testOrphanDirectedFireSessionBinding();
 	testSessionOrphan01bPersistedCrossSessionRecoveryPolicy();
 	testSessionOrphan01bTerminalizeFromOpenResultAfterInboxQuarantine();
+	testMeleeOpenResultParseAfterInboxQuarantine();
 	testCompanionCommandPollDuringIdleThink();
 	testCompanionCommandInboxThrottle();
 	testExecutorDisabledByDefault();
@@ -2625,6 +2811,17 @@ int main()
 	testPsiMindControlAuthorizedAccepted();
 	testPsiMindControlHiddenTargetRejected();
 	testParsePsiMindControlCommandJson();
+	testMeleeAttackAuthorizedAccepted();
+	testMeleeAttackInsufficientTuRejected();
+	testMeleeAttackHiddenTargetRejected();
+	testMeleeAttackWeaponMismatchRejected();
+	testMeleeAttackWrongHandPreflightRejected();
+	testMeleeAttackFriendlyTargetRejected();
+	testMeleeAttackNoLineOfSightRejected();
+	testMeleeTurnStepEstimate();
+	testCompanionMeleeExecutionGateDefaultOff();
+	testMeleeTerminalLifecycleEvaluation();
+	testParseMeleeAttackCommandJson();
 	testP2UiRefreshCompanionPollBlockedWhenBattleBusy();
 	testUnloadAuthorizedAccepted();
 	testUnloadNoMagazineRejected();

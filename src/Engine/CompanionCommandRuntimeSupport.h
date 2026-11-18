@@ -14,6 +14,9 @@ namespace CompanionCommandRuntimeSupport
 
 const int COMMAND_INBOX_MIN_POLL_INTERVAL_MS = 250;
 
+/// Shortest turn animation steps between facings (0–4); M1 melee TU preflight.
+int shortestTurnStepsBetweenDirections(int fromDir, int toDir);
+
 enum DuplicateInboxDecision
 {
 	DUPLICATE_INBOX_PROCEED,
@@ -126,6 +129,10 @@ bool parseMoveParsedFromOpenResultJson(
 bool parseKneelParsedFromOpenResultJson(
 	const std::string &resultJson,
 	CompanionCommandCore::KneelCommandParsed *out);
+
+bool parseMeleeParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::MeleeAttackCommandParsed *out);
 
 enum HandleStateCompanionStage
 {

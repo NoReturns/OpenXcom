@@ -52,6 +52,15 @@ public:
 	/// Determine if the attack hit, and if so, do stuff.
 	void resolveHit();
 
+	/// Headless companion melee: native performMeleeAttack + resolveHit without inbox animation stack (S2a).
+	static bool companionExecuteMelee(
+		BattlescapeGame *parent,
+		BattleAction action,
+		BattleUnit *target,
+		std::string *rejectReason,
+		bool *meleeHitOut,
+		bool *targetUnconsciousOut,
+		bool *targetKilledOut);
 };
 
 }

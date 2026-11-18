@@ -33,6 +33,7 @@
 #include "../Mod/Mod.h"
 #include "../Mod/RuleItem.h"
 #include "../Engine/CompanionPerceptionLog.h"
+#include "../Engine/CompanionCommandRuntime.h"
 #include "../fmath.h"
 
 namespace OpenXcom
@@ -196,16 +197,23 @@ void MeleeAttackBState::performMeleeAttack()
 {
 	// set the soldier in an aiming position
 	_unit->aim(true);
-	_unit->setCache(0);
-	_parent->getMap()->cacheUnit(_unit);
-	// make some noise
-	if (_ammo && _ammo->getRules()->getMeleeAttackSound() != -1)
+	Map *map = _parent->getMap();
+	if (map != 0)
 	{
-		_parent->getMod()->getSoundByDepth(_parent->getDepth(), _ammo->getRules()->getMeleeAttackSound())->play(-1, _parent->getMap()->getSoundAngle(_action.target));
+		_unit->setCache(0);
+		map->cacheUnit(_unit);
 	}
-	else if (_weapon->getRules()->getMeleeAttackSound() != -1)
+	// make some noise
+	if (!_action.companionHeadlessMelee && map != 0)
 	{
-		_parent->getMod()->getSoundByDepth(_parent->getDepth(), _weapon->getRules()->getMeleeAttackSound())->play(-1, _parent->getMap()->getSoundAngle(_action.target));
+		if (_ammo && _ammo->getRules()->getMeleeAttackSound() != -1)
+		{
+			_parent->getMod()->getSoundByDepth(_parent->getDepth(), _ammo->getRules()->getMeleeAttackSound())->play(-1, map->getSoundAngle(_action.target));
+		}
+		else if (_weapon->getRules()->getMeleeAttackSound() != -1)
+		{
+			_parent->getMod()->getSoundByDepth(_parent->getDepth(), _weapon->getRules()->getMeleeAttackSound())->play(-1, map->getSoundAngle(_action.target));
+		}
 	}
 	// use up ammo if applicable
 	if (!_parent->getSave()->getDebugMode() && _weapon->getRules()->getBattleType() == BT_MELEE && _ammo && _ammo->spendBullet() == false)
@@ -213,10 +221,16 @@ void MeleeAttackBState::performMeleeAttack()
 		_parent->getSave()->removeItem(_ammo);
 		_action.weapon->setAmmoItem(0);
 	}
-	_parent->getMap()->setCursorType(CT_NONE);
+	if (map != 0)
+	{
+		map->setCursorType(CT_NONE);
+	}
 
-	// make an explosion animation
-	_parent->statePushFront(new ExplosionBState(_parent, _voxel, _action.weapon, _action.actor, 0, true, true));
+	// make an explosion animation (skipped for companionExecuteMelee — damage applies in resolveHit)
+	if (!_action.companionHeadlessMelee)
+	{
+		_parent->statePushFront(new ExplosionBState(_parent, _voxel, _action.weapon, _action.actor, 0, true, true));
+	}
 
 	if (_action.reactionFire)
 	{
@@ -239,7 +253,12 @@ void MeleeAttackBState::performMeleeAttack()
  */
 void MeleeAttackBState::resolveHit()
 {
-	if (RNG::percent(_unit->getFiringAccuracy(BA_HIT, _weapon)))
+	const bool rolledHit = RNG::percent(_unit->getFiringAccuracy(BA_HIT, _weapon));
+	if (_action.companionRelayMelee && _unit != 0)
+	{
+		CompanionCommandRuntime::noteMeleeAttackResolved(_unit->getId(), _target, rolledHit);
+	}
+	if (rolledHit)
 	{
 		// Give soldiers XP
 		if (_unit->getGeoscapeSoldier() &&
@@ -277,9 +296,10 @@ void MeleeAttackBState::resolveHit()
 			power += _unit->getBaseStats()->strength;
 		}
 		// make some noise to signal the hit.
-		if (_weapon->getRules()->getMeleeHitSound() != -1)
+		Map *map = _parent->getMap();
+		if (!_action.companionHeadlessMelee && map != 0 && _weapon->getRules()->getMeleeHitSound() != -1)
 		{
-			_parent->getMod()->getSoundByDepth(_parent->getDepth(), _action.weapon->getRules()->getMeleeHitSound())->play(-1, _parent->getMap()->getSoundAngle(_action.target));
+			_parent->getMod()->getSoundByDepth(_parent->getDepth(), _action.weapon->getRules()->getMeleeHitSound())->play(-1, map->getSoundAngle(_action.target));
 		}
 
 		// offset the damage voxel ever so slightly so that the target knows which side the attack came from
@@ -294,6 +314,124 @@ void MeleeAttackBState::resolveHit()
 		// now check for new casualties
 		_parent->checkForCasualties(_ammo, _unit);
 	}
+}
+
+bool MeleeAttackBState::companionExecuteMelee(
+	BattlescapeGame *parent,
+	BattleAction action,
+	BattleUnit *target,
+	std::string *rejectReason,
+	bool *meleeHitOut,
+	bool *targetUnconsciousOut,
+	bool *targetKilledOut)
+{
+	if (meleeHitOut != 0)
+	{
+		*meleeHitOut = false;
+	}
+	if (targetUnconsciousOut != 0)
+	{
+		*targetUnconsciousOut = false;
+	}
+	if (targetKilledOut != 0)
+	{
+		*targetKilledOut = false;
+	}
+	if (parent == 0 || action.actor == 0 || action.weapon == 0 || target == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid melee parameters.";
+		}
+		return false;
+	}
+	SavedBattleGame *save = parent->getSave();
+	if (save == 0 || save->getTile(target->getPosition()) == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Invalid target position.";
+		}
+		return false;
+	}
+
+	action.type = BA_HIT;
+	action.target = target->getPosition();
+	action.weapon = action.actor->getMeleeWeapon();
+	if (action.weapon == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "No melee weapon available.";
+		}
+		return false;
+	}
+	if (action.TU <= 0)
+	{
+		action.TU = action.actor->getActionTUs(BA_HIT, action.weapon);
+	}
+	if (action.actor->getTimeUnits() < action.TU)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units.";
+		}
+		return false;
+	}
+	if (target->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target unit unavailable.";
+		}
+		return false;
+	}
+
+	const int stunBefore = target->getStunlevel();
+	const int healthBefore = target->getHealth();
+
+	MeleeAttackBState state(parent, action);
+	state._unit = action.actor;
+	state._target = target;
+	state._weapon = action.weapon;
+	state._ammo = action.weapon->getAmmoItem() != 0 ? action.weapon->getAmmoItem() : action.weapon;
+	state._action = action;
+	state._action.companionHeadlessMelee = true;
+	state._initialized = true;
+
+	int height = target->getFloatHeight() + (target->getHeight() / 2) - save->getTile(action.target)->getTerrainLevel();
+	state._voxel = action.target * Position(16, 16, 24) + Position(8, 8, height);
+
+	state.performMeleeAttack();
+	state.resolveHit();
+
+	if (!action.actor->spendTimeUnits(action.TU))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units.";
+		}
+		return false;
+	}
+
+	const bool hit = target->getStunlevel() > stunBefore || target->getHealth() < healthBefore;
+	const bool unconscious = target->getStatus() == STATUS_UNCONSCIOUS
+		|| (target->getStunlevel() >= target->getHealth() && target->getHealth() > 0);
+	const bool killed = target->getStatus() == STATUS_DEAD || target->getHealth() <= 0;
+
+	if (meleeHitOut != 0)
+	{
+		*meleeHitOut = hit;
+	}
+	if (targetUnconsciousOut != 0)
+	{
+		*targetUnconsciousOut = unconscious;
+	}
+	if (targetKilledOut != 0)
+	{
+		*targetKilledOut = killed;
+	}
+	return true;
 }
 
 }

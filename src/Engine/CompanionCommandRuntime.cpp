@@ -28,6 +28,7 @@
 #include "../Battlescape/BattlescapeGame.h"
 #include "../Battlescape/ProjectileFlyBState.h"
 #include "CompanionGroundInventoryCore.h"
+#include "CompanionMeleeExecutionCore.h"
 #include "CompanionTuVisibilityCore.h"
 #include "Logger.h"
 #include <map>
@@ -61,7 +62,8 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 			KIND_AUTO_SHOT,
 			KIND_AIMED_SHOT,
 			KIND_THROW,
-			KIND_GUIDED_LAUNCH
+			KIND_GUIDED_LAUNCH,
+			KIND_MELEE
 		};
 
 		bool inFlight;
@@ -72,6 +74,13 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	CompanionCommandCore::SnapShotCommandParsed snapParsed;
 	CompanionCommandCore::ThrowCommandParsed throwParsed;
 	CompanionCommandCore::GuidedLaunchCommandParsed guidedLaunchParsed;
+	CompanionCommandCore::MeleeAttackCommandParsed meleeParsed;
+	bool meleeAttackResolved;
+	bool meleeHit;
+	bool targetIncapacitated;
+	bool targetKilled;
+	std::string meleeTargetStatus;
+	std::string meleeActionResult;
 	Position startPos;
 	bool snapProjectileLaunched;
 	std::string snapActionResult;
@@ -120,6 +129,11 @@ static bool isThrowKind(ActiveCommand::Kind kind)
 static bool isGuidedLaunchKind(ActiveCommand::Kind kind)
 {
 	return kind == ActiveCommand::KIND_GUIDED_LAUNCH;
+}
+
+static bool isMeleeKind(ActiveCommand::Kind kind)
+{
+	return kind == ActiveCommand::KIND_MELEE;
 }
 
 static bool isThrowOrGuidedLaunchKind(ActiveCommand::Kind kind)
@@ -1510,6 +1524,107 @@ void rejectPsiMindControlCommand(const std::string &resultPath,
 	writeResultFile(resultPath, json);
 }
 
+std::string buildMeleeAttackResultJson(const CompanionCommandCore::MeleeAttackCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	Position startPos,
+	Position finalPos,
+	int remainingTu,
+	bool kneeled,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256,
+	int tuSpent,
+	bool includeMeleeOutcome,
+	bool meleeHit,
+	bool targetIncapacitated,
+	bool targetKilled,
+	const std::string &targetStatus)
+{
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
+	     << "  \"command_type\": \"MELEE_ATTACK\",\n"
+	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
+	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
+	     << "  \"turn\": " << cmd.turn << ",\n"
+	     << "  \"actor_unit_id\": " << cmd.actorUnitId << ",\n"
+	     << "  \"melee_weapon_battle_item_id\": " << cmd.meleeWeaponBattleItemId << ",\n"
+	     << "  \"active_hand\": \"" << cmd.activeHand << "\",\n"
+	     << "  \"target_unit_id\": " << cmd.targetUnitId << ",\n";
+	if (!publicReason.empty())
+	{
+		json << "  \"public_reason\": \"" << publicReason << "\",\n";
+	}
+	if (status == CompanionCommandCore::CMD_EXECUTING ||
+	    status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"starting_position\": { \"x\": " << startPos.x
+		     << ", \"y\": " << startPos.y << ", \"z\": " << startPos.z << " },\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"final_position\": { \"x\": " << finalPos.x
+		     << ", \"y\": " << finalPos.y << ", \"z\": " << finalPos.z << " },\n"
+		     << "  \"remaining_tu\": " << remainingTu << ",\n"
+	     << "  \"kneeled\": " << (kneeled ? "true" : "false") << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED && tuSpent >= 0)
+	{
+		json << "  \"tu_spent\": " << tuSpent << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED && includeMeleeOutcome)
+	{
+		json << "  \"melee_hit\": " << (meleeHit ? "true" : "false") << ",\n"
+		     << "  \"target_incapacitated\": " << (targetIncapacitated ? "true" : "false") << ",\n"
+		     << "  \"target_killed\": " << (targetKilled ? "true" : "false") << ",\n";
+		if (!targetStatus.empty())
+		{
+			json << "  \"target_status\": \"" << targetStatus << "\",\n";
+		}
+	}
+	if (!snapshotSha256.empty())
+	{
+		json << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n";
+	}
+	if (!inboxSha256.empty())
+	{
+		json << "  \"inbox_sha256\": \"" << inboxSha256 << "\",\n";
+	}
+	json << "  \"completed_at\": \"engine-local\"\n"
+	     << "}\n";
+	return json.str();
+}
+
+void rejectMeleeAttackCommand(const std::string &resultPath,
+	const CompanionCommandCore::MeleeAttackCommandParsed &parsed,
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+{
+	CompanionCommandCore::MeleeAttackCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "MELEE_ATTACK";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+		cmd.meleeWeaponBattleItemId = 0;
+		cmd.targetUnitId = 0;
+		cmd.activeHand = "STR_RIGHT_HAND";
+	}
+	if (cmd.commandType.empty())
+	{
+		cmd.commandType = "MELEE_ATTACK";
+	}
+	const std::string json = buildMeleeAttackResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), Position(0, 0, 0), 0, false,
+		std::string(), inboxSha256, -1, false, false, false, false, std::string());
+	writeResultFile(resultPath, json);
+}
+
 void rejectDropCommand(const std::string &resultPath,
 	const CompanionCommandCore::DropCommandParsed &parsed,
 	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
@@ -1551,14 +1666,20 @@ static bool rejectUnreadableCommandJournal(
 	const CompanionCommandCore::DropCommandParsed *dropRejectTemplate,
 	const CompanionCommandCore::MedikitCommandParsed *medikitRejectTemplate,
 	const CompanionCommandCore::PsiPanicCommandParsed *psiPanicRejectTemplate = 0,
-	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0)
+	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0,
+	const CompanionCommandCore::MeleeAttackCommandParsed *meleeRejectTemplate = 0)
 {
 	if (CompanionCommandJournalCore::classifyExistingJournalJson(journalJson) !=
 		CompanionCommandJournalCore::JOURNAL_UNREADABLE)
 	{
 		return false;
 	}
-	if (psiMindControlRejectTemplate != 0)
+	if (meleeRejectTemplate != 0)
+	{
+		rejectMeleeAttackCommand(resultPath, *meleeRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
+	else if (psiMindControlRejectTemplate != 0)
 	{
 		rejectPsiMindControlCommand(resultPath, *psiMindControlRejectTemplate, "JOURNAL_MALFORMED",
 			"Tactical command journal is unreadable.", inboxDigest);
@@ -1651,7 +1772,8 @@ bool applyDuplicateInboxDecision(
 	const CompanionCommandCore::DropCommandParsed *dropRejectTemplate,
 	const CompanionCommandCore::MedikitCommandParsed *medikitRejectTemplate,
 	const CompanionCommandCore::PsiPanicCommandParsed *psiPanicRejectTemplate = 0,
-	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0)
+	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0,
+	const CompanionCommandCore::MeleeAttackCommandParsed *meleeRejectTemplate = 0)
 {
 	switch (duplicateDecision)
 	{
@@ -1689,7 +1811,11 @@ bool applyDuplicateInboxDecision(
 		return true;
 	}
 	case CompanionCommandRuntimeSupport::DUPLICATE_INBOX_REJECT:
-		if (psiMindControlRejectTemplate != 0)
+		if (meleeRejectTemplate != 0)
+		{
+			rejectMeleeAttackCommand(resultPath, *meleeRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
+		}
+		else if (psiMindControlRejectTemplate != 0)
 		{
 			rejectPsiMindControlCommand(resultPath, *psiMindControlRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
 		}
@@ -3018,6 +3144,81 @@ void fillPsiMindControlValidationInput(
 		!game->checkReservedTU(actor, mindControlTu, true);
 }
 
+void fillMeleeAttackValidationInput(
+	CompanionCommandCore::MeleeAttackValidationInput *input,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &sessionId,
+	const CompanionCommandCore::MeleeAttackCommandParsed &parsed,
+	int actorUnitId,
+	bool actorIsPlayerSoldier,
+	bool actorAlive,
+	bool actorAiControlled,
+	bool humanOverrideRevoked,
+	BattleUnit *actor)
+{
+	fillBindingValidationInput(
+		input,
+		game,
+		battle,
+		battleInitialized,
+		sessionId,
+		parsed.snapshotSha256,
+		parsed.sessionId,
+		parsed.turn,
+		parsed.stateVersion,
+		actorUnitId,
+		actorIsPlayerSoldier,
+		actorAlive,
+		actorAiControlled,
+		humanOverrideRevoked);
+	input->meleeWeaponBattleItemId = parsed.meleeWeaponBattleItemId;
+	input->activeHand = parsed.activeHand;
+	input->targetUnitId = parsed.targetUnitId;
+	input->activeHandValid = parsed.activeHand == "STR_LEFT_HAND" || parsed.activeHand == "STR_RIGHT_HAND";
+
+	BattleItem *meleeWeapon = findBattleItemByIdOnUnit(actor, parsed.meleeWeaponBattleItemId);
+	input->meleeWeaponResolved = meleeWeapon != 0;
+	input->meleeWeaponBelongsToActor = meleeWeapon != 0 && meleeWeapon->getOwner() == actor;
+	input->meleeWeaponInSpecifiedHand =
+		meleeWeapon != 0 &&
+		meleeWeapon->getSlot() != 0 &&
+		meleeWeapon->getSlot()->getId() == parsed.activeHand &&
+		meleeWeapon->getSlot()->getType() == INV_HAND;
+	input->meleeWeaponIsMelee =
+		meleeWeapon != 0 && meleeWeapon->getRules() != 0 && meleeWeapon->getRules()->getBattleType() == BT_MELEE;
+	BattleItem *nativeMelee = actor != 0 ? actor->getMeleeWeapon() : 0;
+	input->meleeWeaponMatchesNativeSelection =
+		meleeWeapon != 0 && nativeMelee != 0 && meleeWeapon->getId() == nativeMelee->getId();
+	input->meleeWeaponUsableEnvironment =
+		meleeWeapon != 0 && battle != 0 && battle->getItemUsable(meleeWeapon).empty();
+
+	BattleUnit *target = findUnitById(battle, parsed.targetUnitId);
+	input->targetResolved = target != 0;
+	input->targetFriendlyRosterSoldier =
+		target != 0 && CompanionTacticalAuthorityCore::isCompanionFriendlyRosterSoldierTarget(target);
+	input->targetGenuineHostile =
+		target != 0 &&
+		target->getOriginalFaction() == FACTION_HOSTILE &&
+		target->getFaction() == FACTION_HOSTILE;
+	input->targetVisible = target != 0 && target->getVisible();
+	input->targetLineOfSightOk = false;
+	if (actor != 0 && target != 0)
+	{
+		std::vector<BattleUnit *> *visible = actor->getVisibleUnits();
+		input->targetLineOfSightOk = visible != 0 &&
+			std::find(visible->begin(), visible->end(), target) != visible->end();
+	}
+
+	const int meleeTu = actor != 0 && meleeWeapon != 0 ? actor->getActionTUs(BA_HIT, meleeWeapon) : 0;
+	const int turnTu = CompanionMeleeExecutionCore::estimateMeleeTurnSteps(actor, target);
+	input->insufficientTuForMelee = actor == 0 || meleeWeapon == 0 || meleeTu <= 0 ||
+		!game->checkReservedTU(actor, meleeTu + turnTu, true);
+	(void)campaign;
+}
+
 bool shouldReadCommandInboxNow(const std::string &commandPath)
 {
 	time_t mtime = 0;
@@ -3241,6 +3442,25 @@ void interruptInFlightForBindingReset(const std::string &resultPath)
 			g_lastSnapshotSha256,
 			g_active.inboxDigest);
 	}
+	else if (isMeleeKind(g_active.kind))
+	{
+		json = buildMeleeAttackResultJson(
+			g_active.meleeParsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			"Battle binding reset.",
+			g_active.startPos,
+			g_active.startPos,
+			0,
+			false,
+			g_lastSnapshotSha256,
+			g_active.inboxDigest,
+			-1,
+			false,
+			false,
+			false,
+			false,
+			std::string());
+	}
 	else
 	{
 		json = buildMoveResultJson(
@@ -3423,6 +3643,8 @@ static std::string activeInFlightCommandSessionId()
 		return g_active.throwParsed.sessionId;
 	case ActiveCommand::KIND_GUIDED_LAUNCH:
 		return g_active.guidedLaunchParsed.sessionId;
+	case ActiveCommand::KIND_MELEE:
+		return g_active.meleeParsed.sessionId;
 	default:
 		return std::string();
 	}
@@ -3639,6 +3861,34 @@ static bool tryTerminalizePersistedCrossSessionOpenResult(
 			resultSnapshotSha256,
 			inboxDigestHex);
 	}
+	else if (inboxCommandType == "MELEE_ATTACK")
+	{
+		CompanionCommandCore::MeleeAttackCommandParsed meleeParsed = {};
+		if (!(inboxPresent
+		          ? CompanionCommandCore::parseMeleeAttackCommandJson(commandJson, &meleeParsed)
+		          : CompanionCommandRuntimeSupport::parseMeleeParsedFromOpenResultJson(resultJson, &meleeParsed)))
+		{
+			return false;
+		}
+		BattleUnit *actor = findUnitById(battle, meleeParsed.actorUnitId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		json = buildMeleeAttackResultJson(
+			meleeParsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			publicReason,
+			pos,
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256,
+			inboxDigestHex,
+			-1,
+			false,
+			false,
+			false,
+			false,
+			std::string());
+	}
 	else
 	{
 		return false;
@@ -3760,6 +4010,8 @@ int getInFlightActorUnitId()
 		return g_active.throwParsed.actorUnitId;
 	case ActiveCommand::KIND_GUIDED_LAUNCH:
 		return g_active.guidedLaunchParsed.actorUnitId;
+	case ActiveCommand::KIND_MELEE:
+		return g_active.meleeParsed.actorUnitId;
 	default:
 		return -1;
 	}
@@ -3811,6 +4063,61 @@ void noteSnapShotBattleActionPop(int actorUnitId, const std::string &actionResul
 	if (!actionResult.empty())
 	{
 		g_active.snapActionResult = actionResult;
+	}
+}
+
+static std::string companionMeleePublicTargetStatus(BattleUnit *target)
+{
+	if (target == 0)
+	{
+		return std::string();
+	}
+	if (target->getStatus() == STATUS_DEAD || target->getHealth() <= 0)
+	{
+		return "dead";
+	}
+	if (target->getStatus() == STATUS_UNCONSCIOUS ||
+	    (target->getHealth() > 0 && target->getStunlevel() >= target->getHealth()))
+	{
+		return "unconscious";
+	}
+	return "active";
+}
+
+void noteMeleeAttackResolved(int actorUnitId, BattleUnit *target, bool meleeHit)
+{
+	if (!g_active.inFlight || !isMeleeKind(g_active.kind))
+	{
+		return;
+	}
+	if (actorUnitId != g_active.meleeParsed.actorUnitId)
+	{
+		return;
+	}
+	g_active.meleeAttackResolved = true;
+	g_active.meleeHit = meleeHit;
+	if (target != 0)
+	{
+		g_active.targetIncapacitated = target->getStatus() == STATUS_UNCONSCIOUS ||
+			(target->getHealth() > 0 && target->getStunlevel() >= target->getHealth());
+		g_active.targetKilled = target->getStatus() == STATUS_DEAD || target->getHealth() <= 0;
+		g_active.meleeTargetStatus = companionMeleePublicTargetStatus(target);
+	}
+}
+
+void noteMeleeBattleActionPop(int actorUnitId, const std::string &actionResult)
+{
+	if (!g_active.inFlight || !isMeleeKind(g_active.kind))
+	{
+		return;
+	}
+	if (actorUnitId != g_active.meleeParsed.actorUnitId)
+	{
+		return;
+	}
+	if (!actionResult.empty())
+	{
+		g_active.meleeActionResult = actionResult;
 	}
 }
 
@@ -3964,6 +4271,106 @@ static bool tryRehydrateOrphanedDirectedFireActive(
 	return true;
 }
 
+static bool tryRehydrateOrphanedMeleeActive(
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	const std::string &liveSessionId,
+	const std::string &commandPath,
+	const std::string &resultPath,
+	const std::string &journalPath)
+{
+	if (g_active.inFlight || game == 0 || battle == 0)
+	{
+		return false;
+	}
+	std::string resultJson;
+	if (!readTextFile(resultPath, &resultJson))
+	{
+		return false;
+	}
+	std::string status;
+	std::string resultCommandId;
+	std::string resultSessionId;
+	std::string resultInboxDigest;
+	CompanionJsonLite::extractJsonStringField(resultJson, "status", &status);
+	if (status != "EXECUTING")
+	{
+		return false;
+	}
+	CompanionJsonLite::extractJsonStringField(resultJson, "command_id", &resultCommandId);
+	CompanionJsonLite::extractJsonStringField(resultJson, "session_id", &resultSessionId);
+	if (resultCommandId.empty())
+	{
+		return false;
+	}
+
+	std::string journalJson;
+	readTextFile(journalPath, &journalJson);
+	if (!journalContainsCommandId(journalJson, resultCommandId))
+	{
+		return false;
+	}
+
+	std::string commandJson;
+	if (!readTextFile(commandPath, &commandJson))
+	{
+		return false;
+	}
+	std::string inboxCommandId;
+	std::string inboxCommandType;
+	CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &inboxCommandId);
+	CompanionJsonLite::extractJsonStringField(commandJson, "command_type", &inboxCommandType);
+	if (inboxCommandId != resultCommandId)
+	{
+		return false;
+	}
+	if (inboxCommandType != "MELEE_ATTACK")
+	{
+		return false;
+	}
+
+	CompanionCommandCore::MeleeAttackCommandParsed meleeParsed = {};
+	if (!CompanionCommandCore::parseMeleeAttackCommandJson(commandJson, &meleeParsed))
+	{
+		return false;
+	}
+
+	if (!CompanionCommandRuntimeSupport::shouldRehydrateOrphanedDirectedFireForSession(
+		    liveSessionId, meleeParsed.sessionId, resultSessionId))
+	{
+		return false;
+	}
+
+	std::string inboxDigest;
+	if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+	{
+		return false;
+	}
+	CompanionJsonLite::extractJsonStringField(resultJson, "inbox_sha256", &resultInboxDigest);
+	if (!resultInboxDigest.empty() && resultInboxDigest != inboxDigest)
+	{
+		return false;
+	}
+
+	BattleUnit *actor = findUnitById(battle, meleeParsed.actorUnitId);
+	beginInFlightCommand();
+	g_active.kind = ActiveCommand::KIND_MELEE;
+	g_active.commandId = resultCommandId;
+	g_active.inboxDigest = inboxDigest;
+	g_active.meleeParsed = meleeParsed;
+	g_active.startPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+	g_active.meleeAttackResolved = false;
+	g_active.meleeHit = false;
+	g_active.targetIncapacitated = false;
+	g_active.targetKilled = false;
+	g_active.meleeTargetStatus.clear();
+	g_active.meleeActionResult.clear();
+	g_active.tuAtAcceptance = actor != 0 ? actor->getTimeUnits() : -1;
+
+	logCommandDiagnostic("rehydrated orphaned melee command_id=" + resultCommandId.substr(0, 8) + "...");
+	return true;
+}
+
 void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, bool battleInitialized)
 {
 	const CommandTickDepthGuard depthGuard;
@@ -3986,7 +4393,8 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	const bool controlReadOk = readTextFile(controlPath, &controlJson);
 	const std::string &sessionId = battle->getCompanionEventLog().getSessionId();
 
-	if (!tryRehydrateOrphanedDirectedFireActive(game, battle, sessionId, commandPath, resultPath, journalPath))
+	if (!tryRehydrateOrphanedMeleeActive(game, battle, sessionId, commandPath, resultPath, journalPath) &&
+	    !tryRehydrateOrphanedDirectedFireActive(game, battle, sessionId, commandPath, resultPath, journalPath))
 	{
 		tryResolveOrphanedDirectedFireSessionBoundary(
 			game, battle, sessionId, commandPath, resultPath, journalPath);
@@ -3998,6 +4406,83 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		{
 			return;
 		}
+		if (isMeleeKind(g_active.kind))
+		{
+			BattleUnit *unit = findUnitById(battle, g_active.meleeParsed.actorUnitId);
+			const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+				tacticalAuthorityForActor(campaign, battle, unit, controlJson, sessionId);
+			const bool aiCommandPermitted = authority.aiCommandPermitted;
+			if (unit != 0 && !aiCommandPermitted)
+			{
+				game->cancelCurrentAction();
+			}
+			CompanionCommandCore::MeleeCompletionInput done = {};
+			done.battleBusy = game->isBusy();
+			done.actorAlive = unit != 0 && !unit->isOut();
+			done.actorStillAiControlled = aiCommandPermitted;
+			done.attackResolved = g_active.meleeAttackResolved;
+			done.actionResult = g_active.meleeActionResult;
+
+			const CompanionCommandCore::CommandLifecycleStatus terminal =
+				CompanionCommandCore::evaluateMeleeTerminalStatus(done);
+			if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
+			{
+				return;
+			}
+
+			std::string publicReason;
+			if (terminal == CompanionCommandCore::CMD_INTERRUPTED)
+			{
+				publicReason = "Melee attack interrupted or incomplete.";
+			}
+			else if (terminal == CompanionCommandCore::CMD_FAILED)
+			{
+				publicReason = !done.actionResult.empty()
+					? done.actionResult
+					: "Melee attack did not resolve.";
+			}
+
+			const std::string resultSnapshotSha256 =
+				snapshotSha256ForTerminalCommandResult(battle, terminal);
+			const Position finalPos = unit != 0 ? unit->getPosition() : g_active.startPos;
+			int tuSpent = -1;
+			if (unit != 0 && g_active.tuAtAcceptance >= 0)
+			{
+				tuSpent = g_active.tuAtAcceptance - unit->getTimeUnits();
+				if (tuSpent < 0)
+				{
+					tuSpent = -1;
+				}
+			}
+			const bool includeOutcome = terminal == CompanionCommandCore::CMD_COMPLETED;
+			const std::string json = buildMeleeAttackResultJson(
+				g_active.meleeParsed,
+				terminal,
+				publicReason,
+				g_active.startPos,
+				finalPos,
+				unit != 0 ? unit->getTimeUnits() : 0,
+				unit != 0 && unit->isKneeled(),
+				resultSnapshotSha256,
+				g_active.inboxDigest,
+				tuSpent,
+				includeOutcome,
+				g_active.meleeHit,
+				g_active.targetIncapacitated,
+				g_active.targetKilled,
+				includeOutcome ? g_active.meleeTargetStatus : std::string());
+			writeResultFile(resultPath, json);
+			logTerminalOnce(g_active.commandId, terminal);
+			if (terminal == CompanionCommandCore::CMD_COMPLETED)
+			{
+				CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+			}
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			clearRosterCasualtyDeferClock();
+			return;
+		}
+
 		if (isThrowOrGuidedLaunchKind(g_active.kind))
 		{
 			const int actorUnitId = isThrowKind(g_active.kind)
@@ -4256,7 +4741,8 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "UNLOAD" && inboxCommandType != "INVENTORY_MOVE" &&
 	    inboxCommandType != "PICKUP" && inboxCommandType != "DROP" &&
 	    inboxCommandType != "HEAL" && inboxCommandType != "STIMULANT" && inboxCommandType != "PAINKILLER" &&
-	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL")
+	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL" &&
+	    inboxCommandType != "MELEE_ATTACK")
 	{
 		std::string inboxDigest;
 		CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
@@ -5323,6 +5809,183 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		logTerminalOnce(psiParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
 		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
 		appendJournalEntry(journalPath, psiParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "MELEE_ATTACK")
+	{
+		CompanionCommandCore::MeleeAttackCommandParsed meleeParsed = {};
+		if (!CompanionCommandCore::parseMeleeAttackCommandJson(commandJson, &meleeParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectMeleeAttackCommand(resultPath, meleeParsed, meleeParsed.rejectCode, meleeParsed.rejectCode, inboxDigest);
+			logRejectOnce(meleeParsed.commandId.empty() ? "unknown" : meleeParsed.commandId, meleeParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(meleeParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &meleeParsed))
+		{
+			logRejectOnce(meleeParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, meleeParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, meleeParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, meleeParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &meleeParsed))
+		{
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, meleeParsed.actorUnitId);
+		const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+			tacticalAuthorityForActor(campaign, battle, actor, controlJson, sessionId);
+		const bool liveActor = isCompanionMoveActor(actor, campaign);
+		const std::set<int> &tacticalAiIds = battle->getCompanionTacticalAiSoldierIds();
+		const CompanionTacticalAuthorityCore::TacticalAuthorityInput authorityInput =
+			CompanionTacticalAuthorityCore::buildTacticalAuthorityInput(
+				campaign != 0,
+				tacticalAiIds,
+				liveActor,
+				meleeParsed.actorUnitId,
+				controlJson,
+				sessionId,
+				campaign != 0 ? campaign->getCompanionCampaignId() : std::string(),
+				battle->getCompanionTacticalBattleId());
+
+		CompanionCommandCore::MeleeAttackValidationInput meleeInput = {};
+		fillMeleeAttackValidationInput(
+			&meleeInput,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			sessionId,
+			meleeParsed,
+			meleeParsed.actorUnitId,
+			liveActor,
+			actor != 0 && !actor->isOut(),
+			authority.aiCommandPermitted,
+			CompanionTacticalAuthorityCore::isStaleRelayAiAfterCampaignHumanAssignment(
+				authorityInput, controlJson, sessionId),
+			actor);
+
+		const CompanionCommandCore::MoveValidationResult meleeVerdict =
+			CompanionCommandCore::validateMeleeAttackCommand(meleeInput);
+		if (!meleeVerdict.accepted)
+		{
+			rejectMeleeAttackCommand(resultPath, meleeParsed, meleeVerdict.rejectCode, meleeVerdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, meleeParsed.commandId);
+			logRejectOnce(meleeParsed.commandId, meleeVerdict.rejectCode);
+			maybeLogNotAiControlledReject(
+				meleeVerdict.rejectCode,
+				meleeParsed.commandId,
+				meleeParsed.actorUnitId,
+				campaign,
+				battle,
+				controlJson,
+				controlReadOk,
+				sessionId);
+			return;
+		}
+
+		logCommandDiagnostic("accepted command_id=" + meleeParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(meleeParsed.actorUnitId));
+
+		if (!CompanionSoldierOwnershipCore::isCompanionMeleeExecutionEnabledFromEnvironment())
+		{
+			rejectMeleeAttackCommand(
+				resultPath,
+				meleeParsed,
+				"MELEE_EXECUTION_DISABLED",
+				"Companion melee strike execution is disabled on this runtime (set OPENXCOM_COMPANION_MELEE_EXECUTION=1 to enable native strikes).",
+				inboxDigest);
+			appendJournalEntry(journalPath, meleeParsed.commandId);
+			logRejectOnce(meleeParsed.commandId, "MELEE_EXECUTION_DISABLED");
+			return;
+		}
+
+		beginInFlightCommand();
+		g_active.kind = ActiveCommand::KIND_MELEE;
+		g_active.commandId = meleeParsed.commandId;
+		g_active.inboxDigest = inboxDigest;
+		g_active.meleeParsed = meleeParsed;
+		g_active.startPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		g_active.tuAtAcceptance = actor != 0 ? actor->getTimeUnits() : -1;
+		g_active.meleeAttackResolved = false;
+		g_active.meleeHit = false;
+		g_active.targetIncapacitated = false;
+		g_active.targetKilled = false;
+		g_active.meleeTargetStatus.clear();
+		g_active.meleeActionResult.clear();
+
+		BattleItem *meleeWeapon = findBattleItemByIdOnUnit(actor, meleeParsed.meleeWeaponBattleItemId);
+		if (actor != 0 && actor->getActiveHand() != meleeParsed.activeHand)
+		{
+			actor->setActiveHand(meleeParsed.activeHand);
+		}
+
+		std::string rejectReason;
+		if (!game->tryExecuteCompanionMeleeAttack(
+			actor,
+			meleeWeapon,
+			meleeParsed.activeHand,
+			meleeParsed.targetUnitId,
+			&rejectReason,
+			0,
+			0,
+			0,
+			0))
+		{
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			rejectMeleeAttackCommand(resultPath, meleeParsed, "MELEE_ATTACK_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, meleeParsed.commandId);
+			logRejectOnce(meleeParsed.commandId, "MELEE_ATTACK_FAILED");
+			return;
+		}
+
+		if (!game->isBusy())
+		{
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			rejectMeleeAttackCommand(
+				resultPath,
+				meleeParsed,
+				"MELEE_ATTACK_FAILED",
+				"Melee attack requires a live Battlescape session (animated state stack).",
+				inboxDigest);
+			appendJournalEntry(journalPath, meleeParsed.commandId);
+			logRejectOnce(meleeParsed.commandId, "MELEE_ATTACK_FAILED");
+			return;
+		}
+
+		logCommandDiagnostic("melee executing command_id=" + meleeParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(meleeParsed.actorUnitId));
+		writeResultFile(resultPath, buildMeleeAttackResultJson(meleeParsed, CompanionCommandCore::CMD_EXECUTING, std::string(),
+			g_active.startPos, g_active.startPos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			g_lastSnapshotSha256, inboxDigest, -1,
+			false, false, false, false, std::string()));
+		appendJournalEntry(journalPath, meleeParsed.commandId);
 		return;
 	}
 
