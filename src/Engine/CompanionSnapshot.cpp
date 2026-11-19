@@ -794,6 +794,122 @@ void appendHandActionCosts(YAML::Node &handCosts, SavedBattleGame *battle, Battl
 	handCosts["actions"] = actions;
 }
 
+bool isFriendlyHwpBattleUnit(const BattleUnit *unit)
+{
+	if (unit == 0)
+	{
+		return false;
+	}
+	return unit->getOriginalFaction() == FACTION_PLAYER
+		&& unit->getFaction() == FACTION_PLAYER
+		&& unit->getGeoscapeSoldier() == 0
+		&& unit->getId() >= BattleUnit::MAX_SOLDIER_ID;
+}
+
+void appendEngineFacingYaml(YAML::Node &parent, const char *key, int direction, bool turning)
+{
+	if (direction < 0 || direction >= 8)
+	{
+		return;
+	}
+	int dx = 0;
+	int dy = 0;
+	CompanionSnapshotUnitState::directionToMapVector(direction, &dx, &dy);
+	YAML::Node facing;
+	facing["direction"] = direction;
+	const char *label = CompanionSnapshotUnitState::directionLabel(direction);
+	if (label != 0)
+	{
+		facing["label"] = label;
+	}
+	YAML::Node vector;
+	vector["dx"] = dx;
+	vector["dy"] = dy;
+	facing["vector"] = vector;
+	if (turning)
+	{
+		facing["turning"] = true;
+	}
+	parent[key] = facing;
+}
+
+void appendFriendlyHwpObservationV1(
+	YAML::Node &obs,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	BattleUnit *unit,
+	Language *lang)
+{
+	if (unit == 0)
+	{
+		return;
+	}
+	obs["schemaVersion"] = 1;
+	obs["unitId"] = unit->getId();
+	obs["hwpUnitType"] = unit->getType();
+	if (lang != 0)
+	{
+		const std::string label = unit->getName(lang, false);
+		if (!label.empty())
+		{
+			obs["displayLabel"] = label;
+		}
+	}
+	const Position pos = unit->getPosition();
+	YAML::Node position;
+	position["x"] = pos.x;
+	position["y"] = pos.y;
+	position["z"] = pos.z;
+	obs["position"] = position;
+	if (CompanionSnapshotUnitState::shouldExportFacing(unit))
+	{
+		appendEngineFacingYaml(obs, "bodyFacing", unit->getDirection(), unit->getStatus() == STATUS_TURNING);
+	}
+	if (unit->getTurretType() >= 0)
+	{
+		appendEngineFacingYaml(obs, "turretFacing", unit->getTurretDirection(), false);
+		obs["turretTypeId"] = unit->getTurretType();
+	}
+	obs["timeUnits"] = unit->getTimeUnits();
+	const UnitStats *stats = unit->getBaseStats();
+	if (stats != 0)
+	{
+		obs["maxTimeUnits"] = stats->tu;
+		obs["health"] = unit->getHealth();
+		obs["maxHealth"] = stats->health;
+	}
+	obs["kneeled"] = unit->isKneeled();
+	obs["movementType"] = CompanionSnapshotUnitState::movementTypeId(unit->getMovementType());
+	YAML::Node capabilities;
+	capabilities["bodyTurn"] = true;
+	capabilities["turretTurn"] = unit->getTurretType() >= 0;
+	obs["capabilities"] = capabilities;
+
+	YAML::Node fixedWeapons(YAML::NodeType::Sequence);
+	for (std::vector<BattleItem *>::iterator i = unit->getInventory()->begin();
+	     i != unit->getInventory()->end();
+	     ++i)
+	{
+		BattleItem *item = *i;
+		if (item == 0 || item->getRules() == 0 || !item->getRules()->isFixed())
+		{
+			continue;
+		}
+		YAML::Node weapon = buildEquipmentItemNode(item, unit, campaign, 0);
+		YAML::Node actionCosts;
+		appendHandActionCosts(actionCosts, battle, unit, item);
+		if (actionCosts["actions"].IsDefined())
+		{
+			weapon["actionCosts"] = actionCosts["actions"];
+		}
+		fixedWeapons.push_back(weapon);
+	}
+	if (fixedWeapons.size() > 0)
+	{
+		obs["fixedWeapons"] = fixedWeapons;
+	}
+}
+
 void appendFriendlyActionCosts(YAML::Node &entry, SavedBattleGame *battle, BattleUnit *unit)
 {
 	YAML::Node costs;
@@ -854,6 +970,10 @@ void appendUnit(YAML::Node &units, SavedBattleGame *battle, SavedGame *campaign,
 		CompanionSnapshotUnitState::appendFriendlyCondition(entry, unit, campaign);
 		CompanionSnapshotUnitState::appendLiveRosterFatalWounds(entry, unit, campaign);
 		CompanionSnapshotUnitState::appendFriendlyReadiness(entry, unit, campaign);
+	}
+	else if (isFriendlyHwpBattleUnit(unit))
+	{
+		appendFriendlyHwpObservationV1(entry["friendlyHwpObservationV1"], battle, campaign, unit, languageFromBattle(battle));
 	}
 	else
 	{

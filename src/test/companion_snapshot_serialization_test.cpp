@@ -96,6 +96,29 @@ struct CyberdiscFixture
 	}
 };
 
+struct FriendlyHwpFixture
+{
+	Unit rules;
+	Armor armor;
+	BattleUnit *unit;
+	FriendlyHwpFixture(int id, const Position &pos, int direction, int turretDirection = -1)
+		: rules("STR_HWP_OBS_TEST_TANK"), armor("STR_SECTOID_ARMOR"), unit(0)
+	{
+		StatAdjustment adjustment;
+		unit = new BattleUnit(&rules, FACTION_PLAYER, id, &armor, &adjustment, 0);
+		unit->setPosition(pos);
+		unit->setDirection(direction);
+		std::string yamlState =
+			"status: 0\nstunlevel: 0\nhealth: 120\ntu: 75\nenergy: 60\nmorale: 100\narmor: [50,50,50,50,50]\nfatalWounds: [0,0,0,0,0,0]\n";
+		if (turretDirection >= 0)
+		{
+			unit->setTurretType(0);
+			yamlState += "directionTurret: " + std::to_string(turretDirection) + "\n";
+		}
+		unit->load(YAML::Load(yamlState));
+	}
+};
+
 struct NeutralCivilianFixture
 {
 	Unit rules;
@@ -123,6 +146,7 @@ struct TacticalFixture
 	std::vector<AlienFixture *> alienBundles;
 	std::vector<CyberdiscFixture *> cyberdiscBundles;
 	std::vector<NeutralCivilianFixture *> neutralBundles;
+	std::vector<FriendlyHwpFixture *> hwpBundles;
 
 	TacticalFixture()
 		: base(new Base(&fixtureMod())),
@@ -153,6 +177,11 @@ struct TacticalFixture
 			delete *i;
 		}
 		neutralBundles.clear();
+		for (std::vector<FriendlyHwpFixture *>::iterator i = hwpBundles.begin(); i != hwpBundles.end(); ++i)
+		{
+			delete *i;
+		}
+		hwpBundles.clear();
 		base->getSoldiers()->clear();
 		game.getBases()->clear();
 		delete base;
@@ -193,6 +222,14 @@ struct TacticalFixture
 	{
 		NeutralCivilianFixture *bundle = new NeutralCivilianFixture(id, visible, direction, kneeled);
 		neutralBundles.push_back(bundle);
+		battle->getUnits()->push_back(bundle->unit);
+		return bundle->unit;
+	}
+
+	BattleUnit *addFriendlyHwpUnit(int id, const Position &pos, int direction, int turretDirection = -1)
+	{
+		FriendlyHwpFixture *bundle = new FriendlyHwpFixture(id, pos, direction, turretDirection);
+		hwpBundles.push_back(bundle);
 		battle->getUnits()->push_back(bundle->unit);
 		return bundle->unit;
 	}
@@ -328,6 +365,51 @@ struct Wp8TestRules
 static Wp8TestRules &wp8Rules()
 {
 	static Wp8TestRules rules;
+	return rules;
+}
+
+struct HwpObservationTestRules
+{
+	RuleInventory rightHand;
+	RuleItem cannon;
+	RuleItem ammo;
+
+	HwpObservationTestRules()
+		: rightHand("STR_RIGHT_HAND"), cannon("STR_HWP_OBS_CANNON"), ammo("STR_HWP_OBS_AMMO")
+	{
+		YAML::Node rh;
+		rh["id"] = "STR_RIGHT_HAND";
+		rh["x"] = 0;
+		rh["y"] = 0;
+		rh["type"] = static_cast<int>(INV_HAND);
+		rh["costs"] = YAML::Node(YAML::NodeType::Map);
+		rightHand.load(rh, 0);
+
+		YAML::Node cannonNode;
+		cannonNode["weight"] = 0;
+		cannonNode["battleType"] = static_cast<int>(BT_FIREARM);
+		cannonNode["clipSize"] = 6;
+		cannonNode["fixedWeapon"] = true;
+		cannonNode["compatibleAmmo"] = YAML::Load("[STR_HWP_OBS_AMMO]");
+		cannonNode["accuracySnap"] = 50;
+		cannonNode["tuSnap"] = 30;
+		cannonNode["accuracyAuto"] = 35;
+		cannonNode["tuAuto"] = 40;
+		cannon.load(cannonNode, &fixtureMod(), 0);
+
+		YAML::Node ammoNode;
+		ammoNode["weight"] = 0;
+		ammoNode["battleType"] = static_cast<int>(BT_AMMO);
+		ammoNode["clipSize"] = 6;
+		ammoNode["power"] = 60;
+		ammoNode["damageType"] = static_cast<int>(DT_HE);
+		ammo.load(ammoNode, &fixtureMod(), 0);
+	}
+};
+
+static HwpObservationTestRules &hwpObservationRules()
+{
+	static HwpObservationTestRules rules;
 	return rules;
 }
 
@@ -680,6 +762,39 @@ static void testRosterCasualtyLedgerSeededForDeadAfterKillSoldier()
 	const YAML::Node ledger = buildParsedSnapshot(fixture)["perceptionLog"]["rosterCasualtySummary"];
 	expect(ledger["entries"].size() == 1, "dead soldier seeded after roster erase");
 	expect(ledger["entries"][0]["status"].as<std::string>() == "dead", "seeded dead");
+}
+
+static void testFriendlyHwpSparseShellWithObservationV1()
+{
+	TacticalFixture fixture;
+	fixture.battle->setGeoscapeSaveHint(&fixture.game);
+	BattleUnit *hwp = fixture.addFriendlyHwpUnit(BattleUnit::MAX_SOLDIER_ID, Position(7, 7, 0), 4, 6);
+	HwpObservationTestRules &R = hwpObservationRules();
+	BattleItem *cannon = new BattleItem(&R.cannon, fixture.battle->getCurrentItemId());
+	BattleItem *clip = new BattleItem(&R.ammo, fixture.battle->getCurrentItemId());
+	expect(cannon->setAmmoItem(clip) == 0, "hwp cannon accepts ammo");
+	cannon->setSlot(&R.rightHand);
+	cannon->setSlotX(0);
+	cannon->setSlotY(0);
+	hwp->getInventory()->push_back(cannon);
+	registerBattleItem(fixture.battle, cannon);
+	registerBattleItem(fixture.battle, clip);
+
+	const YAML::Node entry = findUnitById(buildParsedSnapshot(fixture)["units"], BattleUnit::MAX_SOLDIER_ID);
+	expect(entry.IsDefined(), "friendly HWP exported");
+	expect(!entry["name"], "sparse shell: no top-level name");
+	expect(!entry["health"], "sparse shell: no top-level health");
+	expect(!entry["facing"], "sparse shell: no top-level facing");
+	const YAML::Node obs = entry["friendlyHwpObservationV1"];
+	expect(obs.IsDefined(), "friendlyHwpObservationV1 present");
+	expect(obs["schemaVersion"].as<int>() == 1, "observation schema v1");
+	expect(obs["hwpUnitType"].as<std::string>() == "STR_HWP_OBS_TEST_TANK", "hwp mod type");
+	expect(obs["bodyFacing"]["direction"].as<int>() == 4, "body facing");
+	expect(obs["turretFacing"]["direction"].as<int>() == 6, "turret facing");
+	expect(obs["timeUnits"].as<int>() == 75, "current TU");
+	expect(obs["fixedWeapons"].size() == 1U, "one fixed weapon");
+	expect(obs["fixedWeapons"][0]["itemType"].as<std::string>() == "STR_HWP_OBS_CANNON", "cannon type");
+	expect(obs["fixedWeapons"][0]["loaded"]["rounds"].as<int>() == 6, "cannon ammo");
 }
 
 static void testVisibleHostileObservationOnly()
@@ -2547,6 +2662,7 @@ int main(int argc, char **argv)
 	SNAPSHOT_TEST_STEP(testMindControlledOriginalSoldierFatalityAfterRosterErase);
 	SNAPSHOT_TEST_STEP(testRosterCasualtyLedgerSeededAfterBattleLoad);
 	SNAPSHOT_TEST_STEP(testRosterCasualtyLedgerSeededForDeadAfterKillSoldier);
+	SNAPSHOT_TEST_STEP(testFriendlyHwpSparseShellWithObservationV1);
 	SNAPSHOT_TEST_STEP(testVisibleHostileObservationOnly);
 	SNAPSHOT_TEST_STEP(testVisibleHostileExportsObservedUnitTypeWhenSpotted);
 	SNAPSHOT_TEST_STEP(testVisibleCyberdiscUsesUnitTypeNotRace);
