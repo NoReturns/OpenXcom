@@ -2243,4 +2243,24 @@ bool SavedBattleGame::reclaimCompanionTacticalSoldierForHuman(int soldierId)
 	return true;
 }
 
+bool SavedBattleGame::assignCompanionTacticalHwpToAi(int hwpUnitId)
+{
+	if (hwpUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return false;
+	}
+	_companionTacticalAiHwpIds.insert(hwpUnitId);
+	return true;
+}
+
+bool SavedBattleGame::reclaimCompanionTacticalHwpForHuman(int hwpUnitId)
+{
+	if (hwpUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return false;
+	}
+	_companionTacticalAiHwpIds.erase(hwpUnitId);
+	return true;
+}
+
 }

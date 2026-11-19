@@ -29,7 +29,9 @@ ControlPublicationPlan buildControlPublicationJson(
 	const std::string &campaignId,
 	const std::string &tacticalBattleId,
 	const std::set<int> &tacticalAiSoldierIds,
-	const std::vector<int> &publishableLivePlayerUnitIds);
+	const std::vector<int> &publishableLivePlayerUnitIds,
+	const std::set<int> &tacticalAiHwpIds = std::set<int>(),
+	const std::vector<int> &publishableFriendlyHwpUnitIds = std::vector<int>());
 
 /// Atomic UTF-8 write; leaves @p destPath unchanged on failure.
 bool writeControlFileAtomically(const std::string &destPath, const std::string &jsonUtf8);

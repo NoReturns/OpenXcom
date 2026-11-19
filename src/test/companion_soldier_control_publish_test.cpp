@@ -98,6 +98,19 @@ static void testInvalidSoldierExcludedFromPublicationInput()
 	expect(!isAiControlledUnit(plan.jsonUtf8, bindingFor(SESSION_A), 9), "invalid unit id not published");
 }
 
+static void testHwpAiPublishesHwpAssignments()
+{
+	std::set<int> aiHwp;
+	aiHwp.insert(1000000);
+	const std::vector<int> hwps(1, 1000000);
+	const ControlPublicationPlan plan = buildControlPublicationJson(
+		SESSION_A, CAMPAIGN_A, TACTICAL_A, std::set<int>(), std::vector<int>(), aiHwp, hwps);
+	expect(plan.ok, "hwp plan ok");
+	expect(plan.jsonUtf8.find("\"schema_version\": 2") != std::string::npos, "hwp publication uses schema v2");
+	expect(isAiControlledHwpUnit(plan.jsonUtf8, bindingFor(SESSION_A), 1000000), "hwp ai authorized");
+	expect(!isAiControlledUnit(plan.jsonUtf8, bindingFor(SESSION_A), 1000000), "hwp id not in soldier assignments");
+}
+
 static void testSessionIdPreservedAndReplaced()
 {
 	std::set<int> ai;
@@ -144,6 +157,7 @@ static void testAtomicWriteFailurePreservesPreviousFile()
 int main()
 {
 	testCampaignAiPublishesAiEntry();
+	testHwpAiPublishesHwpAssignments();
 	testCampaignHumanOmitsAiAuthorization();
 	testUnsavedAssignmentIncluded();
 	testReclaimedSoldierNotAuthorized();

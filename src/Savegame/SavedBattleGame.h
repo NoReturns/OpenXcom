@@ -88,6 +88,7 @@ private:
 	CompanionGroundItemMemory _companionGroundItemMemory;
 	std::string _companionTacticalBattleId;
 	std::set<int> _companionTacticalAiSoldierIds;
+	std::set<int> _companionTacticalAiHwpIds;
 	/// Optional mod pointer for headless / unit-test harnesses (not serialized).
 	Mod *_testMod;
 	/// Test harness: geoscape save when no BattlescapeState link (not serialized).
@@ -195,6 +196,9 @@ public:
 	const std::set<int> &getCompanionTacticalAiSoldierIds() const { return _companionTacticalAiSoldierIds; }
 	bool assignCompanionTacticalSoldierToAi(int soldierId);
 	bool reclaimCompanionTacticalSoldierForHuman(int soldierId);
+	const std::set<int> &getCompanionTacticalAiHwpIds() const { return _companionTacticalAiHwpIds; }
+	bool assignCompanionTacticalHwpToAi(int hwpUnitId);
+	bool reclaimCompanionTacticalHwpForHuman(int hwpUnitId);
 	/// Ends the turn.
 	void endTurn();
 	/// Sets debug mode.

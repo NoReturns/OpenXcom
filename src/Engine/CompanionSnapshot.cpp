@@ -107,6 +107,8 @@ bool isPublishableLivePlayerSoldier(const BattleUnit *unit, const SavedGame *cam
 	return campaign->isLiveRosterSoldier(unit->getId());
 }
 
+std::vector<int> collectPublishableFriendlyHwpUnitIds(SavedBattleGame *battle);
+
 std::vector<int> collectPublishableLivePlayerUnitIds(SavedBattleGame *battle, SavedGame *campaign)
 {
 	std::vector<int> ids;
@@ -141,6 +143,7 @@ bool tryPublishSoldierControlBesideSnapshot(
 
 	const std::string sessionId = battle->getCompanionEventLog().getSessionId();
 	const std::vector<int> unitIds = collectPublishableLivePlayerUnitIds(battle, campaign);
+	const std::vector<int> hwpUnitIds = collectPublishableFriendlyHwpUnitIds(battle);
 	battle->ensureCompanionTacticalOwnershipInitialized(campaign);
 	const CompanionSoldierControlPublishCore::ControlPublicationPlan plan =
 		CompanionSoldierControlPublishCore::buildControlPublicationJson(
@@ -148,7 +151,9 @@ bool tryPublishSoldierControlBesideSnapshot(
 			campaign->getCompanionCampaignId(),
 			battle->getCompanionTacticalBattleId(),
 			battle->getCompanionTacticalAiSoldierIds(),
-			unitIds);
+			unitIds,
+			battle->getCompanionTacticalAiHwpIds(),
+			hwpUnitIds);
 	if (!plan.ok)
 	{
 		Log(LOG_WARNING) << "Companion soldier control: publish skipped (" << plan.publicReason << ")";
@@ -804,6 +809,36 @@ bool isFriendlyHwpBattleUnit(const BattleUnit *unit)
 		&& unit->getFaction() == FACTION_PLAYER
 		&& unit->getGeoscapeSoldier() == 0
 		&& unit->getId() >= BattleUnit::MAX_SOLDIER_ID;
+}
+
+bool isPublishableFriendlyHwpUnit(const BattleUnit *unit)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		return false;
+	}
+	return isFriendlyHwpBattleUnit(unit);
+}
+
+std::vector<int> collectPublishableFriendlyHwpUnitIds(SavedBattleGame *battle)
+{
+	std::vector<int> ids;
+	if (battle == 0)
+	{
+		return ids;
+	}
+	for (std::vector<BattleUnit *>::const_iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end(); ++i)
+	{
+		if (!isPublishableFriendlyHwpUnit(*i))
+		{
+			continue;
+		}
+		ids.push_back((*i)->getId());
+	}
+	std::sort(ids.begin(), ids.end());
+	ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+	return ids;
 }
 
 void appendEngineFacingYaml(YAML::Node &parent, const char *key, int direction, bool turning)

@@ -20,7 +20,9 @@ ControlPublicationPlan buildControlPublicationJson(
 	const std::string &campaignId,
 	const std::string &tacticalBattleId,
 	const std::set<int> &tacticalAiSoldierIds,
-	const std::vector<int> &publishableLivePlayerUnitIds)
+	const std::vector<int> &publishableLivePlayerUnitIds,
+	const std::set<int> &tacticalAiHwpIds,
+	const std::vector<int> &publishableFriendlyHwpUnitIds)
 {
 	ControlPublicationPlan plan = {};
 	plan.ok = false;
@@ -40,9 +42,11 @@ ControlPublicationPlan buildControlPublicationJson(
 		return plan;
 	}
 
+	const bool includeHwpAssignments = !publishableFriendlyHwpUnitIds.empty();
+	const int schemaVersion = includeHwpAssignments ? 2 : 1;
 	std::ostringstream json;
 	json << "{\n"
-	     << "  \"schema_version\": 1,\n"
+	     << "  \"schema_version\": " << schemaVersion << ",\n"
 	     << "  \"session_id\": \"" << sessionId << "\",\n"
 	     << "  \"campaign_id\": \"" << campaignId << "\",\n"
 	     << "  \"tactical_battle_id\": \"" << tacticalBattleId << "\",\n"
@@ -67,8 +71,30 @@ ControlPublicationPlan buildControlPublicationJson(
 		firstAssignment = false;
 	}
 
-	json << "\n  }\n"
-	     << "}\n";
+	json << "\n  }";
+
+	if (includeHwpAssignments)
+	{
+		json << ",\n  \"hwp_assignments\": {\n";
+		bool firstHwp = true;
+		for (std::vector<int>::const_iterator it = publishableFriendlyHwpUnitIds.begin();
+		     it != publishableFriendlyHwpUnitIds.end(); ++it)
+		{
+			if (tacticalAiHwpIds.find(*it) == tacticalAiHwpIds.end())
+			{
+				continue;
+			}
+			if (!firstHwp)
+			{
+				json << ",\n";
+			}
+			json << "    \"" << *it << "\": \"ai\"";
+			firstHwp = false;
+		}
+		json << "\n  }";
+	}
+
+	json << "\n}\n";
 	plan.ok = true;
 	plan.sessionId = sessionId;
 	plan.jsonUtf8 = json.str();

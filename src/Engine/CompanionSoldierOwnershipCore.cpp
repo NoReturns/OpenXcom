@@ -4,6 +4,7 @@
 #include "CompanionSoldierOwnershipCore.h"
 #include "CompanionCommandCore.h"
 #include "CompanionJsonLite.h"
+#include "../Savegame/BattleUnit.h"
 #include <cstdlib>
 
 namespace OpenXcom
@@ -15,15 +16,15 @@ namespace CompanionSoldierOwnershipCore
 namespace
 {
 
-bool parseAssignmentsObject(const std::string &json, std::map<int, std::string> *assignmentsOut)
+bool parseAssignmentsObject(const std::string &json, const char *key, std::map<int, std::string> *assignmentsOut)
 {
-	if (assignmentsOut == 0)
+	if (assignmentsOut == 0 || key == 0)
 	{
 		return false;
 	}
 	assignmentsOut->clear();
 	std::string::size_type valueStart = 0;
-	if (!CompanionJsonLite::findJsonKeyValueStart(json, "assignments", &valueStart))
+	if (!CompanionJsonLite::findJsonKeyValueStart(json, key, &valueStart))
 	{
 		return false;
 	}
@@ -142,7 +143,7 @@ bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierCont
 		return false;
 	}
 	if (!CompanionJsonLite::extractJsonIntField(controlFileJson, "schema_version", &out->schemaVersion) ||
-	    out->schemaVersion != 1)
+	    (out->schemaVersion != 1 && out->schemaVersion != 2))
 	{
 		return false;
 	}
@@ -151,9 +152,36 @@ bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierCont
 	{
 		return false;
 	}
-	if (!parseAssignmentsObject(controlFileJson, &out->assignments))
+	if (!parseAssignmentsObject(controlFileJson, "assignments", &out->assignments))
 	{
 		return false;
+	}
+	for (std::map<int, std::string>::const_iterator i = out->assignments.begin();
+	     i != out->assignments.end(); ++i)
+	{
+		if (i->first >= BattleUnit::MAX_SOLDIER_ID)
+		{
+			return false;
+		}
+	}
+	if (out->schemaVersion >= 2)
+	{
+		std::string::size_type hwpStart = 0;
+		if (CompanionJsonLite::findJsonKeyValueStart(controlFileJson, "hwp_assignments", &hwpStart))
+		{
+			if (!parseAssignmentsObject(controlFileJson, "hwp_assignments", &out->hwpAssignments))
+			{
+				return false;
+			}
+			for (std::map<int, std::string>::const_iterator j = out->hwpAssignments.begin();
+			     j != out->hwpAssignments.end(); ++j)
+			{
+				if (j->first < BattleUnit::MAX_SOLDIER_ID)
+				{
+					return false;
+				}
+			}
+		}
 	}
 	CompanionJsonLite::extractJsonStringField(controlFileJson, "campaign_id", &out->campaignId);
 	CompanionJsonLite::extractJsonStringField(controlFileJson, "tactical_battle_id", &out->tacticalBattleId);
@@ -262,6 +290,44 @@ bool isAiControlledUnit(
 	int unitId)
 {
 	return controlModeForUnit(controlFileJson, bindingContext, unitId) == CONTROL_AI;
+}
+
+static SoldierControlMode controlModeForHwpUnit(
+	const std::string &controlFileJson,
+	const RelayControlBindingContext &bindingContext,
+	int hwpUnitId)
+{
+	if (controlFileJson.empty() || hwpUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return CONTROL_HUMAN;
+	}
+	SoldierControlDocument doc = {};
+	if (!parseSoldierControlDocument(controlFileJson, &doc))
+	{
+		return CONTROL_HUMAN;
+	}
+	if (!relayBindingMatchesDocument(doc, bindingContext))
+	{
+		return CONTROL_HUMAN;
+	}
+	std::map<int, std::string>::const_iterator found = doc.hwpAssignments.find(hwpUnitId);
+	if (found == doc.hwpAssignments.end())
+	{
+		return CONTROL_HUMAN;
+	}
+	if (found->second == "ai")
+	{
+		return CONTROL_AI;
+	}
+	return CONTROL_HUMAN;
+}
+
+bool isAiControlledHwpUnit(
+	const std::string &controlFileJson,
+	const RelayControlBindingContext &bindingContext,
+	int hwpUnitId)
+{
+	return controlModeForHwpUnit(controlFileJson, bindingContext, hwpUnitId) == CONTROL_AI;
 }
 
 } // namespace CompanionSoldierOwnershipCore
