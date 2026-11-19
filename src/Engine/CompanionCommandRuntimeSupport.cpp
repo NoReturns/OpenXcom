@@ -16,6 +16,66 @@ namespace CompanionCommandRuntimeSupport
 namespace
 {
 
+bool extractCoordObjectFromJson(
+	const std::string &json,
+	const char *objectKey,
+	int *outX,
+	int *outY,
+	int *outZ)
+{
+	std::string::size_type valueStart = 0;
+	if (!CompanionJsonLite::findJsonKeyValueStart(json, objectKey, &valueStart))
+	{
+		return false;
+	}
+	if (valueStart >= json.size() || json[valueStart] != '{')
+	{
+		return false;
+	}
+	std::string::size_type pos = valueStart + 1;
+	int depth = 1;
+	while (pos < json.size() && depth > 0)
+	{
+		const char c = json[pos];
+		if (c == '"')
+		{
+			++pos;
+			while (pos < json.size())
+			{
+				if (json[pos] == '\\')
+				{
+					pos += 2;
+					continue;
+				}
+				if (json[pos] == '"')
+				{
+					++pos;
+					break;
+				}
+				++pos;
+			}
+			continue;
+		}
+		if (c == '{')
+		{
+			++depth;
+		}
+		else if (c == '}')
+		{
+			--depth;
+		}
+		++pos;
+	}
+	if (depth != 0)
+	{
+		return false;
+	}
+	const std::string coordObject = json.substr(valueStart, pos - valueStart);
+	return CompanionJsonLite::extractJsonIntField(coordObject, "x", outX) &&
+	       CompanionJsonLite::extractJsonIntField(coordObject, "y", outY) &&
+	       CompanionJsonLite::extractJsonIntField(coordObject, "z", outZ);
+}
+
 bool extractJsonString(const std::string &json, const std::string &key, std::string *out)
 {
 	const std::string needle = "\"" + key + "\": \"";
@@ -492,6 +552,49 @@ bool parseKneelParsedFromOpenResultJson(
 	}
 	if (!CompanionJsonLite::extractJsonIntField(resultJson, "actor_unit_id", &out->actorUnitId) ||
 	    !CompanionJsonLite::extractJsonIntField(resultJson, "turn", &out->turn))
+	{
+		return false;
+	}
+	out->valid = !out->commandId.empty() && !out->sessionId.empty();
+	return out->valid;
+}
+
+bool parseTurnFaceParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::TurnFaceCommandParsed *out)
+{
+	if (out == 0 || resultJson.empty())
+	{
+		return false;
+	}
+	std::string status;
+	std::string commandType;
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "status", &status) ||
+	    !isOpenCompanionResultStatus(status) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "command_type", &commandType))
+	{
+		return false;
+	}
+	if (commandType != "TURN_FACE")
+	{
+		return false;
+	}
+	out->valid = false;
+	out->commandType = commandType;
+	out->stateVersion = 0;
+	out->rejectCode.clear();
+	out->targetX = 0;
+	out->targetY = 0;
+	out->targetZ = 0;
+	if (!CompanionJsonLite::extractJsonStringField(resultJson, "command_id", &out->commandId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "session_id", &out->sessionId) ||
+	    !CompanionJsonLite::extractJsonStringField(resultJson, "snapshot_sha256", &out->snapshotSha256))
+	{
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(resultJson, "actor_unit_id", &out->actorUnitId) ||
+	    !CompanionJsonLite::extractJsonIntField(resultJson, "turn", &out->turn) ||
+	    !extractCoordObjectFromJson(resultJson, "target", &out->targetX, &out->targetY, &out->targetZ))
 	{
 		return false;
 	}

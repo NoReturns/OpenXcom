@@ -256,6 +256,13 @@ public:
 	/// Kneel an authorized soldier down (not a stand-up toggle); uses native kneel() rules.
 	bool tryExecuteCompanionKneelDown(BattleUnit *unit, std::string *rejectReason);
 	bool tryExecuteCompanionStandUp(BattleUnit *unit, std::string *rejectReason);
+	/// Turn body toward target tile bearing (native UnitTurnBState semantics); no movement or fire.
+	bool tryExecuteCompanionTurnFace(
+		BattleUnit *unit,
+		Position target,
+		std::string *rejectReason,
+		int *tuSpentOut = 0,
+		int *finalDirectionOut = 0);
 	/// Fire one companion-authorized snap shot through the normal projectile pipeline.
 	bool tryExecuteCompanionSnapShot(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason);
 	/// Fire companion-authorized snap/auto/aimed shot through the normal projectile pipeline.

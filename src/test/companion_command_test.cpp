@@ -1118,6 +1118,94 @@ static void testKneelBindingUsesSharedTacticalValidation()
 		"kneel binding passes shared tactical validation before posture checks");
 }
 
+static TurnFaceValidationInput validTurnFaceInput()
+{
+	TurnFaceValidationInput input = {};
+	input.executorEnabled = true;
+	input.playerTurn = true;
+	input.battleBusy = false;
+	input.battleInitialized = true;
+	input.debugMode = false;
+	input.unitsFalling = false;
+	input.sessionId = "a1b2c3d4e5f6789012345678abcdef01";
+	input.turn = 2;
+	input.commandSessionId = input.sessionId;
+	input.commandTurn = 2;
+	input.lastSnapshotSha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	input.commandSnapshotSha256 = input.lastSnapshotSha256;
+	input.commandStateVersion = 2;
+	input.lastExportedStateVersion = 2;
+	input.actorUnitId = 1;
+	input.actorIsPlayerSoldier = true;
+	input.actorAlive = true;
+	input.actorAiControlled = true;
+	input.duplicateCommandId = false;
+	input.priorCommandNonTerminal = false;
+	input.humanOverrideRevoked = false;
+	input.mapSizeX = 50;
+	input.mapSizeY = 50;
+	input.mapSizeZ = 3;
+	input.actorPosX = 5;
+	input.actorPosY = 5;
+	input.actorPosZ = 0;
+	input.targetX = 7;
+	input.targetY = 5;
+	input.targetZ = 0;
+	input.targetSameHorizontalAsActor = false;
+	input.insufficientTuForTurn = false;
+	return input;
+}
+
+static void testParseTurnFaceCommandJson()
+{
+	const std::string json =
+		"{\n"
+		"  \"schema_version\": 1,\n"
+		"  \"command_id\": \"turn-face-test-1\",\n"
+		"  \"command_type\": \"TURN_FACE\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"target\": {\"x\": 6, \"y\": 5, \"z\": 0},\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"turn\": 2,\n"
+		"  \"state_version\": 2\n"
+		"}\n";
+	TurnFaceCommandParsed parsed = {};
+	expect(parseTurnFaceCommandJson(json, &parsed), "TURN_FACE parse must succeed");
+	expect(parsed.valid && parsed.commandType == "TURN_FACE" && parsed.targetX == 6 && parsed.targetY == 5,
+		"TURN_FACE fields parsed");
+}
+
+static void testParseTurnFaceParsedFromOpenResultJson()
+{
+	const std::string result =
+		"{\n"
+		"  \"command_type\": \"TURN_FACE\",\n"
+		"  \"status\": \"EXECUTING\",\n"
+		"  \"command_id\": \"turn-open-1\",\n"
+		"  \"session_id\": \"a1b2c3d4e5f6789012345678abcdef01\",\n"
+		"  \"snapshot_sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\n"
+		"  \"actor_unit_id\": 1,\n"
+		"  \"turn\": 2,\n"
+		"  \"target\": {\"x\": 7, \"y\": 5, \"z\": 0}\n"
+		"}\n";
+	TurnFaceCommandParsed parsed = {};
+	expect(CompanionCommandRuntimeSupport::parseTurnFaceParsedFromOpenResultJson(result, &parsed),
+		"open COMPLETED TURN_FACE result parses");
+	expect(parsed.valid && parsed.commandType == "TURN_FACE" && parsed.targetX == 7, "open result target coords");
+}
+
+static void testValidateTurnFaceSameHorizontalRejected()
+{
+	TurnFaceValidationInput input = validTurnFaceInput();
+	input.targetX = input.actorPosX;
+	input.targetY = input.actorPosY;
+	input.targetSameHorizontalAsActor = true;
+	const MoveValidationResult result = validateTurnFaceCommand(input);
+	expect(!result.accepted, "same horizontal xy rejected");
+	expect(result.rejectCode == "INVALID_TARGET", "same horizontal reject code");
+}
+
 static void testParseKneelCommandJson()
 {
 	const std::string json =
@@ -2767,6 +2855,9 @@ int main()
 	testKneelCannotKneelPostureRejected();
 	testKneelBindingUsesSharedTacticalValidation();
 	testParseKneelCommandJson();
+	testParseTurnFaceCommandJson();
+	testParseTurnFaceParsedFromOpenResultJson();
+	testValidateTurnFaceSameHorizontalRejected();
 	testParseMoveRejectsKneelType();
 	testTacticalBindingSharedByMoveAndKneel();
 	testHandleStateCompanionStageOrder();

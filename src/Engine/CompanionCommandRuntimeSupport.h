@@ -130,6 +130,10 @@ bool parseKneelParsedFromOpenResultJson(
 	const std::string &resultJson,
 	CompanionCommandCore::KneelCommandParsed *out);
 
+bool parseTurnFaceParsedFromOpenResultJson(
+	const std::string &resultJson,
+	CompanionCommandCore::TurnFaceCommandParsed *out);
+
 bool parseMeleeParsedFromOpenResultJson(
 	const std::string &resultJson,
 	CompanionCommandCore::MeleeAttackCommandParsed *out);

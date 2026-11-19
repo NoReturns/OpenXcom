@@ -95,6 +95,37 @@ struct KneelValidationInput : TacticalCommandBindingValidationInput
 
 typedef KneelCommandParsed StandCommandParsed;
 
+struct TurnFaceCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	int targetX;
+	int targetY;
+	int targetZ;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct TurnFaceValidationInput : TacticalCommandBindingValidationInput
+{
+	int targetX;
+	int targetY;
+	int targetZ;
+	int actorPosX;
+	int actorPosY;
+	int actorPosZ;
+	int mapSizeX;
+	int mapSizeY;
+	int mapSizeZ;
+	bool targetSameHorizontalAsActor;
+	bool insufficientTuForTurn;
+};
+
 struct StandValidationInput : TacticalCommandBindingValidationInput
 {
 	bool actorKneeling;
@@ -638,6 +669,7 @@ MoveValidationResult validateMedikitCommand(const MedikitValidationInput &input)
 MoveValidationResult validatePsiPanicCommand(const PsiPanicValidationInput &input);
 MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidationInput &input);
 MoveValidationResult validateMeleeAttackCommand(const MeleeAttackValidationInput &input);
+MoveValidationResult validateTurnFaceCommand(const TurnFaceValidationInput &input);
 CommandLifecycleStatus evaluateWalkTerminalStatus(const WalkCompletionInput &input);
 WalkStopDiagnostics resolveWalkStopDiagnostics(
 	CommandLifecycleStatus terminal,
@@ -660,6 +692,7 @@ CommandLifecycleStatus evaluateMeleeTerminalStatus(const MeleeCompletionInput &i
 bool parseMoveCommandJson(const std::string &json, MoveCommandParsed *out);
 bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out);
 bool parseStandCommandJson(const std::string &json, StandCommandParsed *out);
+bool parseTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *out);
 bool parseSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out);

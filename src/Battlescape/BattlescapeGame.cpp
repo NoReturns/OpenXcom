@@ -71,6 +71,8 @@
 #include "../Engine/CompanionMedikitExecutionCore.h"
 #include "../Engine/CompanionPsiExecutionCore.h"
 #include "../Engine/CompanionMeleeExecutionCore.h"
+#include "../Engine/CompanionTurnFaceExecutionCore.h"
+#include "../Engine/CompanionTuVisibilityCore.h"
 #include "../Engine/CompanionSoldierOwnershipCore.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionGroundInventoryCore.h"
@@ -2788,6 +2790,143 @@ bool BattlescapeGame::tryExecuteCompanionKneelDown(BattleUnit *unit, std::string
 		}
 		return false;
 	}
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionTurnFace(
+	BattleUnit *unit,
+	Position target,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	int *finalDirectionOut)
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (finalDirectionOut != 0)
+	{
+		*finalDirectionOut = -1;
+	}
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!CompanionTacticalAuthorityCore::isCompanionFriendlyRosterSoldierTarget(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor is not an authorized roster soldier.";
+		}
+		return false;
+	}
+	if (!companionMedikitActorAuthorized(unit, rejectReason))
+	{
+		return false;
+	}
+
+	const Position pos = unit->getPosition();
+	if (_save->getMapSizeX() <= 0 || _save->getMapSizeY() <= 0 || _save->getMapSizeZ() <= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle map is not initialized.";
+		}
+		return false;
+	}
+	if (target.x < 0 || target.y < 0 || target.z < 0 ||
+	    target.x >= _save->getMapSizeX() || target.y >= _save->getMapSizeY() || target.z >= _save->getMapSizeZ())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target out of map bounds.";
+		}
+		return false;
+	}
+	if (target.x == pos.x && target.y == pos.y)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target must differ from actor position on the horizontal plane.";
+		}
+		return false;
+	}
+
+	const int stepsEstimate = CompanionTuVisibilityCore::estimateDirectedFireFacingSteps(unit, target);
+	if (stepsEstimate > 0 && stepsEstimate > unit->getTimeUnits())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to turn.";
+		}
+		return false;
+	}
+	if (stepsEstimate > 0 && !checkReservedTU(unit, stepsEstimate, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to turn.";
+		}
+		return false;
+	}
+
+	const Position startPos = unit->getPosition();
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+	}
+
+	CompanionTurnFaceExecutionCore::ExecutionOutcome outcome = {};
+	if (!CompanionTurnFaceExecutionCore::executeTurnFace(this, unit, target, rejectReason, &outcome))
+	{
+		return false;
+	}
+
+	if (unit->getPosition() != startPos)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Turn caused unexpected movement.";
+		}
+		return false;
+	}
+
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = outcome.tuSpentTurning;
+	}
+	if (finalDirectionOut != 0)
+	{
+		*finalDirectionOut = outcome.finalDirection;
+	}
+
+	Map *map = getMap();
+	if (map != 0)
+	{
+		unit->setCache(0);
+		map->cacheUnit(unit);
+	}
+
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
 	return true;
 }
 
