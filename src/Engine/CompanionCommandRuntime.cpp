@@ -30,6 +30,8 @@
 #include "CompanionGroundInventoryCore.h"
 #include "CompanionMeleeExecutionCore.h"
 #include "CompanionTuVisibilityCore.h"
+#include "CompanionTacticalHwpAuthorityCore.h"
+#include "CompanionTacticalHwpMoveExecutionCore.h"
 #include "Logger.h"
 #include <map>
 #include "CrossPlatform.h"
@@ -58,6 +60,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 		{
 			KIND_NONE,
 			KIND_MOVE,
+			KIND_HWP_MOVE,
 			KIND_SNAP_SHOT,
 			KIND_AUTO_SHOT,
 			KIND_AIMED_SHOT,
@@ -90,6 +93,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	int directedFireTuCost;
 	int directedFireFacingStepsEstimate;
 	bool moveAcceptedWhileKneeled;
+	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput hwpMoveAuthority;
 };
 
 ActiveCommand g_active = {};
@@ -559,6 +563,35 @@ static std::string insertMoveDiagnosticsFields(
 	return json;
 }
 
+static std::string insertHwpMoveFinalDirectionField(
+	const std::string &json,
+	const std::string &commandType,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	int engineObservedDirection)
+{
+	if (commandType != "HWP_MOVE")
+	{
+		return json;
+	}
+	if (status != CompanionCommandCore::CMD_COMPLETED &&
+	    status != CompanionCommandCore::CMD_INTERRUPTED)
+	{
+		return json;
+	}
+	if (engineObservedDirection < 0 || engineObservedDirection >= 8)
+	{
+		return json;
+	}
+	const std::string::size_type insertAt = json.rfind("  \"completed_at\"");
+	if (insertAt == std::string::npos)
+	{
+		return json;
+	}
+	std::ostringstream extra;
+	extra << "  \"final_direction\": " << engineObservedDirection << ",\n";
+	return json.substr(0, insertAt) + extra.str() + json.substr(insertAt);
+}
+
 std::string buildMoveResultJson(const CompanionCommandCore::MoveCommandParsed &cmd,
 	CompanionCommandCore::CommandLifecycleStatus status,
 	const std::string &publicReason,
@@ -572,17 +605,17 @@ std::string buildMoveResultJson(const CompanionCommandCore::MoveCommandParsed &c
 	const CompanionCommandCore::WalkStopDiagnostics *stopDiagnostics = 0,
 	int tuAtAcceptance = -1,
 	bool kneeledAtAccept = false,
-	bool noMovementProgress = false)
+	bool noMovementProgress = false,
+	int engineObservedDirection = -1)
 {
 	const std::string base = buildResultJson(cmd.commandType, cmd.commandId, cmd.sessionId, cmd.turn, cmd.actorUnitId,
 		status, publicReason, startPos, finalPos, remainingTu, kneeled, destinationReached,
 		snapshotSha256, inboxSha256);
-	if (stopDiagnostics == 0)
-	{
-		return base;
-	}
-	return insertMoveDiagnosticsFields(
-		base, *stopDiagnostics, remainingTu, tuAtAcceptance, kneeledAtAccept, kneeled, noMovementProgress);
+	std::string json = stopDiagnostics == 0
+		? base
+		: insertMoveDiagnosticsFields(
+			base, *stopDiagnostics, remainingTu, tuAtAcceptance, kneeledAtAccept, kneeled, noMovementProgress);
+	return insertHwpMoveFinalDirectionField(json, cmd.commandType, status, engineObservedDirection);
 }
 
 std::string buildKneelResultJson(const CompanionCommandCore::KneelCommandParsed &cmd,
@@ -2019,6 +2052,52 @@ void fillBindingValidationInput(
 	input->duplicateCommandId = false;
 	input->priorCommandNonTerminal = g_active.inFlight;
 	input->humanOverrideRevoked = humanOverrideRevoked;
+}
+
+static void fillHwpRemoteAuthorityInput(
+	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::MoveCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	if (out == 0)
+	{
+		return;
+	}
+	*out = {};
+	out->campaign = campaign;
+	out->battle = battle;
+	out->actorUnitId = parsed.actorUnitId;
+	out->controlFileJson = controlJson;
+	out->controlFileReadOk = controlReadOk;
+	out->battleSessionId = sessionId;
+	out->relayCampaignId = campaign != 0 ? campaign->getCompanionCampaignId() : std::string();
+	out->relayTacticalBattleId = battle != 0 ? battle->getCompanionTacticalBattleId() : std::string();
+	out->commandSnapshotSha256 = parsed.snapshotSha256;
+	out->lastSnapshotSha256 = g_lastSnapshotSha256;
+	out->commandSessionId = parsed.sessionId;
+	out->commandTurn = parsed.turn;
+	out->turn = battle != 0 ? battle->getTurn() : 0;
+	out->commandStateVersion = parsed.stateVersion;
+	out->lastExportedStateVersion = g_lastExportedStateVersion;
+	out->battleInitialized = battleInitialized;
+	out->playerTurn = battle != 0 && battle->getSide() == FACTION_PLAYER;
+	out->battleBusy = game != 0 && game->isBusy();
+	out->unitsFalling = battle != 0 && battle->getUnitsFalling();
+	out->requireBindingFreshness = true;
+	out->actorNativeActionInProgress = false;
+	if (actor != 0 && game != 0)
+	{
+		const int status = actor->getStatus();
+		out->actorNativeActionInProgress = game->isBusy() &&
+			(status == STATUS_WALKING || status == STATUS_TURNING);
+	}
 }
 
 static bool snapWeaponSupportsSnapShot(BattleItem *weapon)
@@ -3737,6 +3816,7 @@ static std::string activeInFlightCommandSessionId()
 	switch (g_active.kind)
 	{
 	case ActiveCommand::KIND_MOVE:
+	case ActiveCommand::KIND_HWP_MOVE:
 		return g_active.moveParsed.sessionId;
 	case ActiveCommand::KIND_SNAP_SHOT:
 	case ActiveCommand::KIND_AUTO_SHOT:
@@ -3894,6 +3974,35 @@ static bool tryTerminalizePersistedCrossSessionOpenResult(
 			false,
 			resultSnapshotSha256,
 			inboxDigestHex);
+	}
+	else if (inboxCommandType == "HWP_MOVE")
+	{
+		CompanionCommandCore::MoveCommandParsed parsed = {};
+		if (!(inboxPresent
+		          ? CompanionCommandCore::parseHwpMoveCommandJson(commandJson, &parsed)
+		          : CompanionCommandRuntimeSupport::parseMoveParsedFromOpenResultJson(resultJson, &parsed)))
+		{
+			return false;
+		}
+		BattleUnit *actor = findUnitById(battle, parsed.actorUnitId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		const int hwpDirection = actor != 0 ? actor->getDirection() : -1;
+		json = buildMoveResultJson(
+			parsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			publicReason,
+			pos,
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			false,
+			resultSnapshotSha256,
+			inboxDigestHex,
+			0,
+			-1,
+			false,
+			false,
+			hwpDirection);
 	}
 	else if (inboxCommandType == "SNAP_SHOT" || inboxCommandType == "AUTO_SHOT" || inboxCommandType == "AIMED_SHOT")
 	{
@@ -4115,7 +4224,15 @@ void noteSnapshotExportStateVersion(int latestEventSeq)
 
 bool isMoveInFlight()
 {
-	return g_active.inFlight;
+	return g_active.inFlight &&
+		(g_active.kind == ActiveCommand::KIND_MOVE || g_active.kind == ActiveCommand::KIND_HWP_MOVE);
+}
+
+void abandonInFlightCommandForTestHarness()
+{
+	g_active.inFlight = false;
+	g_active.kind = ActiveCommand::KIND_NONE;
+	clearRosterCasualtyDeferClock();
 }
 
 int getInFlightActorUnitId()
@@ -4127,6 +4244,7 @@ int getInFlightActorUnitId()
 	switch (g_active.kind)
 	{
 	case ActiveCommand::KIND_MOVE:
+	case ActiveCommand::KIND_HWP_MOVE:
 		return g_active.moveParsed.actorUnitId;
 	case ActiveCommand::KIND_SNAP_SHOT:
 	case ActiveCommand::KIND_AUTO_SHOT:
@@ -4272,7 +4390,8 @@ void noteThrowBattleActionPop(int actorUnitId, const std::string &actionResult)
 
 void noteWalkBattleActionPop(int actorUnitId, const std::string &actionResult)
 {
-	if (!g_active.inFlight || g_active.kind != ActiveCommand::KIND_MOVE)
+	if (!g_active.inFlight ||
+	    (g_active.kind != ActiveCommand::KIND_MOVE && g_active.kind != ActiveCommand::KIND_HWP_MOVE))
 	{
 		return;
 	}
@@ -4772,69 +4891,138 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			return;
 		}
 
-		BattleUnit *unit = findUnitById(battle, g_active.moveParsed.actorUnitId);
-		const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
-			tacticalAuthorityForActor(campaign, battle, unit, controlJson, sessionId);
-		const bool aiCommandPermitted = authority.aiCommandPermitted;
-		if (unit != 0 && !aiCommandPermitted)
+		if (g_active.kind == ActiveCommand::KIND_HWP_MOVE)
 		{
-			game->cancelCurrentAction();
-		}
-		CompanionCommandCore::WalkCompletionInput done = {};
-		done.requestedDest = Position(g_active.moveParsed.destX, g_active.moveParsed.destY, g_active.moveParsed.destZ);
-		done.startPos = g_active.startPos;
-		done.currentPos = unit != 0 ? unit->getPosition() : g_active.startPos;
-		done.battleBusy = game->isBusy();
-		done.actorAlive = unit != 0 && !unit->isOut();
-		done.actorStillAiControlled = aiCommandPermitted;
-		done.actionResult = g_active.walkActionResult;
+			BattleUnit *unit = findUnitById(battle, g_active.moveParsed.actorUnitId);
+			const bool aiCommandPermitted =
+				CompanionTacticalHwpAuthorityCore::evaluateHwpRemoteCommandAuthority(g_active.hwpMoveAuthority).accepted;
+			if (unit != 0 && !aiCommandPermitted)
+			{
+				game->cancelCurrentAction();
+			}
+			CompanionTacticalHwpMoveExecutionCore::HwpMoveLifecycleObservation observation = {};
+			observation.startPos = g_active.startPos;
+			observation.requestedDest =
+				Position(g_active.moveParsed.destX, g_active.moveParsed.destY, g_active.moveParsed.destZ);
+			observation.walkActionResult = g_active.walkActionResult;
+			CompanionCommandCore::WalkStopDiagnostics stopDiagnostics = {};
+			const CompanionCommandCore::CommandLifecycleStatus terminal =
+				CompanionTacticalHwpMoveExecutionCore::observeHwpMoveLifecycle(
+					game, g_active.hwpMoveAuthority, observation, &stopDiagnostics);
+			if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
+			{
+				return;
+			}
 
-		const CompanionCommandCore::CommandLifecycleStatus terminal =
-			CompanionCommandCore::evaluateWalkTerminalStatus(done);
-		if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
-		{
+			const Position finalPos = unit != 0 ? unit->getPosition() : g_active.startPos;
+			const bool reached = unit != 0 && finalPos == observation.requestedDest;
+			const bool noMovementProgress = finalPos == g_active.startPos;
+			const std::string resultSnapshotSha256 =
+				snapshotSha256ForTerminalCommandResult(battle, terminal);
+			std::string publicReason = stopDiagnostics.publicReason;
+			if (publicReason.empty()
+			    && terminal == CompanionCommandCore::CMD_INTERRUPTED)
+			{
+				publicReason = "Movement interrupted or incomplete.";
+			}
+			const int engineFinalDirection = unit != 0 ? unit->getDirection() : -1;
+			const std::string json = buildMoveResultJson(
+				g_active.moveParsed,
+				terminal,
+				publicReason,
+				g_active.startPos,
+				finalPos,
+				unit != 0 ? unit->getTimeUnits() : 0,
+				unit != 0 && unit->isKneeled(),
+				reached,
+				resultSnapshotSha256,
+				g_active.inboxDigest,
+				stopDiagnostics.movementStopReason.empty() ? 0 : &stopDiagnostics,
+				g_active.tuAtAcceptance,
+				g_active.moveAcceptedWhileKneeled,
+				noMovementProgress,
+				engineFinalDirection);
+			writeResultFile(resultPath, json);
+			if (terminal == CompanionCommandCore::CMD_COMPLETED
+			    || terminal == CompanionCommandCore::CMD_INTERRUPTED
+			    || terminal == CompanionCommandCore::CMD_FAILED)
+			{
+				CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+			}
+			logTerminalOnce(g_active.commandId, terminal);
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			clearRosterCasualtyDeferClock();
 			return;
 		}
 
-		const bool reached = unit != 0 && unit->getPosition() == done.requestedDest;
-		const Position finalPos = unit != 0 ? unit->getPosition() : done.startPos;
-		const bool noMovementProgress = finalPos == g_active.startPos;
-		const std::string resultSnapshotSha256 =
-			snapshotSha256ForTerminalCommandResult(battle, terminal);
-		const CompanionCommandCore::WalkStopDiagnostics stopDiagnostics =
-			CompanionCommandCore::resolveWalkStopDiagnostics(terminal, done);
-		std::string publicReason = stopDiagnostics.publicReason;
-		if (publicReason.empty()
-		    && terminal == CompanionCommandCore::CMD_INTERRUPTED)
+		if (g_active.kind == ActiveCommand::KIND_MOVE)
 		{
-			publicReason = "Movement interrupted or incomplete.";
+			BattleUnit *unit = findUnitById(battle, g_active.moveParsed.actorUnitId);
+			const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+				tacticalAuthorityForActor(campaign, battle, unit, controlJson, sessionId);
+			const bool aiCommandPermitted = authority.aiCommandPermitted;
+			if (unit != 0 && !aiCommandPermitted)
+			{
+				game->cancelCurrentAction();
+			}
+			CompanionCommandCore::WalkCompletionInput done = {};
+			done.requestedDest = Position(g_active.moveParsed.destX, g_active.moveParsed.destY, g_active.moveParsed.destZ);
+			done.startPos = g_active.startPos;
+			done.currentPos = unit != 0 ? unit->getPosition() : g_active.startPos;
+			done.battleBusy = game->isBusy();
+			done.actorAlive = unit != 0 && !unit->isOut();
+			done.actorStillAiControlled = aiCommandPermitted;
+			done.actionResult = g_active.walkActionResult;
+
+			const CompanionCommandCore::CommandLifecycleStatus terminal =
+				CompanionCommandCore::evaluateWalkTerminalStatus(done);
+			if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
+			{
+				return;
+			}
+
+			const bool reached = unit != 0 && unit->getPosition() == done.requestedDest;
+			const Position finalPos = unit != 0 ? unit->getPosition() : done.startPos;
+			const bool noMovementProgress = finalPos == g_active.startPos;
+			const std::string resultSnapshotSha256 =
+				snapshotSha256ForTerminalCommandResult(battle, terminal);
+			const CompanionCommandCore::WalkStopDiagnostics stopDiagnostics =
+				CompanionCommandCore::resolveWalkStopDiagnostics(terminal, done);
+			std::string publicReason = stopDiagnostics.publicReason;
+			if (publicReason.empty()
+			    && terminal == CompanionCommandCore::CMD_INTERRUPTED)
+			{
+				publicReason = "Movement interrupted or incomplete.";
+			}
+			const std::string json = buildMoveResultJson(
+				g_active.moveParsed,
+				terminal,
+				publicReason,
+				g_active.startPos,
+				finalPos,
+				unit != 0 ? unit->getTimeUnits() : 0,
+				unit != 0 && unit->isKneeled(),
+				reached,
+				resultSnapshotSha256,
+				g_active.inboxDigest,
+				stopDiagnostics.movementStopReason.empty() ? 0 : &stopDiagnostics,
+				g_active.tuAtAcceptance,
+				g_active.moveAcceptedWhileKneeled,
+				noMovementProgress);
+			writeResultFile(resultPath, json);
+			if (terminal == CompanionCommandCore::CMD_COMPLETED
+			    || terminal == CompanionCommandCore::CMD_INTERRUPTED
+			    || terminal == CompanionCommandCore::CMD_FAILED)
+			{
+				CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+			}
+			logTerminalOnce(g_active.commandId, terminal);
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			clearRosterCasualtyDeferClock();
+			return;
 		}
-		const std::string json = buildMoveResultJson(
-			g_active.moveParsed,
-			terminal,
-			publicReason,
-			g_active.startPos,
-			finalPos,
-			unit != 0 ? unit->getTimeUnits() : 0,
-			unit != 0 && unit->isKneeled(),
-			reached,
-			resultSnapshotSha256,
-			g_active.inboxDigest,
-			stopDiagnostics.movementStopReason.empty() ? 0 : &stopDiagnostics,
-			g_active.tuAtAcceptance,
-			g_active.moveAcceptedWhileKneeled,
-			noMovementProgress);
-		writeResultFile(resultPath, json);
-		if (terminal == CompanionCommandCore::CMD_COMPLETED
-		    || terminal == CompanionCommandCore::CMD_INTERRUPTED
-		    || terminal == CompanionCommandCore::CMD_FAILED)
-		{
-			CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
-		}
-		logTerminalOnce(g_active.commandId, terminal);
-		g_active.inFlight = false;
-		g_active.kind = ActiveCommand::KIND_NONE;
-		clearRosterCasualtyDeferClock();
 		return;
 	}
 
@@ -4868,7 +5056,8 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "PICKUP" && inboxCommandType != "DROP" &&
 	    inboxCommandType != "HEAL" && inboxCommandType != "STIMULANT" && inboxCommandType != "PAINKILLER" &&
 	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL" &&
-	    inboxCommandType != "MELEE_ATTACK" && inboxCommandType != "TURN_FACE")
+	    inboxCommandType != "MELEE_ATTACK" && inboxCommandType != "TURN_FACE" &&
+	    inboxCommandType != "HWP_MOVE")
 	{
 		std::string inboxDigest;
 		CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
@@ -7161,6 +7350,138 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
 		logTerminalOnce(kneelParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
 		appendJournalEntry(journalPath, kneelParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "HWP_MOVE")
+	{
+		if (!CompanionTacticalHwpAuthorityCore::hwpMoveRelayExecutionSupported())
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			CompanionCommandCore::MoveCommandParsed unsupported = {};
+			unsupported.rejectCode = "HWP_EXECUTION_NOT_SUPPORTED";
+			unsupported.commandType = "HWP_MOVE";
+			CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &unsupported.commandId);
+			rejectCommand(resultPath, unsupported, "HWP_EXECUTION_NOT_SUPPORTED",
+				"HWP_MOVE relay execution is not enabled.", inboxDigest);
+			logRejectOnce(unsupported.commandId.empty() ? "unknown" : unsupported.commandId,
+				"HWP_EXECUTION_NOT_SUPPORTED");
+			return;
+		}
+
+		CompanionCommandCore::MoveCommandParsed hwpParsed = {};
+		if (!CompanionCommandCore::parseHwpMoveCommandJson(commandJson, &hwpParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectCommand(resultPath, hwpParsed, hwpParsed.rejectCode, hwpParsed.rejectCode, inboxDigest);
+			logRejectOnce(hwpParsed.commandId.empty() ? "unknown" : hwpParsed.commandId, hwpParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(hwpParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, &hwpParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			logRejectOnce(hwpParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, hwpParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, hwpParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+				duplicateDecision, hwpParsed.commandId, inboxDigest, resultPath, conflictPath,
+				existingResultJson, &hwpParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != hwpParsed.commandId)
+		{
+			rejectCommand(resultPath, hwpParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest);
+			appendJournalEntry(journalPath, hwpParsed.commandId);
+			logRejectOnce(hwpParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, hwpParsed.actorUnitId);
+		CompanionTacticalHwpAuthorityCore::HwpMoveValidationInput moveInput = {};
+		fillHwpRemoteAuthorityInput(
+			&moveInput.authority,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			controlJson,
+			controlReadOk,
+			sessionId,
+			hwpParsed,
+			actor);
+		moveInput.destX = hwpParsed.destX;
+		moveInput.destY = hwpParsed.destY;
+		moveInput.destZ = hwpParsed.destZ;
+		moveInput.mapSizeX = battle->getMapSizeX();
+		moveInput.mapSizeY = battle->getMapSizeY();
+		moveInput.mapSizeZ = battle->getMapSizeZ();
+
+		const CompanionCommandCore::MoveValidationResult verdict =
+			CompanionTacticalHwpAuthorityCore::validateHwpMoveExecutionPreflight(moveInput);
+		if (!verdict.accepted)
+		{
+			rejectCommand(resultPath, hwpParsed, verdict.rejectCode, verdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, hwpParsed.commandId);
+			logRejectOnce(hwpParsed.commandId, verdict.rejectCode);
+			return;
+		}
+
+		logCommandDiagnostic("accepted HWP_MOVE command_id=" + hwpParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(hwpParsed.actorUnitId));
+
+		CompanionTacticalHwpMoveExecutionCore::HwpMoveStartOutcome startOutcome = {};
+		if (!CompanionTacticalHwpMoveExecutionCore::tryStartHwpMove(game, moveInput, &startOutcome))
+		{
+			const std::string rejectCode = startOutcome.rejectCode.empty() ? "MOVE_START_FAILED" : startOutcome.rejectCode;
+			const std::string rejectReason = startOutcome.rejectReason.empty()
+				? "HWP move could not start."
+				: startOutcome.rejectReason;
+			rejectCommand(resultPath, hwpParsed, rejectCode, rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, hwpParsed.commandId);
+			logRejectOnce(hwpParsed.commandId, rejectCode);
+			return;
+		}
+
+		beginInFlightCommand();
+		g_active.kind = ActiveCommand::KIND_HWP_MOVE;
+		g_active.commandId = hwpParsed.commandId;
+		g_active.inboxDigest = inboxDigest;
+		g_active.moveParsed = hwpParsed;
+		g_active.hwpMoveAuthority = moveInput.authority;
+		g_active.walkActionResult.clear();
+		g_active.startPos = startOutcome.startPos;
+		g_active.tuAtAcceptance = startOutcome.tuAtAcceptance;
+		g_active.moveAcceptedWhileKneeled = actor != 0 && actor->isKneeled();
+
+		logMoveStartedOnce(hwpParsed.commandId, hwpParsed.actorUnitId);
+
+		writeResultFile(resultPath, buildMoveResultJson(hwpParsed, CompanionCommandCore::CMD_EXECUTING, std::string(),
+			startOutcome.startPos, startOutcome.startPos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(), false, g_lastSnapshotSha256, inboxDigest));
+		appendJournalEntry(journalPath, hwpParsed.commandId);
 		return;
 	}
 

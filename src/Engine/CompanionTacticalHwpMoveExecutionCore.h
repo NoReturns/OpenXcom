@@ -3,7 +3,7 @@
  * Open X-Com Companion — HWP_MOVE native execution (M1 HWP-S3B-02).
  *
  * Uses BattalionGame::queueCompanionPlayerOrderedWalk + UnitWalkBState.
- * Relay inbox dispatch remains disabled (hwpTacticalCommandExecutionSupported() == false).
+ * Relay inbox dispatch uses hwpMoveRelayExecutionSupported() (HWP_MOVE only).
  */
 #include "CompanionCommandCore.h"
 #include "CompanionTacticalHwpAuthorityCore.h"

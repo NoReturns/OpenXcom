@@ -52,6 +52,9 @@ void archiveStaleInboxAfterSnapshotExport(SavedBattleGame *battle, const std::st
 
 void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, bool battleInitialized);
 
+/// Test harness only — clears in-flight bookkeeping between bounded relay cases.
+void abandonInFlightCommandForTestHarness();
+
 } // namespace CompanionCommandRuntime
 
 } // namespace OpenXcom

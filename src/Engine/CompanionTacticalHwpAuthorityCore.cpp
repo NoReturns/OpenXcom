@@ -102,6 +102,11 @@ bool hwpTacticalCommandExecutionSupported()
 	return false;
 }
 
+bool hwpMoveRelayExecutionSupported()
+{
+	return true;
+}
+
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId)
 {
 	if (battle == 0 || unitId <= 0)
@@ -271,9 +276,9 @@ MoveValidationResult validateHwpMoveExecutionPreflight(const HwpMoveValidationIn
 	{
 		return contract;
 	}
-	if (!hwpTacticalCommandExecutionSupported())
+	if (!hwpMoveRelayExecutionSupported())
 	{
-		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP tactical command execution is not enabled.");
+		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP_MOVE relay execution is not enabled.");
 	}
 	return accept();
 }

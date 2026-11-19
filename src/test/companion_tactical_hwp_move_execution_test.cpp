@@ -362,15 +362,15 @@ static void testSoldierMoveRegressionAndHwpBlockedOnSoldierMove()
 	expect(reject.find("roster soldiers") != std::string::npos, "soldier-only guard message");
 }
 
-static void testRelayExecutionLockAndNoDispatch()
+static void testRelayExecutionLockAndMovePreflight()
 {
-	expect(!hwpTacticalCommandExecutionSupported(), "relay execution lock remains off");
+	expect(!hwpTacticalCommandExecutionSupported(), "global HWP execution lock remains off");
+	expect(hwpMoveRelayExecutionSupported(), "HWP_MOVE relay gate on");
 	TacticalHarness h(6, 6);
 	h.addTank(1'000'000, Position(1, 1, 0), 80, true);
 	const HwpMoveValidationInput moveInput = h.moveInputFor(1'000'000, 2, 1, 0, true);
 	const MoveValidationResult relay = validateHwpMoveExecutionPreflight(moveInput);
-	expect(!relay.accepted, "relay preflight still rejects");
-	expect(relay.rejectCode == "HWP_EXECUTION_NOT_SUPPORTED", "HWP_EXECUTION_NOT_SUPPORTED");
+	expect(relay.accepted, "HWP_MOVE relay preflight accepts bound AI tank");
 }
 
 static void testBattleBusyRejectBeforeWalk()
@@ -386,7 +386,7 @@ int companion_tactical_hwp_move_execution_test_main(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
-	testRelayExecutionLockAndNoDispatch();
+	testRelayExecutionLockAndMovePreflight();
 	testLegalHwpFootprintIs2x2();
 	testTryStartRejectsWhenActorBusyFlagged();
 	testNoPathToDestinationRejectBeforeWalk();

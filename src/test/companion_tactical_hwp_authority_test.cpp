@@ -285,7 +285,8 @@ static void testMixedSquadSoldierUnchanged()
 
 static void testExecutionStillUnavailable()
 {
-	expect(!hwpTacticalCommandExecutionSupported(), "HWP execution globally disabled");
+	expect(!hwpTacticalCommandExecutionSupported(), "HWP non-MOVE execution globally disabled");
+	expect(hwpMoveRelayExecutionSupported(), "HWP_MOVE relay execution enabled");
 	TacticalFixture fx;
 	fx.addHwp(1000000, Position(2, 2, 0));
 	fx.battle->assignCompanionTacticalHwpToAi(1000000);
@@ -327,8 +328,7 @@ static void testHwpMoveContractValidatedWithoutPath()
 	const MoveValidationResult contract = validateHwpMoveCommand(moveInput);
 	expect(contract.accepted, "HWP_MOVE contract accepts in-bounds destination");
 	const MoveValidationResult exec = validateHwpMoveExecutionPreflight(moveInput);
-	expect(!exec.accepted, "HWP_MOVE execution preflight still disabled");
-	expect(exec.rejectCode == "HWP_EXECUTION_NOT_SUPPORTED", "execution lock holds");
+	expect(exec.accepted, "HWP_MOVE execution preflight accepts in-band AI HWP");
 }
 
 static void testHwpMoveInvalidDestinationRejected()

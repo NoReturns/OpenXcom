@@ -18,8 +18,11 @@ class SavedGame;
 namespace CompanionTacticalHwpAuthorityCore
 {
 
-/// False for live relay inbox (S3B-03+); native executor bypasses this via validateHwpMoveCommand + tryStartHwpMove.
+/// False — FIRE/TURN and other non-MOVE HWP commands remain unsupported on the relay inbox.
 bool hwpTacticalCommandExecutionSupported();
+
+/// True when HWP_MOVE relay execution is enabled (action-specific; does not enable other HWP command types).
+bool hwpMoveRelayExecutionSupported();
 
 struct HwpRemoteAuthorityInput
 {
@@ -67,7 +70,7 @@ struct HwpMoveValidationInput
 /// S3B contract: authority + in-bounds destination only (no pathfinding).
 CompanionCommandCore::MoveValidationResult validateHwpMoveCommand(const HwpMoveValidationInput &input);
 
-/// Authority + destination + execution lock (always rejects until S3 execution WP).
+/// Authority + destination + HWP_MOVE relay execution gate (other HWP types use validateHwpTacticalCommandExecutionPreflight).
 CompanionCommandCore::MoveValidationResult validateHwpMoveExecutionPreflight(const HwpMoveValidationInput &input);
 
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId);
