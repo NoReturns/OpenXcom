@@ -154,6 +154,7 @@ set ( engine_src
 	Engine/CompanionTacticalOwnershipCore.cpp
 	Engine/CompanionTacticalAuthorityCore.cpp
 	Engine/CompanionTacticalHumanOrderAdmission.cpp
+	Engine/CompanionTacticalHwpAuthorityCore.cpp
 	Engine/CompanionBattlescapeOwnershipCore.cpp
 	Engine/CompanionOwnershipHandoffCore.cpp
 	Engine/CompanionSoldierControlPublishCore.cpp
@@ -918,6 +919,24 @@ if ( OPENXCOM_BUILD_COMPANION_TACTICAL_AUTHORITY_TESTS )
     target_link_libraries ( companion_tactical_authority_test ${system_libs} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_tactical_authority_test COMMAND companion_tactical_authority_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_TACTICAL_HWP_AUTHORITY_TESTS "Build companion HWP tactical authority tests (M1 HWP-S3A)" ON )
+if ( OPENXCOM_BUILD_COMPANION_TACTICAL_HWP_AUTHORITY_TESTS )
+  add_executable ( companion_tactical_hwp_authority_test
+    test/companion_tactical_hwp_authority_test_main.cpp
+    test/companion_tactical_hwp_authority_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_tactical_hwp_authority_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_tactical_hwp_authority_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_tactical_hwp_authority_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_tactical_hwp_authority_test )
+  else ()
+    target_link_libraries ( companion_tactical_hwp_authority_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_tactical_hwp_authority_test COMMAND companion_tactical_hwp_authority_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_SOLDIER_CONTROL_PUBLISH_TESTS "Build companion soldier control publish regression tests" ON )
