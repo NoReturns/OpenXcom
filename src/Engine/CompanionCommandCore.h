@@ -690,6 +690,7 @@ struct MeleeCompletionInput
 CommandLifecycleStatus evaluateMeleeTerminalStatus(const MeleeCompletionInput &input);
 
 bool parseMoveCommandJson(const std::string &json, MoveCommandParsed *out);
+bool parseHwpMoveCommandJson(const std::string &json, MoveCommandParsed *out);
 bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out);
 bool parseStandCommandJson(const std::string &json, StandCommandParsed *out);
 bool parseTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *out);

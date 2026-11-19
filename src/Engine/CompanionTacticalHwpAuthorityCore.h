@@ -53,6 +53,23 @@ CompanionCommandCore::MoveValidationResult evaluateHwpRemoteCommandAuthority(
 CompanionCommandCore::MoveValidationResult validateHwpTacticalCommandExecutionPreflight(
 	const HwpRemoteAuthorityInput &input);
 
+struct HwpMoveValidationInput
+{
+	HwpRemoteAuthorityInput authority;
+	int destX;
+	int destY;
+	int destZ;
+	int mapSizeX;
+	int mapSizeY;
+	int mapSizeZ;
+};
+
+/// S3B contract: authority + in-bounds destination only (no pathfinding).
+CompanionCommandCore::MoveValidationResult validateHwpMoveCommand(const HwpMoveValidationInput &input);
+
+/// Authority + destination + execution lock (always rejects until S3 execution WP).
+CompanionCommandCore::MoveValidationResult validateHwpMoveExecutionPreflight(const HwpMoveValidationInput &input);
+
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId);
 
 bool isOperationalFriendlyHwpForRemoteCommands(const BattleUnit *unit);

@@ -3,6 +3,7 @@
  */
 #define SDL_MAIN_HANDLED
 #include "Engine/CompanionTacticalHwpAuthorityCore.h"
+#include "Engine/CompanionCommandCore.h"
 #include "Engine/CompanionTacticalAuthorityCore.h"
 #include "Engine/CompanionSoldierOwnershipCore.h"
 #include "Engine/CompanionSoldierControlPublishCore.h"
@@ -25,6 +26,7 @@ using namespace OpenXcom::CompanionTacticalHwpAuthorityCore;
 using namespace OpenXcom::CompanionTacticalAuthorityCore;
 using namespace OpenXcom::CompanionSoldierOwnershipCore;
 using namespace OpenXcom::CompanionSoldierControlPublishCore;
+using namespace OpenXcom::CompanionCommandCore;
 
 static int g_failures = 0;
 
@@ -288,10 +290,63 @@ static void testExecutionStillUnavailable()
 	fx.addHwp(1000000, Position(2, 2, 0));
 	fx.battle->assignCompanionTacticalHwpToAi(1000000);
 	const HwpRemoteAuthorityInput input = baseInput(fx, 1000000, true);
-	const CompanionCommandCore::MoveValidationResult preflight =
+	const MoveValidationResult preflight =
 		validateHwpTacticalCommandExecutionPreflight(input);
 	expect(!preflight.accepted, "preflight rejects execution");
 	expect(preflight.rejectCode == "HWP_EXECUTION_NOT_SUPPORTED", "HWP_EXECUTION_NOT_SUPPORTED");
+}
+
+static void testHwpMoveJsonParseAndMoveParserRejects()
+{
+	const std::string json =
+		"{\"schema_version\":1,\"command_id\":\"hwp-move-1\",\"command_type\":\"HWP_MOVE\","
+		"\"actor_unit_id\":1000000,\"destination\":{\"x\":2,\"y\":2,\"z\":0},"
+		"\"snapshot_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+		"\"session_id\":\"a1b2c3d4e5f6789012345678abcdef01\",\"turn\":1,\"state_version\":0}";
+	MoveCommandParsed parsed = {};
+	expect(parseHwpMoveCommandJson(json, &parsed), "parseHwpMoveCommandJson succeeds");
+	expect(parsed.valid, "HWP_MOVE parsed valid");
+	expect(parsed.commandType == "HWP_MOVE", "command_type HWP_MOVE");
+	MoveCommandParsed moveParsed = {};
+	expect(!parseMoveCommandJson(json, &moveParsed), "MOVE parser rejects HWP_MOVE");
+}
+
+static void testHwpMoveContractValidatedWithoutPath()
+{
+	TacticalFixture fx;
+	fx.addHwp(1000000, Position(0, 0, 0));
+	fx.battle->assignCompanionTacticalHwpToAi(1000000);
+	HwpMoveValidationInput moveInput = {};
+	moveInput.authority = baseInput(fx, 1000000, true);
+	moveInput.destX = 2;
+	moveInput.destY = 2;
+	moveInput.destZ = 0;
+	moveInput.mapSizeX = 4;
+	moveInput.mapSizeY = 4;
+	moveInput.mapSizeZ = 1;
+	const MoveValidationResult contract = validateHwpMoveCommand(moveInput);
+	expect(contract.accepted, "HWP_MOVE contract accepts in-bounds destination");
+	const MoveValidationResult exec = validateHwpMoveExecutionPreflight(moveInput);
+	expect(!exec.accepted, "HWP_MOVE execution preflight still disabled");
+	expect(exec.rejectCode == "HWP_EXECUTION_NOT_SUPPORTED", "execution lock holds");
+}
+
+static void testHwpMoveInvalidDestinationRejected()
+{
+	TacticalFixture fx;
+	fx.addHwp(1000000, Position(0, 0, 0));
+	fx.battle->assignCompanionTacticalHwpToAi(1000000);
+	HwpMoveValidationInput moveInput = {};
+	moveInput.authority = baseInput(fx, 1000000, true);
+	moveInput.destX = 9;
+	moveInput.destY = 0;
+	moveInput.destZ = 0;
+	moveInput.mapSizeX = 4;
+	moveInput.mapSizeY = 4;
+	moveInput.mapSizeZ = 1;
+	const MoveValidationResult contract = validateHwpMoveCommand(moveInput);
+	expect(!contract.accepted, "OOB destination rejected");
+	expect(contract.rejectCode == "INVALID_DESTINATION", "INVALID_DESTINATION");
 }
 
 int companion_tactical_hwp_authority_test_body()
@@ -305,6 +360,9 @@ int companion_tactical_hwp_authority_test_body()
 	testStaleSessionRejected();
 	testMixedSquadSoldierUnchanged();
 	testExecutionStillUnavailable();
+	testHwpMoveJsonParseAndMoveParserRejects();
+	testHwpMoveContractValidatedWithoutPath();
+	testHwpMoveInvalidDestinationRejected();
 
 	if (g_failures == 0)
 	{

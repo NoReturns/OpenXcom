@@ -248,6 +248,36 @@ MoveValidationResult validateHwpTacticalCommandExecutionPreflight(const HwpRemot
 	return accept();
 }
 
+MoveValidationResult validateHwpMoveCommand(const HwpMoveValidationInput &input)
+{
+	MoveValidationResult authority = evaluateHwpRemoteCommandAuthority(input.authority);
+	if (!authority.accepted)
+	{
+		return authority;
+	}
+	authority.accepted = false;
+	if (input.destX < 0 || input.destY < 0 || input.destZ < 0 ||
+	    input.destX >= input.mapSizeX || input.destY >= input.mapSizeY || input.destZ >= input.mapSizeZ)
+	{
+		return reject("INVALID_DESTINATION", "Destination out of map bounds.");
+	}
+	return accept();
+}
+
+MoveValidationResult validateHwpMoveExecutionPreflight(const HwpMoveValidationInput &input)
+{
+	MoveValidationResult contract = validateHwpMoveCommand(input);
+	if (!contract.accepted)
+	{
+		return contract;
+	}
+	if (!hwpTacticalCommandExecutionSupported())
+	{
+		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP tactical command execution is not enabled.");
+	}
+	return accept();
+}
+
 } // namespace CompanionTacticalHwpAuthorityCore
 
 } // namespace OpenXcom
