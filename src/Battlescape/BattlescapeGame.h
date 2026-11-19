@@ -251,8 +251,12 @@ public:
 	void requestCompanionBriefing(bool battleInitialized);
 	/// Fulfill a deferred briefing when the battlefield is idle.
 	void tryFulfillCompanionBriefing(bool battleInitialized);
-	/// Start a companion-authorized walk (no teleport); returns false with rejectReason when not started.
+	/// Queue playerOrdered UnitWalkBState (shared by roster MOVE and HWP_MOVE executors).
+	bool queueCompanionPlayerOrderedWalk(BattleUnit *unit, Position dest, std::string *rejectReason);
+	/// Start a companion-authorized walk for roster soldiers only (no teleport).
 	bool tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason);
+	/// Start companion-authorized walk for friendly HWPs (caller must run HWP authority first).
+	bool tryExecuteCompanionHwpMove(BattleUnit *unit, Position dest, std::string *rejectReason);
 	/// Kneel an authorized soldier down (not a stand-up toggle); uses native kneel() rules.
 	bool tryExecuteCompanionKneelDown(BattleUnit *unit, std::string *rejectReason);
 	bool tryExecuteCompanionStandUp(BattleUnit *unit, std::string *rejectReason);

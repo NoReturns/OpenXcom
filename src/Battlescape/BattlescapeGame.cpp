@@ -68,6 +68,7 @@
 #include "../Engine/CompanionOnDemandRelayCore.h"
 #include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
+#include "../Engine/CompanionTacticalHwpAuthorityCore.h"
 #include "../Engine/CompanionMedikitExecutionCore.h"
 #include "../Engine/CompanionPsiExecutionCore.h"
 #include "../Engine/CompanionMeleeExecutionCore.h"
@@ -2646,7 +2647,7 @@ void BattlescapeGame::tryFulfillCompanionBriefing(bool battleInitialized)
 	}
 }
 
-bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason)
+bool BattlescapeGame::queueCompanionPlayerOrderedWalk(BattleUnit *unit, Position dest, std::string *rejectReason)
 {
 	if (unit == 0 || unit->isOut())
 	{
@@ -2695,6 +2696,56 @@ bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, s
 	_currentAction.playerOrdered = true;
 	statePushBack(new UnitWalkBState(this, _currentAction));
 	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason)
+{
+	if (unit == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (unit->getGeoscapeSoldier() == 0 && unit->getId() >= BattleUnit::MAX_SOLDIER_ID)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Companion MOVE is for roster soldiers only.";
+		}
+		return false;
+	}
+	return queueCompanionPlayerOrderedWalk(unit, dest, rejectReason);
+}
+
+bool BattlescapeGame::tryExecuteCompanionHwpMove(BattleUnit *unit, Position dest, std::string *rejectReason)
+{
+	if (unit == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (unit->getGeoscapeSoldier() != 0 || unit->getId() < BattleUnit::MAX_SOLDIER_ID)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "HWP_MOVE is for friendly HWPs only.";
+		}
+		return false;
+	}
+	if (!CompanionTacticalHwpAuthorityCore::isOperationalFriendlyHwpForRemoteCommands(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "HWP is not operational.";
+		}
+		return false;
+	}
+	return queueCompanionPlayerOrderedWalk(unit, dest, rejectReason);
 }
 
 bool BattlescapeGame::tryExecuteCompanionStandUp(BattleUnit *unit, std::string *rejectReason)

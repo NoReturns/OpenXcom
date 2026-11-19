@@ -155,6 +155,7 @@ set ( engine_src
 	Engine/CompanionTacticalAuthorityCore.cpp
 	Engine/CompanionTacticalHumanOrderAdmission.cpp
 	Engine/CompanionTacticalHwpAuthorityCore.cpp
+	Engine/CompanionTacticalHwpMoveExecutionCore.cpp
 	Engine/CompanionBattlescapeOwnershipCore.cpp
 	Engine/CompanionOwnershipHandoffCore.cpp
 	Engine/CompanionSoldierControlPublishCore.cpp
@@ -937,6 +938,24 @@ if ( OPENXCOM_BUILD_COMPANION_TACTICAL_HWP_AUTHORITY_TESTS )
     target_link_libraries ( companion_tactical_hwp_authority_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_tactical_hwp_authority_test COMMAND companion_tactical_hwp_authority_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_TACTICAL_HWP_MOVE_EXECUTION_TESTS "Build companion HWP_MOVE execution tests (M1 HWP-S3B-02)" ON )
+if ( OPENXCOM_BUILD_COMPANION_TACTICAL_HWP_MOVE_EXECUTION_TESTS )
+  add_executable ( companion_tactical_hwp_move_execution_test
+    test/companion_tactical_hwp_move_execution_test_main.cpp
+    test/companion_tactical_hwp_move_execution_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_tactical_hwp_move_execution_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_tactical_hwp_move_execution_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_tactical_hwp_move_execution_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_tactical_hwp_move_execution_test )
+  else ()
+    target_link_libraries ( companion_tactical_hwp_move_execution_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_tactical_hwp_move_execution_test COMMAND companion_tactical_hwp_move_execution_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_SOLDIER_CONTROL_PUBLISH_TESTS "Build companion soldier control publish regression tests" ON )

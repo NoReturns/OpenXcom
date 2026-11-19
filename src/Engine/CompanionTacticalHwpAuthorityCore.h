@@ -18,7 +18,7 @@ class SavedGame;
 namespace CompanionTacticalHwpAuthorityCore
 {
 
-/// Always false until a future HWP command execution work package (S3A lock).
+/// False for live relay inbox (S3B-03+); native executor bypasses this via validateHwpMoveCommand + tryStartHwpMove.
 bool hwpTacticalCommandExecutionSupported();
 
 struct HwpRemoteAuthorityInput
