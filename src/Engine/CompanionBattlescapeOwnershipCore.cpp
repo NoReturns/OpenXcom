@@ -16,6 +16,7 @@
 #include "../Mod/Mod.h"
 #include "../Mod/RuleInterface.h"
 #include <algorithm>
+#include <sstream>
 
 namespace OpenXcom
 {
@@ -68,6 +69,34 @@ const BattleUnit *findUnitBySoldierId(SavedBattleGame *battle, int soldierId)
 		}
 	}
 	return 0;
+}
+
+static std::string formatPositionLabel(const Position &pos)
+{
+	std::ostringstream ss;
+	ss << pos.x << "," << pos.y << "," << pos.z;
+	return ss.str();
+}
+
+static void collectFriendlyHwps(SavedBattleGame *battle, std::vector<BattleUnit*> *out)
+{
+	out->clear();
+	if (battle == 0)
+	{
+		return;
+	}
+	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end();
+	     ++i)
+	{
+		if (isDeployedFriendlyHwpUnit(*i))
+		{
+			out->push_back(*i);
+		}
+	}
+	std::sort(out->begin(), out->end(), [](const BattleUnit *a, const BattleUnit *b) {
+		return a->getId() < b->getId();
+	});
 }
 
 std::string statusNoteForUnit(const BattleUnit *unit)
@@ -142,6 +171,120 @@ bool isDeployedRosterSoldierUnit(const BattleUnit *unit, const SavedGame *campai
 	return campaign->isLiveRosterSoldier(unit->getId());
 }
 
+bool isDeployedFriendlyHwpUnit(const BattleUnit *unit)
+{
+	if (unit == 0)
+	{
+		return false;
+	}
+	if (unit->getOriginalFaction() != FACTION_PLAYER || unit->getFaction() != FACTION_PLAYER)
+	{
+		return false;
+	}
+	if (unit->getGeoscapeSoldier() != 0)
+	{
+		return false;
+	}
+	if (unit->getId() < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return false;
+	}
+	return !unit->isOut();
+}
+
+bool isBattleScopedFriendlyHwpUnit(const BattleUnit *unit)
+{
+	if (unit == 0)
+	{
+		return false;
+	}
+	if (unit->getOriginalFaction() != FACTION_PLAYER)
+	{
+		return false;
+	}
+	if (unit->getGeoscapeSoldier() != 0)
+	{
+		return false;
+	}
+	if (unit->getId() < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return false;
+	}
+	return true;
+}
+
+static int friendlyHwpStableOrdinal(const BattleUnit *unit, SavedBattleGame *battle)
+{
+	int ordinal = 1;
+	if (unit == 0 || battle == 0)
+	{
+		return ordinal;
+	}
+	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end();
+	     ++i)
+	{
+		const BattleUnit *peer = *i;
+		if (!isBattleScopedFriendlyHwpUnit(peer) || peer->getType() != unit->getType())
+		{
+			continue;
+		}
+		if (peer->getId() < unit->getId())
+		{
+			++ordinal;
+		}
+	}
+	return ordinal;
+}
+
+static std::string friendlyHwpDisplayName(
+	const BattleUnit *unit,
+	Language *lang,
+	SavedBattleGame *battle)
+{
+	std::string typeLabel;
+	if (lang != 0)
+	{
+		typeLabel = unit->getName(lang, false);
+	}
+	else
+	{
+		typeLabel = unit->getType();
+	}
+	std::ostringstream ss;
+	ss << typeLabel << " #" << friendlyHwpStableOrdinal(unit, battle);
+	return ss.str();
+}
+
+CompanionSoldierOwnershipCore::SoldierControlMode effectiveTacticalHwpOwner(
+	const SavedBattleGame *battle,
+	int hwpUnitId)
+{
+	if (battle == 0 || hwpUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return CONTROL_HUMAN;
+	}
+	const std::set<int> &ai = battle->getCompanionTacticalAiHwpIds();
+	return ai.find(hwpUnitId) != ai.end() ? CONTROL_AI : CONTROL_HUMAN;
+}
+
+bool hwpEligibleForOwnershipToggle(const BattleUnit *unit)
+{
+	if (!isDeployedFriendlyHwpUnit(unit))
+	{
+		return false;
+	}
+	if (unit->getOriginalFaction() == FACTION_PLAYER && unit->getFaction() != FACTION_PLAYER)
+	{
+		return false;
+	}
+	if (unit->getStatus() == STATUS_DEAD || unit->getStatus() == STATUS_UNCONSCIOUS)
+	{
+		return false;
+	}
+	return true;
+}
+
 CompanionSoldierOwnershipCore::SoldierControlMode effectiveTacticalOwner(
 	const SavedBattleGame *battle,
 	int soldierId,
@@ -201,6 +344,9 @@ std::vector<SquadOwnershipRow> buildSquadOwnershipRows(
 		return rows;
 	}
 	const bool battleBusy = game != 0 && game->isBusy();
+	std::vector<BattleUnit*> friendlyHwps;
+	collectFriendlyHwps(battle, &friendlyHwps);
+
 	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin();
 	     i != battle->getUnits()->end(); ++i)
 	{
@@ -211,6 +357,7 @@ std::vector<SquadOwnershipRow> buildSquadOwnershipRows(
 		}
 		SquadOwnershipRow row = {};
 		row.soldierId = unit->getId();
+		row.isFriendlyHwp = false;
 		row.displayName = unit->getName(lang, false);
 		row.effectiveOwner = effectiveTacticalOwner(
 			battle, row.soldierId, campaign->isLiveRosterSoldier(row.soldierId));
@@ -225,7 +372,33 @@ std::vector<SquadOwnershipRow> buildSquadOwnershipRows(
 		}
 		rows.push_back(row);
 	}
+	for (std::vector<BattleUnit*>::const_iterator i = friendlyHwps.begin();
+	     i != friendlyHwps.end();
+	     ++i)
+	{
+		BattleUnit *unit = *i;
+		SquadOwnershipRow row = {};
+		row.soldierId = unit->getId();
+		row.isFriendlyHwp = true;
+		row.displayName = friendlyHwpDisplayName(unit, lang, battle);
+		row.positionLabel = formatPositionLabel(unit->getPosition());
+		row.effectiveOwner = effectiveTacticalHwpOwner(battle, row.soldierId);
+		row.statusNote = statusNoteForUnit(unit);
+		row.unsavedVsGeoscapeSave = false;
+		row.handoffBlock = evaluateHandoffBlock(unit, battleBusy, inFlightCompanionActorUnitId);
+		const bool eligible = hwpEligibleForOwnershipToggle(unit);
+		if (eligible && row.handoffBlock == HANDOFF_OK)
+		{
+			row.canAssignToAster = row.effectiveOwner == CONTROL_HUMAN;
+			row.canReclaimForHuman = row.effectiveOwner == CONTROL_AI;
+		}
+		rows.push_back(row);
+	}
 	std::sort(rows.begin(), rows.end(), [](const SquadOwnershipRow &a, const SquadOwnershipRow &b) {
+		if (a.isFriendlyHwp != b.isFriendlyHwp)
+		{
+			return !a.isFriendlyHwp;
+		}
 		return a.soldierId < b.soldierId;
 	});
 	return rows;
@@ -251,7 +424,16 @@ OwnershipChangeOutcome tryApplyOwnershipToggle(
 	}
 
 	const BattleUnit *unit = findUnitBySoldierId(battle, soldierId);
-	if (!soldierEligibleForOwnershipToggle(unit, campaign))
+	const bool isHwp = soldierId >= BattleUnit::MAX_SOLDIER_ID;
+	if (isHwp)
+	{
+		if (!hwpEligibleForOwnershipToggle(unit))
+		{
+			outcome.error = CHANGE_NOT_ASSIGNABLE;
+			return outcome;
+		}
+	}
+	else if (!soldierEligibleForOwnershipToggle(unit, campaign))
 	{
 		outcome.error = CHANGE_NOT_ASSIGNABLE;
 		return outcome;
@@ -265,8 +447,10 @@ OwnershipChangeOutcome tryApplyOwnershipToggle(
 		return outcome;
 	}
 
-	const bool wasAi = effectiveTacticalOwner(
-		battle, soldierId, campaign->isLiveRosterSoldier(soldierId)) == CONTROL_AI;
+	const bool wasAi = isHwp
+		? effectiveTacticalHwpOwner(battle, soldierId) == CONTROL_AI
+		: effectiveTacticalOwner(
+			battle, soldierId, campaign->isLiveRosterSoldier(soldierId)) == CONTROL_AI;
 	const bool wantAi = assignToAster;
 	if (wasAi == wantAi)
 	{
@@ -277,7 +461,18 @@ OwnershipChangeOutcome tryApplyOwnershipToggle(
 	}
 
 	bool applied = false;
-	if (wantAi)
+	if (isHwp)
+	{
+		if (wantAi)
+		{
+			applied = battle->assignCompanionTacticalHwpToAi(soldierId);
+		}
+		else
+		{
+			applied = battle->reclaimCompanionTacticalHwpForHuman(soldierId);
+		}
+	}
+	else if (wantAi)
 	{
 		applied = campaign->assignCompanionSoldierToAi(soldierId);
 	}
@@ -295,7 +490,21 @@ OwnershipChangeOutcome tryApplyOwnershipToggle(
 	{
 		if (!CompanionSnapshot::tryPublishSoldierControl(battle, campaign))
 		{
-			rollbackOwnership(campaign, soldierId, wasAi);
+			if (isHwp)
+			{
+				if (wasAi)
+				{
+					battle->assignCompanionTacticalHwpToAi(soldierId);
+				}
+				else
+				{
+					battle->reclaimCompanionTacticalHwpForHuman(soldierId);
+				}
+			}
+			else
+			{
+				rollbackOwnership(campaign, soldierId, wasAi);
+			}
 			outcome.error = CHANGE_PUBLISH_FAILED;
 			return outcome;
 		}
@@ -304,8 +513,9 @@ OwnershipChangeOutcome tryApplyOwnershipToggle(
 	outcome.ok = true;
 	outcome.error = CHANGE_OK;
 	outcome.handoffBlock = HANDOFF_OK;
-	outcome.effectiveOwnerAfter = effectiveTacticalOwner(
-		battle, soldierId, campaign->isLiveRosterSoldier(soldierId));
+	outcome.effectiveOwnerAfter = isHwp
+		? effectiveTacticalHwpOwner(battle, soldierId)
+		: effectiveTacticalOwner(battle, soldierId, campaign->isLiveRosterSoldier(soldierId));
 	return outcome;
 }
 

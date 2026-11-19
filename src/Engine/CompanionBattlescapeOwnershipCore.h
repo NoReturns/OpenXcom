@@ -44,7 +44,9 @@ enum OwnershipChangeError
 struct SquadOwnershipRow
 {
 	int soldierId;
+	bool isFriendlyHwp;
 	std::string displayName;
+	std::string positionLabel;
 	CompanionSoldierOwnershipCore::SoldierControlMode effectiveOwner;
 	std::string statusNote;
 	bool unsavedVsGeoscapeSave;
@@ -62,6 +64,17 @@ struct OwnershipChangeOutcome
 };
 
 bool isDeployedRosterSoldierUnit(const BattleUnit *unit, const SavedGame *campaign);
+
+bool isDeployedFriendlyHwpUnit(const BattleUnit *unit);
+
+/// Player HWP on this battle (including destroyed); for stable per-battle display ordinals only.
+bool isBattleScopedFriendlyHwpUnit(const BattleUnit *unit);
+
+CompanionSoldierOwnershipCore::SoldierControlMode effectiveTacticalHwpOwner(
+	const SavedBattleGame *battle,
+	int hwpUnitId);
+
+bool hwpEligibleForOwnershipToggle(const BattleUnit *unit);
 
 CompanionSoldierOwnershipCore::SoldierControlMode effectiveTacticalOwner(
 	const SavedBattleGame *battle,

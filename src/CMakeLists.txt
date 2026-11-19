@@ -999,6 +999,24 @@ if ( OPENXCOM_BUILD_COMPANION_BATTLESCAPE_OWNERSHIP_TESTS )
   add_test ( NAME companion_battlescape_ownership_test COMMAND companion_battlescape_ownership_test )
 endif ()
 
+option ( OPENXCOM_BUILD_COMPANION_BATTLESPE_HWP_SQUAD_TESTS "Build companion battlescape HWP squad UI tests (M1 HWP-S2B)" ON )
+if ( OPENXCOM_BUILD_COMPANION_BATTLESPE_HWP_SQUAD_TESTS )
+  add_executable ( companion_battlescape_hwp_squad_test
+    test/companion_battlescape_hwp_squad_test_main.cpp
+    test/companion_battlescape_hwp_squad_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_battlescape_hwp_squad_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_battlescape_hwp_squad_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_battlescape_hwp_squad_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_battlescape_hwp_squad_test )
+  else ()
+    target_link_libraries ( companion_battlescape_hwp_squad_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_battlescape_hwp_squad_test COMMAND companion_battlescape_hwp_squad_test )
+endif ()
+
 option ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS "Build companion snapshot terrain regression tests" ON )
 if ( OPENXCOM_BUILD_COMPANION_SNAPSHOT_TERRAIN_TESTS )
   add_executable ( companion_snapshot_terrain_test

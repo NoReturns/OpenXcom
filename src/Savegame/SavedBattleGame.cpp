@@ -2243,9 +2243,44 @@ bool SavedBattleGame::reclaimCompanionTacticalSoldierForHuman(int soldierId)
 	return true;
 }
 
+namespace
+{
+const BattleUnit *findLiveFriendlyHwpUnit(SavedBattleGame *battle, int hwpUnitId)
+{
+	if (battle == 0 || hwpUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return 0;
+	}
+	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end();
+	     ++i)
+	{
+		const BattleUnit *unit = *i;
+		if (unit == 0 || unit->getId() != hwpUnitId)
+		{
+			continue;
+		}
+		if (unit->getOriginalFaction() != FACTION_PLAYER || unit->getFaction() != FACTION_PLAYER)
+		{
+			return 0;
+		}
+		if (unit->getGeoscapeSoldier() != 0)
+		{
+			return 0;
+		}
+		if (unit->isOut())
+		{
+			return 0;
+		}
+		return unit;
+	}
+	return 0;
+}
+} // namespace
+
 bool SavedBattleGame::assignCompanionTacticalHwpToAi(int hwpUnitId)
 {
-	if (hwpUnitId < BattleUnit::MAX_SOLDIER_ID)
+	if (findLiveFriendlyHwpUnit(this, hwpUnitId) == 0)
 	{
 		return false;
 	}
@@ -2256,6 +2291,10 @@ bool SavedBattleGame::assignCompanionTacticalHwpToAi(int hwpUnitId)
 bool SavedBattleGame::reclaimCompanionTacticalHwpForHuman(int hwpUnitId)
 {
 	if (hwpUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		return false;
+	}
+	if (findLiveFriendlyHwpUnit(this, hwpUnitId) == 0 && _companionTacticalAiHwpIds.find(hwpUnitId) == _companionTacticalAiHwpIds.end())
 	{
 		return false;
 	}

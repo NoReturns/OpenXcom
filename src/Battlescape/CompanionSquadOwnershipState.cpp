@@ -220,6 +220,10 @@ void CompanionSquadOwnershipState::applyScroll()
 		{
 			_txtStatus[slot]->setText(tr(row.statusNote));
 		}
+		else if (!row.positionLabel.empty())
+		{
+			_txtStatus[slot]->setText(row.positionLabel);
+		}
 		else
 		{
 			_txtStatus[slot]->setText("");
