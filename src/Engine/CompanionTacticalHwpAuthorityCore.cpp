@@ -114,12 +114,7 @@ bool hwpTurnRelayExecutionSupported()
 
 bool hwpFireRelayExecutionSupported()
 {
-#ifdef COMPANION_HWP_FIRE_RELAY_HARNESS
-	// Test executable only (CMake define on companion_hwp_fire_relay_test); production builds stay false.
 	return true;
-#else
-	return false;
-#endif
 }
 
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId)

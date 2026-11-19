@@ -365,9 +365,9 @@ static void testInvalidTargetBounds()
 		"OOB target rejected");
 }
 
-static void testFireRelayGateOff()
+static void testFireRelayGateOn()
 {
-	expect(!hwpFireRelayExecutionSupported(), "relay gate off until relay harness green");
+	expect(hwpFireRelayExecutionSupported(), "HWP_FIRE relay execution enabled");
 }
 
 static void testTurretVsHullFacingAdvisory()
@@ -393,7 +393,7 @@ int main()
 	testInsufficientTuRejected();
 	testReservedTuRejectsFire();
 	testInvalidTargetBounds();
-	testFireRelayGateOff();
+	testFireRelayGateOn();
 	testTurretVsHullFacingAdvisory();
 
 	if (g_failures == 0)

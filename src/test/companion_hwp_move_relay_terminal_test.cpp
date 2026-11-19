@@ -684,7 +684,8 @@ void certHumanAndUnsupported()
 		CompanionJsonLite::extractJsonStringField(h.resultJson(), "reject_code", &code);
 		if (std::string(type) == "HWP_FIRE")
 		{
-			expect(h.status() == "REJECTED" && code == "HWP_EXECUTION_NOT_SUPPORTED", "HWP_FIRE gate off");
+			expect(h.status() == "REJECTED" && code != "HWP_EXECUTION_NOT_SUPPORTED",
+				"HWP_FIRE malformed inbox rejected without gate-off code");
 		}
 		else
 		{

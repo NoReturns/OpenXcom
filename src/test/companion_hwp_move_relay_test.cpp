@@ -623,7 +623,8 @@ static void testRelayUnsupportedHwpCommandTypes()
 		expect(h.statusIs("REJECTED"), "unsupported command REJECTED");
 		std::string rejectCode;
 		expect(CompanionJsonLite::extractJsonStringField(h.resultJson(), "reject_code", &rejectCode), "reject_code");
-		expect(rejectCode == "HWP_EXECUTION_NOT_SUPPORTED", "HWP_EXECUTION_NOT_SUPPORTED");
+		expect(rejectCode != "HWP_EXECUTION_NOT_SUPPORTED",
+			"malformed HWP_FIRE rejected without gate-off code");
 		h.resetRelayArtifacts();
 	}
 }
