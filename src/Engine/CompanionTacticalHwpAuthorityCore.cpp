@@ -107,6 +107,11 @@ bool hwpMoveRelayExecutionSupported()
 	return true;
 }
 
+bool hwpTurnRelayExecutionSupported()
+{
+	return true;
+}
+
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId)
 {
 	if (battle == 0 || unitId <= 0)
@@ -281,6 +286,20 @@ MoveValidationResult validateHwpMoveExecutionPreflight(const HwpMoveValidationIn
 		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP_MOVE relay execution is not enabled.");
 	}
 	return accept();
+}
+
+MoveValidationResult validateHwpTurnExecutionPreflight(const HwpTurnValidationInput &input)
+{
+	MoveValidationResult authority = evaluateHwpRemoteCommandAuthority(input.authority);
+	if (!authority.accepted)
+	{
+		return authority;
+	}
+	if (!hwpTurnRelayExecutionSupported())
+	{
+		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP_TURN relay execution is not enabled.");
+	}
+	return CompanionCommandCore::validateHwpTurnContract(input.contract);
 }
 
 } // namespace CompanionTacticalHwpAuthorityCore

@@ -73,6 +73,7 @@
 #include "../Engine/CompanionPsiExecutionCore.h"
 #include "../Engine/CompanionMeleeExecutionCore.h"
 #include "../Engine/CompanionTurnFaceExecutionCore.h"
+#include "../Engine/CompanionHwpTurnExecutionCore.h"
 #include "../Engine/CompanionTuVisibilityCore.h"
 #include "../Engine/CompanionSoldierOwnershipCore.h"
 #include "../Engine/CompanionPerceptionLog.h"
@@ -2964,6 +2965,123 @@ bool BattlescapeGame::tryExecuteCompanionTurnFace(
 	if (finalDirectionOut != 0)
 	{
 		*finalDirectionOut = outcome.finalDirection;
+	}
+
+	Map *map = getMap();
+	if (map != 0)
+	{
+		unit->setCache(0);
+		map->cacheUnit(unit);
+	}
+
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionHwpTurn(
+	BattleUnit *unit,
+	Position target,
+	bool turnPartIsTurret,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	int *finalDirectionOut,
+	int *finalTurretDirectionOut)
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (finalDirectionOut != 0)
+	{
+		*finalDirectionOut = -1;
+	}
+	if (finalTurretDirectionOut != 0)
+	{
+		*finalTurretDirectionOut = -1;
+	}
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (unit->getId() < BattleUnit::MAX_SOLDIER_ID || unit->getGeoscapeSoldier() != 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor is not a friendly HWP.";
+		}
+		return false;
+	}
+	if (_save->getMapSizeX() <= 0 || _save->getMapSizeY() <= 0 || _save->getMapSizeZ() <= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle map is not initialized.";
+		}
+		return false;
+	}
+	if (target.x < 0 || target.y < 0 || target.z < 0 ||
+	    target.x >= _save->getMapSizeX() || target.y >= _save->getMapSizeY() || target.z >= _save->getMapSizeZ())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target out of map bounds.";
+		}
+		return false;
+	}
+
+	const Position startPos = unit->getPosition();
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+	}
+
+	const CompanionHwpTurnExecutionCore::HwpTurnPart part = turnPartIsTurret
+		? CompanionHwpTurnExecutionCore::HwpTurnPart::Turret
+		: CompanionHwpTurnExecutionCore::HwpTurnPart::Body;
+	CompanionHwpTurnExecutionCore::ExecutionOutcome outcome = {};
+	if (!CompanionHwpTurnExecutionCore::executeHwpTurn(this, unit, target, part, rejectReason, &outcome))
+	{
+		return false;
+	}
+
+	if (unit->getPosition() != startPos)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Turn caused unexpected movement.";
+		}
+		return false;
+	}
+
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = outcome.tuSpentTurning;
+	}
+	if (finalDirectionOut != 0)
+	{
+		*finalDirectionOut = outcome.finalDirection;
+	}
+	if (finalTurretDirectionOut != 0)
+	{
+		*finalTurretDirectionOut = outcome.finalTurretDirection;
 	}
 
 	Map *map = getMap();

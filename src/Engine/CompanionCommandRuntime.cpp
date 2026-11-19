@@ -32,9 +32,11 @@
 #include "CompanionTuVisibilityCore.h"
 #include "CompanionTacticalHwpAuthorityCore.h"
 #include "CompanionTacticalHwpMoveExecutionCore.h"
+#include "CompanionHwpTurnExecutionCore.h"
 #include "Logger.h"
 #include <map>
 #include "CrossPlatform.h"
+#include "Options.h"
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -695,6 +697,90 @@ std::string buildTurnFaceResultJson(const CompanionCommandCore::TurnFaceCommandP
 	return json.str();
 }
 
+static void appendHwpTurnObservedFields(
+	std::ostringstream &json,
+	const Position &startPos,
+	BattleUnit *actor,
+	int tuSpent)
+{
+	if (actor == 0)
+	{
+		return;
+	}
+	const Position finalPos = actor->getPosition();
+	json << "  \"starting_position\": { \"x\": " << startPos.x << ", \"y\": " << startPos.y
+	     << ", \"z\": " << startPos.z << " },\n"
+	     << "  \"final_position\": { \"x\": " << finalPos.x << ", \"y\": " << finalPos.y
+	     << ", \"z\": " << finalPos.z << " },\n"
+	     << "  \"remaining_tu\": " << actor->getTimeUnits() << ",\n";
+	if (tuSpent >= 0)
+	{
+		json << "  \"tu_spent\": " << tuSpent << ",\n";
+	}
+	else
+	{
+		(void)tuSpent;
+	}
+	const int hullDir = actor->getDirection();
+	if (hullDir >= 0 && hullDir < 8)
+	{
+		json << "  \"final_direction\": " << hullDir << ",\n";
+	}
+	if (actor->getTurretType() >= 0)
+	{
+		const int turretDir = actor->getTurretDirection();
+		if (turretDir >= 0 && turretDir < 8)
+		{
+			json << "  \"final_turret_direction\": " << turretDir << ",\n";
+		}
+	}
+}
+
+std::string buildHwpTurnResultJson(
+	const CompanionCommandCore::HwpTurnCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	const Position &startPos,
+	BattleUnit *actor,
+	int tuSpent,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256)
+{
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
+	     << "  \"command_type\": \"HWP_TURN\",\n"
+	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
+	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
+	     << "  \"turn\": " << cmd.turn << ",\n"
+	     << "  \"actor_unit_id\": " << cmd.actorUnitId << ",\n"
+	     << "  \"turn_part\": \"" << cmd.turnPart << "\",\n"
+	     << "  \"target\": { \"x\": " << cmd.targetX << ", \"y\": " << cmd.targetY
+	     << ", \"z\": " << cmd.targetZ << " },\n";
+	if (!publicReason.empty())
+	{
+		json << "  \"public_reason\": \"" << publicReason << "\",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED ||
+	    (status == CompanionCommandCore::CMD_REJECTED && actor != 0))
+	{
+		appendHwpTurnObservedFields(json, startPos, actor,
+			tuSpent >= 0 ? tuSpent : -1);
+	}
+	if (!snapshotSha256.empty())
+	{
+		json << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n";
+	}
+	if (!inboxSha256.empty())
+	{
+		json << "  \"inbox_sha256\": \"" << inboxSha256 << "\",\n";
+	}
+	json << "  \"completed_at\": \"engine-local\"\n"
+	     << "}\n";
+	return json.str();
+}
+
 std::string buildSnapShotResultJson(const CompanionCommandCore::SnapShotCommandParsed &cmd,
 	CompanionCommandCore::CommandLifecycleStatus status,
 	const std::string &publicReason,
@@ -1189,6 +1275,36 @@ void rejectStandCommand(const std::string &resultPath, const CompanionCommandCor
 	}
 	std::string json = buildKneelResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false, std::string(), inboxSha256);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
+	writeResultFile(resultPath, json);
+}
+
+void rejectHwpTurnCommand(
+	const std::string &resultPath,
+	const CompanionCommandCore::HwpTurnCommandParsed &parsed,
+	const std::string &reasonCode,
+	const std::string &publicReason,
+	const std::string &inboxSha256,
+	const Position &startPos,
+	BattleUnit *actor,
+	int tuSpentObserved,
+	const CompanionTuVisibilityCore::TuAccountingFields *tuFields = 0)
+{
+	CompanionCommandCore::HwpTurnCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "HWP_TURN";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+		cmd.turnPart = "body";
+	}
+	if (cmd.commandType.empty())
+	{
+		cmd.commandType = "HWP_TURN";
+	}
+	std::string json = buildHwpTurnResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, startPos, actor, tuSpentObserved, std::string(), inboxSha256);
 	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
 	writeResultFile(resultPath, json);
 }
@@ -1793,7 +1909,8 @@ static bool rejectUnreadableCommandJournal(
 	const CompanionCommandCore::PsiPanicCommandParsed *psiPanicRejectTemplate = 0,
 	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0,
 	const CompanionCommandCore::MeleeAttackCommandParsed *meleeRejectTemplate = 0,
-	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0)
+	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0,
+	const CompanionCommandCore::HwpTurnCommandParsed *hwpTurnRejectTemplate = 0)
 {
 	if (CompanionCommandJournalCore::classifyExistingJournalJson(journalJson) !=
 		CompanionCommandJournalCore::JOURNAL_UNREADABLE)
@@ -1875,6 +1992,11 @@ static bool rejectUnreadableCommandJournal(
 		rejectTurnFaceCommand(resultPath, *turnFaceRejectTemplate, "JOURNAL_MALFORMED",
 			"Tactical command journal is unreadable.", inboxDigest);
 	}
+	else if (hwpTurnRejectTemplate != 0)
+	{
+		rejectHwpTurnCommand(resultPath, *hwpTurnRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest, Position(0, 0, 0), 0, -1);
+	}
 	else if (moveRejectTemplate != 0)
 	{
 		rejectCommand(resultPath, *moveRejectTemplate, "JOURNAL_MALFORMED",
@@ -1905,7 +2027,8 @@ bool applyDuplicateInboxDecision(
 	const CompanionCommandCore::PsiPanicCommandParsed *psiPanicRejectTemplate = 0,
 	const CompanionCommandCore::PsiMindControlCommandParsed *psiMindControlRejectTemplate = 0,
 	const CompanionCommandCore::MeleeAttackCommandParsed *meleeRejectTemplate = 0,
-	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0)
+	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0,
+	const CompanionCommandCore::HwpTurnCommandParsed *hwpTurnRejectTemplate = 0)
 {
 	switch (duplicateDecision)
 	{
@@ -2004,6 +2127,11 @@ bool applyDuplicateInboxDecision(
 		{
 			rejectTurnFaceCommand(resultPath, *turnFaceRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
 		}
+		else if (hwpTurnRejectTemplate != 0)
+		{
+			rejectHwpTurnCommand(resultPath, *hwpTurnRejectTemplate, "DUPLICATE_COMMAND_ID",
+				"Command ID already used.", inboxDigest, Position(0, 0, 0), 0, -1);
+		}
 		else if (moveRejectTemplate != 0)
 		{
 			rejectCommand(resultPath, *moveRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
@@ -2052,6 +2180,52 @@ void fillBindingValidationInput(
 	input->duplicateCommandId = false;
 	input->priorCommandNonTerminal = g_active.inFlight;
 	input->humanOverrideRevoked = humanOverrideRevoked;
+}
+
+static void fillHwpRemoteAuthorityInput(
+	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::HwpTurnCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	if (out == 0)
+	{
+		return;
+	}
+	*out = {};
+	out->campaign = campaign;
+	out->battle = battle;
+	out->actorUnitId = parsed.actorUnitId;
+	out->controlFileJson = controlJson;
+	out->controlFileReadOk = controlReadOk;
+	out->battleSessionId = sessionId;
+	out->relayCampaignId = campaign != 0 ? campaign->getCompanionCampaignId() : std::string();
+	out->relayTacticalBattleId = battle != 0 ? battle->getCompanionTacticalBattleId() : std::string();
+	out->commandSnapshotSha256 = parsed.snapshotSha256;
+	out->lastSnapshotSha256 = g_lastSnapshotSha256;
+	out->commandSessionId = parsed.sessionId;
+	out->commandTurn = parsed.turn;
+	out->turn = battle != 0 ? battle->getTurn() : 0;
+	out->commandStateVersion = parsed.stateVersion;
+	out->lastExportedStateVersion = g_lastExportedStateVersion;
+	out->battleInitialized = battleInitialized;
+	out->playerTurn = battle != 0 && battle->getSide() == FACTION_PLAYER;
+	out->battleBusy = game != 0 && game->isBusy();
+	out->unitsFalling = battle != 0 && battle->getUnitsFalling();
+	out->requireBindingFreshness = true;
+	out->actorNativeActionInProgress = false;
+	if (actor != 0 && game != 0)
+	{
+		const int status = actor->getStatus();
+		out->actorNativeActionInProgress = game->isBusy() &&
+			(status == STATUS_WALKING || status == STATUS_TURNING);
+	}
 }
 
 static void fillHwpRemoteAuthorityInput(
@@ -5057,7 +5231,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "HEAL" && inboxCommandType != "STIMULANT" && inboxCommandType != "PAINKILLER" &&
 	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL" &&
 	    inboxCommandType != "MELEE_ATTACK" && inboxCommandType != "TURN_FACE" &&
-	    inboxCommandType != "HWP_MOVE")
+	    inboxCommandType != "HWP_MOVE" && inboxCommandType != "HWP_TURN")
 	{
 		std::string inboxDigest;
 		CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
@@ -7350,6 +7524,166 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
 		logTerminalOnce(kneelParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
 		appendJournalEntry(journalPath, kneelParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "HWP_TURN")
+	{
+		if (!CompanionTacticalHwpAuthorityCore::hwpTurnRelayExecutionSupported())
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			CompanionCommandCore::HwpTurnCommandParsed unsupported = {};
+			unsupported.rejectCode = "HWP_EXECUTION_NOT_SUPPORTED";
+			unsupported.commandType = "HWP_TURN";
+			CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &unsupported.commandId);
+			rejectHwpTurnCommand(resultPath, unsupported, "HWP_EXECUTION_NOT_SUPPORTED",
+				"HWP_TURN relay execution is not enabled.", inboxDigest, Position(0, 0, 0), 0, -1);
+			logRejectOnce(unsupported.commandId.empty() ? "unknown" : unsupported.commandId,
+				"HWP_EXECUTION_NOT_SUPPORTED");
+			return;
+		}
+
+		CompanionCommandCore::HwpTurnCommandParsed hwpTurnParsed = {};
+		if (!CompanionCommandCore::parseHwpTurnCommandJson(commandJson, &hwpTurnParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectHwpTurnCommand(resultPath, hwpTurnParsed, hwpTurnParsed.rejectCode, hwpTurnParsed.rejectCode,
+				inboxDigest, Position(0, 0, 0), 0, -1);
+			logRejectOnce(hwpTurnParsed.commandId.empty() ? "unknown" : hwpTurnParsed.commandId, hwpTurnParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(hwpTurnParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &hwpTurnParsed))
+		{
+			logRejectOnce(hwpTurnParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, hwpTurnParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, hwpTurnParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+				duplicateDecision, hwpTurnParsed.commandId, inboxDigest, resultPath, conflictPath,
+				existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &hwpTurnParsed))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != hwpTurnParsed.commandId)
+		{
+			rejectHwpTurnCommand(resultPath, hwpTurnParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest, Position(0, 0, 0), 0, -1);
+			appendJournalEntry(journalPath, hwpTurnParsed.commandId);
+			logRejectOnce(hwpTurnParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, hwpTurnParsed.actorUnitId);
+		const Position target(hwpTurnParsed.targetX, hwpTurnParsed.targetY, hwpTurnParsed.targetZ);
+		const Position actorPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		const bool turnPartIsTurret = hwpTurnParsed.turnPart == "turret";
+		const CompanionHwpTurnExecutionCore::HwpTurnPart turnPart = turnPartIsTurret
+			? CompanionHwpTurnExecutionCore::HwpTurnPart::Turret
+			: CompanionHwpTurnExecutionCore::HwpTurnPart::Body;
+		const int facingStepsEstimate = actor != 0
+			? CompanionHwpTurnExecutionCore::estimateTurnSteps(actor, target, turnPart) : 0;
+
+		CompanionTacticalHwpAuthorityCore::HwpTurnValidationInput turnInput = {};
+		fillHwpRemoteAuthorityInput(
+			&turnInput.authority,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			controlJson,
+			controlReadOk,
+			sessionId,
+			hwpTurnParsed,
+			actor);
+		turnInput.contract.targetX = hwpTurnParsed.targetX;
+		turnInput.contract.targetY = hwpTurnParsed.targetY;
+		turnInput.contract.targetZ = hwpTurnParsed.targetZ;
+		turnInput.contract.mapSizeX = battle->getMapSizeX();
+		turnInput.contract.mapSizeY = battle->getMapSizeY();
+		turnInput.contract.mapSizeZ = battle->getMapSizeZ();
+		turnInput.contract.targetSameHorizontalAsActor =
+			actor != 0 && target.x == actorPos.x && target.y == actorPos.y;
+		turnInput.contract.turnPartIsTurret = turnPartIsTurret;
+		turnInput.contract.strafeDisabledForTurret = turnPartIsTurret && !Options::strafe;
+		turnInput.contract.actorHasNoTurret = actor != 0 && actor->getTurretType() < 0;
+		turnInput.contract.insufficientTuForTurn = actor != 0 && facingStepsEstimate > 0 &&
+			(facingStepsEstimate > actor->getTimeUnits() ||
+			 !game->checkReservedTU(actor, facingStepsEstimate, true));
+
+		const CompanionCommandCore::MoveValidationResult verdict =
+			CompanionTacticalHwpAuthorityCore::validateHwpTurnExecutionPreflight(turnInput);
+		if (!verdict.accepted)
+		{
+			const CompanionTuVisibilityCore::TuAccountingFields turnTuReject = tuFieldsForInsufficientReject(
+				actor, game, facingStepsEstimate, verdict.rejectCode);
+			rejectHwpTurnCommand(
+				resultPath, hwpTurnParsed, verdict.rejectCode, verdict.publicReason, inboxDigest,
+				actorPos, actor, -1,
+				verdict.rejectCode == "INSUFFICIENT_TU" ? &turnTuReject : 0);
+			appendJournalEntry(journalPath, hwpTurnParsed.commandId);
+			logRejectOnce(hwpTurnParsed.commandId, verdict.rejectCode);
+			return;
+		}
+
+		logCommandDiagnostic("accepted HWP_TURN command_id=" + hwpTurnParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(hwpTurnParsed.actorUnitId) + " part=" + hwpTurnParsed.turnPart);
+
+		const Position startPos = actorPos;
+		const int tuBefore = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string rejectReason;
+		int tuSpent = 0;
+		int finalDirection = -1;
+		int finalTurretDirection = -1;
+		if (!game->tryExecuteCompanionHwpTurn(
+			actor, target, turnPartIsTurret, &rejectReason, &tuSpent, &finalDirection, &finalTurretDirection))
+		{
+			const int tuSpentObserved = actor != 0 ? tuBefore - actor->getTimeUnits() : -1;
+			rejectHwpTurnCommand(resultPath, hwpTurnParsed, "HWP_TURN_START_FAILED", rejectReason, inboxDigest,
+				startPos, actor, tuSpentObserved >= 0 ? tuSpentObserved : -1);
+			appendJournalEntry(journalPath, hwpTurnParsed.commandId);
+			logRejectOnce(hwpTurnParsed.commandId, "HWP_TURN_START_FAILED");
+			return;
+		}
+
+		if (actor != 0 && actor->getPosition() != startPos)
+		{
+			const int tuSpentObserved = tuBefore - actor->getTimeUnits();
+			rejectHwpTurnCommand(resultPath, hwpTurnParsed, "HWP_TURN_START_FAILED",
+				"Turn caused unexpected movement.", inboxDigest, startPos, actor, tuSpentObserved);
+			appendJournalEntry(journalPath, hwpTurnParsed.commandId);
+			logRejectOnce(hwpTurnParsed.commandId, "HWP_TURN_START_FAILED");
+			return;
+		}
+
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildHwpTurnResultJson(hwpTurnParsed, CompanionCommandCore::CMD_COMPLETED,
+			std::string(), startPos, actor, tuSpent, resultSnapshotSha256, inboxDigest));
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		logTerminalOnce(hwpTurnParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		appendJournalEntry(journalPath, hwpTurnParsed.commandId);
 		return;
 	}
 

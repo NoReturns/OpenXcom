@@ -267,6 +267,15 @@ public:
 		std::string *rejectReason,
 		int *tuSpentOut = 0,
 		int *finalDirectionOut = 0);
+	/// HWP turn-in-place (body or turret strafe); synchronous CompanionHwpTurnExecutionCore path.
+	bool tryExecuteCompanionHwpTurn(
+		BattleUnit *unit,
+		Position target,
+		bool turnPartIsTurret,
+		std::string *rejectReason,
+		int *tuSpentOut = 0,
+		int *finalDirectionOut = 0,
+		int *finalTurretDirectionOut = 0);
 	/// Fire one companion-authorized snap shot through the normal projectile pipeline.
 	bool tryExecuteCompanionSnapShot(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason);
 	/// Fire companion-authorized snap/auto/aimed shot through the normal projectile pipeline.

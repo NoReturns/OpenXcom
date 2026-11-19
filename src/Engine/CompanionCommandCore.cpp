@@ -603,6 +603,89 @@ bool parseTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *ou
 	return true;
 }
 
+bool parseHwpTurnCommandJson(const std::string &json, HwpTurnCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	HwpTurnCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "HWP_TURN")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!extractTargetCoords(json, &parsed.targetX, &parsed.targetY, &parsed.targetZ))
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "turn_part", &parsed.turnPart) ||
+	    (parsed.turnPart != "body" && parsed.turnPart != "turret"))
+	{
+		parsed.rejectCode = "INVALID_TURN_PART";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
 static bool parseDirectedFireCommandJson(const std::string &json, const char *expectedCommandType, SnapShotCommandParsed *out)
 {
 	if (out == 0 || expectedCommandType == 0)
@@ -2085,6 +2168,45 @@ MoveValidationResult validateTurnFaceCommand(const TurnFaceValidationInput &inpu
 	{
 		result.rejectCode = "INVALID_TARGET";
 		result.publicReason = "Target must differ from actor position on the horizontal plane.";
+		return result;
+	}
+	if (input.insufficientTuForTurn)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units to turn.";
+		return result;
+	}
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validateHwpTurnContract(const HwpTurnValidationInput &input)
+{
+	MoveValidationResult result = {};
+	result.accepted = false;
+	if (input.targetX < 0 || input.targetY < 0 || input.targetZ < 0 ||
+	    input.targetX >= input.mapSizeX || input.targetY >= input.mapSizeY || input.targetZ >= input.mapSizeZ)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target out of map bounds.";
+		return result;
+	}
+	if (input.targetSameHorizontalAsActor)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target must differ from actor position on the horizontal plane.";
+		return result;
+	}
+	if (input.turnPartIsTurret && input.actorHasNoTurret)
+	{
+		result.rejectCode = "INVALID_TURN_PART";
+		result.publicReason = "Unit has no turret.";
+		return result;
+	}
+	if (input.turnPartIsTurret && input.strafeDisabledForTurret)
+	{
+		result.rejectCode = "STRAFE_DISABLED";
+		result.publicReason = "Strafe option disabled; turret turn unavailable.";
 		return result;
 	}
 	if (input.insufficientTuForTurn)

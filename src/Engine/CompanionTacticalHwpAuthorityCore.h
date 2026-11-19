@@ -24,6 +24,9 @@ bool hwpTacticalCommandExecutionSupported();
 /// True when HWP_MOVE relay execution is enabled (action-specific; does not enable other HWP command types).
 bool hwpMoveRelayExecutionSupported();
 
+/// True when HWP_TURN relay execution is enabled (S4-1c).
+bool hwpTurnRelayExecutionSupported();
+
 struct HwpRemoteAuthorityInput
 {
 	SavedGame *campaign;
@@ -67,11 +70,19 @@ struct HwpMoveValidationInput
 	int mapSizeZ;
 };
 
+struct HwpTurnValidationInput
+{
+	HwpRemoteAuthorityInput authority;
+	CompanionCommandCore::HwpTurnValidationInput contract;
+};
+
 /// S3B contract: authority + in-bounds destination only (no pathfinding).
 CompanionCommandCore::MoveValidationResult validateHwpMoveCommand(const HwpMoveValidationInput &input);
 
 /// Authority + destination + HWP_MOVE relay execution gate (other HWP types use validateHwpTacticalCommandExecutionPreflight).
 CompanionCommandCore::MoveValidationResult validateHwpMoveExecutionPreflight(const HwpMoveValidationInput &input);
+
+CompanionCommandCore::MoveValidationResult validateHwpTurnExecutionPreflight(const HwpTurnValidationInput &input);
 
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId);
 

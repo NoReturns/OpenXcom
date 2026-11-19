@@ -605,7 +605,7 @@ static void testRelayUnsupportedHwpCommandTypes()
 	h.addTank(Position(1, 1, 0), 80, true);
 	h.writeControlJson(true, false);
 	expect(h.exportSnapshotBinding(), "snapshot export unsupported");
-	for (const char *type : { "HWP_FIRE", "HWP_TURN" })
+	for (const char *type : { "HWP_FIRE" })
 	{
 		std::ostringstream json;
 		json << "{\n"
