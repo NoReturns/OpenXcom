@@ -719,7 +719,10 @@ void Map::drawTerrain(Surface *surface)
 					unit = tile->getUnit();
 
 					// Draw cursor back
-					if (_cursorType != CT_NONE && _selectorX > itX - _cursorSize && _selectorY > itY - _cursorSize && _selectorX < itX+1 && _selectorY < itY+1 && !_save->getBattleState()->getMouseOverIcons())
+					{
+						BattlescapeState *battleState = _save->getBattleState();
+						const bool mouseOverIcons = battleState != 0 && battleState->getMouseOverIcons();
+						if (_cursorType != CT_NONE && _selectorX > itX - _cursorSize && _selectorY > itY - _cursorSize && _selectorX < itX+1 && _selectorY < itY+1 && !mouseOverIcons)
 					{
 						if (_camera->getViewLevel() == itZ)
 						{
@@ -746,6 +749,7 @@ void Map::drawTerrain(Surface *surface)
 							tmpSurface = _game->getMod()->getSurfaceSet("CURSOR.PCK")->getFrame(frameNumber);
 							tmpSurface->blitNShade(surface, screenPosition.x, screenPosition.y, 0);
 						}
+					}
 					}
 
 					// special handling for a moving unit in background of tile.
@@ -1010,7 +1014,10 @@ void Map::drawTerrain(Surface *surface)
 						}
 					}
 					// Draw cursor front
-					if (_cursorType != CT_NONE && _selectorX > itX - _cursorSize && _selectorY > itY - _cursorSize && _selectorX < itX+1 && _selectorY < itY+1 && !_save->getBattleState()->getMouseOverIcons())
+					{
+						BattlescapeState *battleState = _save->getBattleState();
+						const bool mouseOverIcons = battleState != 0 && battleState->getMouseOverIcons();
+						if (_cursorType != CT_NONE && _selectorX > itX - _cursorSize && _selectorY > itY - _cursorSize && _selectorX < itX+1 && _selectorY < itY+1 && !mouseOverIcons)
 					{
 						if (_camera->getViewLevel() == itZ)
 						{
@@ -1114,6 +1121,7 @@ void Map::drawTerrain(Surface *surface)
 						{
 							drawHoverTileCoordinateLabel(surface, screenPosition.x, screenPosition.y);
 						}
+					}
 					}
 
 					// Draw waypoints if any on this tile
@@ -1355,8 +1363,9 @@ void Map::mouseOver(Action *action, State *state)
  */
 void Map::drawHoverTileCoordinateLabel(Surface *surface, int screenX, int screenY)
 {
-	const bool selectorIndicatorAvailable =
-		_cursorType != CT_NONE && !_save->getBattleState()->getMouseOverIcons();
+	BattlescapeState *battleState = _save->getBattleState();
+	const bool mouseOverIcons = battleState != 0 && battleState->getMouseOverIcons();
+	const bool selectorIndicatorAvailable = _cursorType != CT_NONE && !mouseOverIcons;
 	const int viewZ = _camera->getViewLevel();
 
 	if (!CompanionTacticalHoverCoordsCore::shouldShowHoverTileCoords(

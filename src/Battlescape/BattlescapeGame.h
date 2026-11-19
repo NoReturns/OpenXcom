@@ -278,6 +278,13 @@ public:
 		int *finalTurretDirectionOut = 0);
 	/// Fire one companion-authorized snap shot through the normal projectile pipeline.
 	bool tryExecuteCompanionSnapShot(BattleUnit *unit, Position target, BattleItem *weapon, std::string *rejectReason);
+	/// Non-mutating directed-fire preflight (TU, ammo, LOS, busy) for companion and HWP executors.
+	bool preflightCompanionDirectedFire(
+		BattleUnit *unit,
+		Position target,
+		BattleItem *weapon,
+		BattleActionType actionType,
+		std::string *rejectReason);
 	/// Fire companion-authorized snap/auto/aimed shot through the normal projectile pipeline.
 	bool tryExecuteCompanionDirectedFire(BattleUnit *unit, Position target, BattleItem *weapon, BattleActionType actionType, std::string *rejectReason);
 	bool tryExecuteCompanionPrime(BattleUnit *unit, BattleItem *weapon, int fuseTimer, std::string *rejectReason);

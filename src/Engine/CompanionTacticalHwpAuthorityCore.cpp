@@ -112,6 +112,16 @@ bool hwpTurnRelayExecutionSupported()
 	return true;
 }
 
+bool hwpFireRelayExecutionSupported()
+{
+#ifdef COMPANION_HWP_FIRE_RELAY_HARNESS
+	// Test executable only (CMake define on companion_hwp_fire_relay_test); production builds stay false.
+	return true;
+#else
+	return false;
+#endif
+}
+
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId)
 {
 	if (battle == 0 || unitId <= 0)
@@ -300,6 +310,20 @@ MoveValidationResult validateHwpTurnExecutionPreflight(const HwpTurnValidationIn
 		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP_TURN relay execution is not enabled.");
 	}
 	return CompanionCommandCore::validateHwpTurnContract(input.contract);
+}
+
+MoveValidationResult validateHwpFireExecutionPreflight(const HwpFireValidationInput &input)
+{
+	MoveValidationResult authority = evaluateHwpRemoteCommandAuthority(input.authority);
+	if (!authority.accepted)
+	{
+		return authority;
+	}
+	if (!hwpFireRelayExecutionSupported())
+	{
+		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP_FIRE relay execution is not enabled.");
+	}
+	return CompanionCommandCore::validateHwpFireContract(input.contract);
 }
 
 } // namespace CompanionTacticalHwpAuthorityCore

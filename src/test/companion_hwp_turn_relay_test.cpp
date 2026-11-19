@@ -101,6 +101,23 @@ static std::string hwpTurnRelayJoin(const std::string &dir, const char *name)
 	return dir.empty() ? std::string(name) : dir + sep + name;
 }
 
+static std::string hwpTurnRelayExeDir()
+{
+#ifdef _WIN32
+	char path[MAX_PATH];
+	const DWORD n = GetModuleFileNameA(NULL, path, MAX_PATH);
+	if (n == 0 || n >= MAX_PATH)
+	{
+		return ".";
+	}
+	std::string p(path, n);
+	const auto slash = p.find_last_of("\\/");
+	return slash == std::string::npos ? "." : p.substr(0, slash);
+#else
+	return ".";
+#endif
+}
+
 static void hwpTurnRelayWrite(const std::string &path, const std::string &body)
 {
 	std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc | std::ios::binary);
@@ -151,7 +168,7 @@ struct HwpTurnRelayHarness
 		battle.getCompanionEventLog().beginSession();
 		sessionId = battle.getCompanionEventLog().getSessionId();
 
-		relayDir = hwpTurnRelayJoin(".", "hwp_turn_relay_e2e");
+		relayDir = hwpTurnRelayJoin(hwpTurnRelayExeDir(), "hwp_turn_relay_e2e");
 		HWP_TURN_RELAY_MKDIR(relayDir.c_str());
 		snapshotPath = hwpTurnRelayJoin(relayDir, "tactical-relay-fixture.yaml");
 		hwpTurnRelayWrite(snapshotPath, "tactical:\n  relay_fixture: hwp_turn_s4_1c\n");
@@ -173,6 +190,7 @@ struct HwpTurnRelayHarness
 		std::remove(hwpTurnRelayJoin(relayDir, "tactical-command-journal.json").c_str());
 		std::remove(hwpTurnRelayJoin(relayDir, "tactical-command-conflict.json").c_str());
 		std::remove(hwpTurnRelayJoin(relayDir, "companion-tactical-publication-confirm.json").c_str());
+		std::remove(hwpTurnRelayJoin(relayDir, "companion-soldier-control.json").c_str());
 	}
 
 	void resetScenario()
@@ -208,15 +226,18 @@ struct HwpTurnRelayHarness
 				break;
 			}
 		}
+		expect(!liveHwps.empty(), "HWP must exist on map before control publish (spawn before writeControl)");
 		if (hwpAi)
 		{
 			aiHwps.insert(HWP_ID);
-			battle.assignCompanionTacticalHwpToAi(HWP_ID);
+			expect(battle.assignCompanionTacticalHwpToAi(HWP_ID), "tactical HWP AI assign");
 		}
 		else
 		{
-			battle.reclaimCompanionTacticalHwpForHuman(HWP_ID);
+			expect(battle.reclaimCompanionTacticalHwpForHuman(HWP_ID), "tactical HWP human reclaim");
 		}
+		const bool tacticalAi = battle.getCompanionTacticalAiHwpIds().count(HWP_ID) != 0;
+		expect(tacticalAi == hwpAi, "tactical ai HWP set matches harness intent");
 		const ControlPublicationPlan plan = buildControlPublicationJson(
 			sessionId,
 			campaign.getCompanionCampaignId(),
@@ -228,6 +249,17 @@ struct HwpTurnRelayHarness
 		expect(plan.ok, "control plan");
 		if (plan.ok)
 		{
+			const std::string hwpAiMarker = "\"" + std::to_string(HWP_ID) + "\": \"ai\"";
+			if (hwpAi)
+			{
+				expect(plan.jsonUtf8.find(hwpAiMarker) != std::string::npos,
+					"companion-soldier-control includes HWP in hwp_assignments");
+			}
+			else
+			{
+				expect(plan.jsonUtf8.find(hwpAiMarker) == std::string::npos,
+					"human control must not list HWP as ai");
+			}
 			hwpTurnRelayWrite(hwpTurnRelayJoin(relayDir, "companion-soldier-control.json"), plan.jsonUtf8);
 		}
 	}
@@ -401,6 +433,9 @@ static void testHumanHwpReject()
 	h.publishInbox(h.hwpTurnCommandJson("hwp-turn-human", "body", 5, 3, 0));
 	h.tickRelay();
 	expect(h.statusIs("REJECTED"), "human HWP rejected");
+	std::string rejectCode;
+	expect(CompanionJsonLite::extractJsonStringField(h.resultJson(), "reject_code", &rejectCode), "reject_code");
+	expect(rejectCode == "NOT_AI_CONTROLLED", "human HWP NOT_AI_CONTROLLED");
 }
 
 int main()

@@ -686,6 +686,96 @@ bool parseHwpTurnCommandJson(const std::string &json, HwpTurnCommandParsed *out)
 	return true;
 }
 
+bool parseHwpFireCommandJson(const std::string &json, HwpFireCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	HwpFireCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "HWP_FIRE")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!extractTargetCoords(json, &parsed.targetX, &parsed.targetY, &parsed.targetZ))
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "fire_mode", &parsed.fireMode) ||
+	    (parsed.fireMode != "snap" && parsed.fireMode != "aimed"))
+	{
+		parsed.rejectCode = "INVALID_FIRE_MODE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "weapon_battle_item_id", &parsed.weaponBattleItemId) ||
+	    parsed.weaponBattleItemId < 0)
+	{
+		parsed.rejectCode = "INVALID_WEAPON_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
 static bool parseDirectedFireCommandJson(const std::string &json, const char *expectedCommandType, SnapShotCommandParsed *out)
 {
 	if (out == 0 || expectedCommandType == 0)
@@ -2213,6 +2303,69 @@ MoveValidationResult validateHwpTurnContract(const HwpTurnValidationInput &input
 	{
 		result.rejectCode = "INSUFFICIENT_TU";
 		result.publicReason = "Not enough time units to turn.";
+		return result;
+	}
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validateHwpFireContract(const HwpFireValidationInput &input)
+{
+	MoveValidationResult result = {};
+	result.accepted = false;
+	if (input.targetX < 0 || input.targetY < 0 || input.targetZ < 0 ||
+	    input.targetX >= input.mapSizeX || input.targetY >= input.mapSizeY || input.targetZ >= input.mapSizeZ)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target out of map bounds.";
+		return result;
+	}
+	if (input.invalidFireMode)
+	{
+		result.rejectCode = "INVALID_FIRE_MODE";
+		result.publicReason = "fire_mode must be snap or aimed.";
+		return result;
+	}
+	if (input.actorIsRosterSoldier)
+	{
+		result.rejectCode = "INVALID_ACTOR";
+		result.publicReason = "Actor is a roster soldier, not a friendly HWP.";
+		return result;
+	}
+	if (!input.weaponResolved || !input.weaponBelongsToActor)
+	{
+		result.rejectCode = "WEAPON_NOT_FOUND";
+		result.publicReason = "weapon_battle_item_id must match exactly one fixed weapon on HWP.";
+		return result;
+	}
+	if (!input.weaponSupportsFireMode)
+	{
+		result.rejectCode = "UNSUPPORTED_WEAPON";
+		result.publicReason = "Weapon does not support the requested fire mode.";
+		return result;
+	}
+	if (!input.weaponUsable)
+	{
+		result.rejectCode = "UNSUPPORTED_WEAPON";
+		result.publicReason = "Weapon is not usable for firing.";
+		return result;
+	}
+	if (!input.weaponHasAmmo)
+	{
+		result.rejectCode = "NO_AMMUNITION";
+		result.publicReason = "Weapon has no ammunition.";
+		return result;
+	}
+	if (input.insufficientTuForFireMode)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for fire mode.";
+		return result;
+	}
+	if (input.visibleUnitTargetDefinitelyBlocked)
+	{
+		result.rejectCode = "NO_LINE_OF_FIRE";
+		result.publicReason = "No line of fire to visible target.";
 		return result;
 	}
 	result.accepted = true;

@@ -164,6 +164,7 @@ set ( engine_src
 	Engine/CompanionMeleeExecutionCore.cpp
 	Engine/CompanionTurnFaceExecutionCore.cpp
 	Engine/CompanionHwpTurnExecutionCore.cpp
+	Engine/CompanionHwpFireExecutionCore.cpp
 	Engine/CompanionMedikitExecutionCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
@@ -993,6 +994,24 @@ if ( OPENXCOM_BUILD_COMPANION_HWP_TURN_RELAY_TEST )
   add_test ( NAME companion_hwp_turn_relay_test COMMAND companion_hwp_turn_relay_test )
 endif ()
 
+option ( OPENXCOM_BUILD_COMPANION_HWP_FIRE_RELAY_TEST "Build companion HWP_FIRE relay test (M1 HWP-S5-1c)" ON )
+if ( OPENXCOM_BUILD_COMPANION_HWP_FIRE_RELAY_TEST )
+  add_executable ( companion_hwp_fire_relay_test
+    test/companion_hwp_fire_relay_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_hwp_fire_relay_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  target_compile_definitions ( companion_hwp_fire_relay_test PRIVATE COMPANION_HWP_FIRE_RELAY_HARNESS )
+  if ( WIN32 )
+    set_target_properties ( companion_hwp_fire_relay_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_hwp_fire_relay_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_hwp_fire_relay_test )
+  else ()
+    target_link_libraries ( companion_hwp_fire_relay_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_hwp_fire_relay_test COMMAND companion_hwp_fire_relay_test )
+endif ()
+
 option ( OPENXCOM_BUILD_COMPANION_HWP_MOVE_RELAY_TERMINAL_TEST "Build HWP_MOVE relay terminal certification (M1 HWP-S3B-03A)" ON )
 if ( OPENXCOM_BUILD_COMPANION_HWP_MOVE_RELAY_TERMINAL_TEST )
   add_executable ( companion_hwp_move_relay_terminal_test
@@ -1321,6 +1340,23 @@ if ( OPENXCOM_BUILD_COMPANION_HWP_TURN_ENGINE_TEST )
     target_link_libraries ( companion_hwp_turn_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_hwp_turn_engine_test COMMAND companion_hwp_turn_engine_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_HWP_FIRE_ENGINE_TEST "Build companion HWP_FIRE engine test (M1 HWP-S5-1b)" ON )
+if ( OPENXCOM_BUILD_COMPANION_HWP_FIRE_ENGINE_TEST )
+  add_executable ( companion_hwp_fire_engine_test
+    test/companion_hwp_fire_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_hwp_fire_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_hwp_fire_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_hwp_fire_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_hwp_fire_engine_test )
+  else ()
+    target_link_libraries ( companion_hwp_fire_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_hwp_fire_engine_test COMMAND companion_hwp_fire_engine_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_TURN_FACE_ENGINE_TEST "Build companion TURN_FACE engine test (M1 WP-TURN-1b)" ON )

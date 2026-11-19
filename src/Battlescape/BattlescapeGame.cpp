@@ -1057,7 +1057,11 @@ void BattlescapeGame::handleState()
 		{
 			_states.front()->think();
 		}
-		getMap()->invalidate(); // redraw map
+		Map *map = getMap();
+		if (map != 0)
+		{
+			map->invalidate(); // redraw map
+		}
 	}
 }
 
@@ -3157,7 +3161,7 @@ static const char *companionDirectedFireModeLabel(BattleActionType actionType)
 	}
 }
 
-bool BattlescapeGame::tryExecuteCompanionDirectedFire(
+bool BattlescapeGame::preflightCompanionDirectedFire(
 	BattleUnit *unit,
 	Position target,
 	BattleItem *weapon,
@@ -3188,6 +3192,14 @@ bool BattlescapeGame::tryExecuteCompanionDirectedFire(
 		}
 		return false;
 	}
+	if (_save->getTile(target) == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target out of map bounds.";
+		}
+		return false;
+	}
 	if (!companionFirearmSupportsDirectedFire(weapon, actionType))
 	{
 		if (rejectReason != 0)
@@ -3213,7 +3225,7 @@ bool BattlescapeGame::tryExecuteCompanionDirectedFire(
 		return false;
 	}
 	const int fireTu = unit->getActionTUs(actionType, weapon);
-	if (fireTu <= 0 || !checkReservedTU(unit, fireTu, true))
+	if (fireTu <= 0 || fireTu > unit->getTimeUnits() || !checkReservedTU(unit, fireTu, true))
 	{
 		if (rejectReason != 0)
 		{
@@ -3221,10 +3233,47 @@ bool BattlescapeGame::tryExecuteCompanionDirectedFire(
 		}
 		return false;
 	}
+	if (getPanicHandled())
+	{
+		BattleAction probe = {};
+		probe.type = actionType;
+		probe.actor = unit;
+		probe.weapon = weapon;
+		probe.target = target;
+		probe.autoShotCounter = 0;
+		if (ProjectileFlyBState::companionPreflightVisibleUnitTargetBlocked(
+				probe, _save, this, unit->getPosition()))
+		{
+			if (rejectReason != 0)
+			{
+				*rejectReason = "No line of fire to visible target.";
+			}
+			return false;
+		}
+	}
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionDirectedFire(
+	BattleUnit *unit,
+	Position target,
+	BattleItem *weapon,
+	BattleActionType actionType,
+	std::string *rejectReason)
+{
+	if (!preflightCompanionDirectedFire(unit, target, weapon, actionType, rejectReason))
+	{
+		return false;
+	}
+
+	const int fireTu = unit->getActionTUs(actionType, weapon);
 
 	cancelCurrentAction();
 	_save->setSelectedUnit(unit);
-	_parentState->updateSoldierInfo();
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+	}
 
 	_currentAction = BattleAction();
 	_currentAction.type = actionType;
@@ -3235,10 +3284,17 @@ bool BattlescapeGame::tryExecuteCompanionDirectedFire(
 	_currentAction.targeting = true;
 	_currentAction.playerOrdered = true;
 	_currentAction.autoShotCounter = 0;
-	_currentAction.cameraPosition = getMap()->getCamera()->getMapOffset();
+	Map *map = getMap();
+	if (map != 0)
+	{
+		_currentAction.cameraPosition = map->getCamera()->getMapOffset();
+		map->setCursorType(CT_NONE);
+		if (_parentState != 0)
+		{
+			_parentState->getGame()->getCursor()->setVisible(false);
+		}
+	}
 
-	getMap()->setCursorType(CT_NONE);
-	_parentState->getGame()->getCursor()->setVisible(false);
 	_states.push_back(new ProjectileFlyBState(this, _currentAction));
 	statePushFront(new UnitTurnBState(this, _currentAction));
 	return true;

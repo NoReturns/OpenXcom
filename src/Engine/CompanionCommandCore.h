@@ -158,6 +158,43 @@ struct HwpTurnValidationInput
 	bool actorHasNoTurret;
 };
 
+struct HwpFireCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	int targetX;
+	int targetY;
+	int targetZ;
+	std::string fireMode;
+	int weaponBattleItemId;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct HwpFireValidationInput
+{
+	int targetX;
+	int targetY;
+	int targetZ;
+	int mapSizeX;
+	int mapSizeY;
+	int mapSizeZ;
+	bool invalidFireMode;
+	bool actorIsRosterSoldier;
+	bool weaponResolved;
+	bool weaponBelongsToActor;
+	bool weaponSupportsFireMode;
+	bool weaponUsable;
+	bool weaponHasAmmo;
+	bool insufficientTuForFireMode;
+	bool visibleUnitTargetDefinitelyBlocked;
+};
+
 struct StandValidationInput : TacticalCommandBindingValidationInput
 {
 	bool actorKneeling;
@@ -703,6 +740,7 @@ MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidatio
 MoveValidationResult validateMeleeAttackCommand(const MeleeAttackValidationInput &input);
 MoveValidationResult validateTurnFaceCommand(const TurnFaceValidationInput &input);
 MoveValidationResult validateHwpTurnContract(const HwpTurnValidationInput &input);
+MoveValidationResult validateHwpFireContract(const HwpFireValidationInput &input);
 CommandLifecycleStatus evaluateWalkTerminalStatus(const WalkCompletionInput &input);
 WalkStopDiagnostics resolveWalkStopDiagnostics(
 	CommandLifecycleStatus terminal,
@@ -728,6 +766,7 @@ bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out);
 bool parseStandCommandJson(const std::string &json, StandCommandParsed *out);
 bool parseTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *out);
 bool parseHwpTurnCommandJson(const std::string &json, HwpTurnCommandParsed *out);
+bool parseHwpFireCommandJson(const std::string &json, HwpFireCommandParsed *out);
 bool parseSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out);

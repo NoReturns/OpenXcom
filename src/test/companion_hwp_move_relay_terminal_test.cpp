@@ -682,7 +682,14 @@ void certHumanAndUnsupported()
 		h.tickRelay();
 		std::string code;
 		CompanionJsonLite::extractJsonStringField(h.resultJson(), "reject_code", &code);
-		expect(h.status() == "REJECTED" && code == "UNSUPPORTED_COMMAND_TYPE", type);
+		if (std::string(type) == "HWP_FIRE")
+		{
+			expect(h.status() == "REJECTED" && code == "HWP_EXECUTION_NOT_SUPPORTED", "HWP_FIRE gate off");
+		}
+		else
+		{
+			expect(h.status() == "REJECTED" && code == "INVALID_TARGET", "HWP_TURN malformed target");
+		}
 	}
 }
 
