@@ -159,6 +159,7 @@ set ( engine_src
 	Engine/CompanionTacticalMcHostileAuthorityCore.cpp
 	Engine/CompanionTacticalMcHostileMoveExecutionCore.cpp
 	Engine/CompanionTacticalMcHostilePostureExecutionCore.cpp
+	Engine/CompanionTacticalMcHostileFireExecutionCore.cpp
 	Engine/CompanionBattlescapeOwnershipCore.cpp
 	Engine/CompanionOwnershipHandoffCore.cpp
 	Engine/CompanionSoldierControlPublishCore.cpp
@@ -1067,6 +1068,23 @@ if ( OPENXCOM_BUILD_COMPANION_HWP_MOVE_RELAY_TERMINAL_TEST )
     target_link_libraries ( companion_hwp_move_relay_terminal_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_hwp_move_relay_terminal_test COMMAND companion_hwp_move_relay_terminal_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_FIRE_RELAY_TERMINAL_TEST "Build MC fire relay terminal certification (M1 MC-03A)" ON )
+if ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_FIRE_RELAY_TERMINAL_TEST )
+  add_executable ( companion_mc_hostile_fire_relay_terminal_test
+    test/companion_mc_hostile_fire_relay_terminal_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_mc_hostile_fire_relay_terminal_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_mc_hostile_fire_relay_terminal_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_mc_hostile_fire_relay_terminal_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_mc_hostile_fire_relay_terminal_test )
+  else ()
+    target_link_libraries ( companion_mc_hostile_fire_relay_terminal_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_mc_hostile_fire_relay_terminal_test COMMAND companion_mc_hostile_fire_relay_terminal_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_MOVE_RELAY_TERMINAL_TEST "Build MC_MOVE relay terminal certification (M1 MC-02B)" ON )

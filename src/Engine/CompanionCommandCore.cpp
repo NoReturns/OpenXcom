@@ -1241,6 +1241,21 @@ static bool parseDirectedFireCommandJson(const std::string &json, const char *ex
 	return true;
 }
 
+static bool parseMcDirectedFireCommandJson(const std::string &json, const char *expectedCommandType, SnapShotCommandParsed *out)
+{
+	if (!parseDirectedFireCommandJson(json, expectedCommandType, out))
+	{
+		return false;
+	}
+	if (out->actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		out->valid = false;
+		out->rejectCode = "INVALID_ACTOR";
+		return false;
+	}
+	return true;
+}
+
 bool parseSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out)
 {
 	return parseDirectedFireCommandJson(json, "SNAP_SHOT", out);
@@ -1254,6 +1269,21 @@ bool parseAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *ou
 bool parseAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out)
 {
 	return parseDirectedFireCommandJson(json, "AIMED_SHOT", out);
+}
+
+bool parseMcSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out)
+{
+	return parseMcDirectedFireCommandJson(json, "MC_SNAP_SHOT", out);
+}
+
+bool parseMcAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *out)
+{
+	return parseMcDirectedFireCommandJson(json, "MC_AUTO_SHOT", out);
+}
+
+bool parseMcAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out)
+{
+	return parseMcDirectedFireCommandJson(json, "MC_AIMED_SHOT", out);
 }
 
 bool isValidPrimeFuseTimerForBattleType(int fuseTimer, int battleType)

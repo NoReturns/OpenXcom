@@ -4,6 +4,7 @@
 #define SDL_MAIN_HANDLED
 #include "Engine/CompanionTacticalMcHostileAuthorityCore.h"
 #include "Engine/CompanionTacticalMcHostilePostureExecutionCore.h"
+#include "Engine/CompanionTacticalMcHostileFireExecutionCore.h"
 #include "Engine/CompanionCommandCore.h"
 #include "Engine/CompanionSoldierControlPublishCore.h"
 #include "../Savegame/SavedBattleGame.h"
@@ -162,6 +163,34 @@ static void testAiOwnedMcHostilePermitted()
 	expect(evaluateMcRemoteCommandAuthority(input).accepted, "AI-owned MC hostile passes authority");
 }
 
+static void testMcFireJsonParse()
+{
+	const std::string snap =
+		"{\"schema_version\":1,\"command_id\":\"mc-snap-1\",\"command_type\":\"MC_SNAP_SHOT\","
+		"\"actor_unit_id\":1000042,\"target\":{\"x\":6,\"y\":5,\"z\":0},"
+		"\"active_hand\":\"STR_RIGHT_HAND\","
+		"\"snapshot_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+		"\"session_id\":\"a1b2c3d4e5f6789012345678abcdef01\",\"turn\":1,\"state_version\":0}";
+	SnapShotCommandParsed parsed = {};
+	expect(parseMcSnapShotCommandJson(snap, &parsed), "parseMcSnapShotCommandJson");
+	expect(parsed.commandType == "MC_SNAP_SHOT", "MC_SNAP_SHOT command_type");
+	expect(!parseSnapShotCommandJson(snap, &parsed), "roster parser rejects MC_SNAP_SHOT actor band");
+	const std::string autoJson =
+		"{\"schema_version\":1,\"command_id\":\"mc-auto-1\",\"command_type\":\"MC_AUTO_SHOT\","
+		"\"actor_unit_id\":1000042,\"target\":{\"x\":6,\"y\":5,\"z\":0},"
+		"\"active_hand\":\"STR_RIGHT_HAND\","
+		"\"snapshot_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+		"\"session_id\":\"a1b2c3d4e5f6789012345678abcdef01\",\"turn\":1,\"state_version\":0}";
+	expect(parseMcAutoShotCommandJson(autoJson, &parsed), "parseMcAutoShotCommandJson");
+	const std::string aimedJson =
+		"{\"schema_version\":1,\"command_id\":\"mc-aim-1\",\"command_type\":\"MC_AIMED_SHOT\","
+		"\"actor_unit_id\":1000042,\"target\":{\"x\":6,\"y\":5,\"z\":0},"
+		"\"active_hand\":\"STR_RIGHT_HAND\","
+		"\"snapshot_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+		"\"session_id\":\"a1b2c3d4e5f6789012345678abcdef01\",\"turn\":1,\"state_version\":0}";
+	expect(parseMcAimedShotCommandJson(aimedJson, &parsed), "parseMcAimedShotCommandJson");
+}
+
 static void testMcMoveJsonParse()
 {
 	const std::string json =
@@ -302,7 +331,10 @@ static void testWrongTurnRejected()
 int companion_tactical_mc_hostile_authority_test_body()
 {
 	expect(mcMoveRelayExecutionSupported(), "MC_MOVE relay gate on");
+	expect(CompanionTacticalMcHostileFireExecutionCore::mcFireRelayExecutionSupported(),
+		"MC fire relay gate on");
 	testAiOwnedMcHostilePermitted();
+	testMcFireJsonParse();
 	testMcMoveJsonParse();
 	testMcMoveContract();
 	testReclaimedMcHostileRejected();

@@ -808,6 +808,9 @@ bool parseHwpGuidedLaunchCommandJson(const std::string &json, HwpGuidedLaunchCom
 bool parseSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
+bool parseMcSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
+bool parseMcAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
+bool parseMcAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parsePrimeCommandJson(const std::string &json, PrimeCommandParsed *out);
 bool parseThrowCommandJson(const std::string &json, ThrowCommandParsed *out);
 bool parseGuidedLaunchCommandJson(const std::string &json, GuidedLaunchCommandParsed *out);

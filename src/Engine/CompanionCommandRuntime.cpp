@@ -36,6 +36,7 @@
 #include "CompanionTacticalMcHostileAuthorityCore.h"
 #include "CompanionTacticalMcHostileMoveExecutionCore.h"
 #include "CompanionTacticalMcHostilePostureExecutionCore.h"
+#include "CompanionTacticalMcHostileFireExecutionCore.h"
 #include "CompanionHwpTurnExecutionCore.h"
 #include "CompanionHwpFireExecutionCore.h"
 #include "CompanionHwpGuidedLaunchExecutionCore.h"
@@ -72,6 +73,9 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 			KIND_MC_MOVE,
 			KIND_MC_TURN,
 			KIND_MC_KNEEL,
+			KIND_MC_SNAP_SHOT,
+			KIND_MC_AUTO_SHOT,
+			KIND_MC_AIMED_SHOT,
 			KIND_HWP_FIRE,
 			KIND_HWP_GUIDED_LAUNCH,
 			KIND_SNAP_SHOT,
@@ -116,6 +120,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput hwpMoveAuthority;
 	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput hwpFireAuthority;
 	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput mcMoveAuthority;
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput mcFireAuthority;
 };
 
 ActiveCommand g_active = {};
@@ -158,9 +163,16 @@ static bool isDirectedFireKind(ActiveCommand::Kind kind)
 	       kind == ActiveCommand::KIND_AIMED_SHOT;
 }
 
+static bool isMcDirectedFireKind(ActiveCommand::Kind kind)
+{
+	return kind == ActiveCommand::KIND_MC_SNAP_SHOT ||
+	       kind == ActiveCommand::KIND_MC_AUTO_SHOT ||
+	       kind == ActiveCommand::KIND_MC_AIMED_SHOT;
+}
+
 static bool isDirectedFireOrHwpFireKind(ActiveCommand::Kind kind)
 {
-	return isDirectedFireKind(kind) || isHwpFireKind(kind);
+	return isDirectedFireKind(kind) || isHwpFireKind(kind) || isMcDirectedFireKind(kind);
 }
 
 static bool isThrowKind(ActiveCommand::Kind kind)
@@ -192,24 +204,61 @@ static BattleActionType battleActionTypeForDirectedFireKind(ActiveCommand::Kind 
 {
 	switch (kind)
 	{
-	case ActiveCommand::KIND_AUTO_SHOT: return BA_AUTOSHOT;
-	case ActiveCommand::KIND_AIMED_SHOT: return BA_AIMEDSHOT;
+	case ActiveCommand::KIND_AUTO_SHOT:
+	case ActiveCommand::KIND_MC_AUTO_SHOT: return BA_AUTOSHOT;
+	case ActiveCommand::KIND_AIMED_SHOT:
+	case ActiveCommand::KIND_MC_AIMED_SHOT: return BA_AIMEDSHOT;
 	case ActiveCommand::KIND_SNAP_SHOT:
+	case ActiveCommand::KIND_MC_SNAP_SHOT:
 	default: return BA_SNAPSHOT;
 	}
 }
 
 static ActiveCommand::Kind directedFireKindForCommandType(const std::string &commandType)
 {
-	if (commandType == "AUTO_SHOT")
+	if (commandType == "AUTO_SHOT" || commandType == "MC_AUTO_SHOT")
 	{
-		return ActiveCommand::KIND_AUTO_SHOT;
+		return commandType == "MC_AUTO_SHOT"
+			? ActiveCommand::KIND_MC_AUTO_SHOT
+			: ActiveCommand::KIND_AUTO_SHOT;
 	}
-	if (commandType == "AIMED_SHOT")
+	if (commandType == "AIMED_SHOT" || commandType == "MC_AIMED_SHOT")
 	{
-		return ActiveCommand::KIND_AIMED_SHOT;
+		return commandType == "MC_AIMED_SHOT"
+			? ActiveCommand::KIND_MC_AIMED_SHOT
+			: ActiveCommand::KIND_AIMED_SHOT;
+	}
+	if (commandType == "MC_SNAP_SHOT")
+	{
+		return ActiveCommand::KIND_MC_SNAP_SHOT;
 	}
 	return ActiveCommand::KIND_SNAP_SHOT;
+}
+
+static const char *mcFireUnsupportedModeReason(const std::string &commandType)
+{
+	if (commandType == "MC_AUTO_SHOT")
+	{
+		return "Weapon does not support automatic fire.";
+	}
+	if (commandType == "MC_AIMED_SHOT")
+	{
+		return "Weapon does not support aimed shot.";
+	}
+	return "Weapon does not support snap shot.";
+}
+
+static const char *mcFireInsufficientTuReason(const std::string &commandType)
+{
+	if (commandType == "MC_AUTO_SHOT")
+	{
+		return "Not enough time units for automatic fire.";
+	}
+	if (commandType == "MC_AIMED_SHOT")
+	{
+		return "Not enough time units for aimed shot.";
+	}
+	return "Not enough time units for snap shot.";
 }
 int g_lastExportedStateVersion = 0;
 std::string g_boundSessionId;
@@ -2780,6 +2829,23 @@ static void fillMcRemoteAuthorityInput(
 		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
 }
 
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::SnapShotCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
 static bool snapWeaponSupportsSnapShot(BattleItem *weapon)
 {
 	if (weapon == 0)
@@ -4291,7 +4357,7 @@ void interruptInFlightForBindingReset(const std::string &resultPath)
 			g_lastSnapshotSha256,
 			g_active.inboxDigest);
 	}
-	else if (isDirectedFireKind(g_active.kind))
+	else if (isDirectedFireKind(g_active.kind) || isMcDirectedFireKind(g_active.kind))
 	{
 		json = buildSnapShotResultJson(
 			g_active.snapParsed,
@@ -4502,6 +4568,9 @@ static std::string activeInFlightCommandSessionId()
 	case ActiveCommand::KIND_SNAP_SHOT:
 	case ActiveCommand::KIND_AUTO_SHOT:
 	case ActiveCommand::KIND_AIMED_SHOT:
+	case ActiveCommand::KIND_MC_SNAP_SHOT:
+	case ActiveCommand::KIND_MC_AUTO_SHOT:
+	case ActiveCommand::KIND_MC_AIMED_SHOT:
 		return g_active.snapParsed.sessionId;
 	case ActiveCommand::KIND_HWP_FIRE:
 		return g_active.hwpFireParsed.sessionId;
@@ -4965,6 +5034,9 @@ int getInFlightActorUnitId()
 	case ActiveCommand::KIND_SNAP_SHOT:
 	case ActiveCommand::KIND_AUTO_SHOT:
 	case ActiveCommand::KIND_AIMED_SHOT:
+	case ActiveCommand::KIND_MC_SNAP_SHOT:
+	case ActiveCommand::KIND_MC_AUTO_SHOT:
+	case ActiveCommand::KIND_MC_AIMED_SHOT:
 		return g_active.snapParsed.actorUnitId;
 	case ActiveCommand::KIND_HWP_FIRE:
 		return g_active.hwpFireParsed.actorUnitId;
@@ -4990,6 +5062,13 @@ void notifySnapShotProjectileLaunched(int actorUnitId)
 	if (isHwpFireKind(g_active.kind))
 	{
 		if (actorUnitId != g_active.hwpFireParsed.actorUnitId)
+		{
+			return;
+		}
+	}
+	else if (isMcDirectedFireKind(g_active.kind))
+	{
+		if (actorUnitId != g_active.snapParsed.actorUnitId)
 		{
 			return;
 		}
@@ -5731,6 +5810,97 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			return;
 		}
 
+		if (isMcDirectedFireKind(g_active.kind))
+		{
+			BattleUnit *unit = findUnitById(battle, g_active.snapParsed.actorUnitId);
+			const bool aiCommandPermitted =
+				CompanionTacticalMcHostileAuthorityCore::evaluateMcRemoteCommandAuthority(
+					g_active.mcFireAuthority).accepted;
+			if (unit != 0 && !aiCommandPermitted)
+			{
+				game->cancelCurrentAction();
+			}
+			CompanionCommandCore::SnapShotCompletionInput done = {};
+			done.battleBusy = game->isBusy();
+			done.actorAlive = unit != 0 && !unit->isOut();
+			done.actorStillAiControlled = aiCommandPermitted;
+			done.projectileLaunched = g_active.snapProjectileLaunched;
+			done.actionResult = g_active.snapActionResult;
+
+			const CompanionCommandCore::CommandLifecycleStatus terminal =
+				CompanionCommandCore::evaluateSnapShotTerminalStatus(done);
+			if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
+			{
+				return;
+			}
+
+			std::string publicReason;
+			if (terminal == CompanionCommandCore::CMD_INTERRUPTED)
+			{
+				publicReason = "MC weapon fire interrupted or incomplete.";
+			}
+			else if (terminal == CompanionCommandCore::CMD_FAILED)
+			{
+				publicReason = !done.actionResult.empty()
+					? done.actionResult
+					: "MC weapon fire did not resolve.";
+			}
+
+			const std::string resultSnapshotSha256 =
+				snapshotSha256ForTerminalCommandResult(battle, terminal);
+			const Position finalPos = unit != 0 ? unit->getPosition() : g_active.startPos;
+			std::string json = buildSnapShotResultJson(
+				g_active.snapParsed,
+				terminal,
+				publicReason,
+				g_active.startPos,
+				finalPos,
+				unit != 0 ? unit->getTimeUnits() : 0,
+				unit != 0 && unit->isKneeled(),
+				resultSnapshotSha256,
+				g_active.inboxDigest);
+			if (done.actionResult == "STR_NOT_ENOUGH_TIME_UNITS"
+			    || g_active.snapActionResult == "STR_NOT_ENOUGH_TIME_UNITS")
+			{
+				CompanionTuVisibilityCore::TuAccountingFields tu;
+				tu.timeUnitsAtAcceptance = g_active.tuAtAcceptance;
+				tu.timeUnitsRemaining = unit != 0 ? unit->getTimeUnits() : -1;
+				tu.actionTuCost = g_active.directedFireTuCost;
+				tu.facingTuStepsEstimated = g_active.directedFireFacingStepsEstimate;
+				if (g_active.directedFireFacingStepsEstimate >= 0)
+				{
+					tu.facingTuEstimate = g_active.directedFireFacingStepsEstimate;
+				}
+				tu.facingTuSpentEstimate = CompanionTuVisibilityCore::estimateFacingTuSpent(
+					g_active.tuAtAcceptance,
+					unit != 0 ? unit->getTimeUnits() : -1,
+					g_active.directedFireTuCost);
+				const int remaining = unit != 0 ? unit->getTimeUnits() : -1;
+				if (remaining >= 0 && g_active.directedFireTuCost >= 0 && remaining < g_active.directedFireTuCost)
+				{
+					tu.outcomeClass = "fire_insufficient_after_facing";
+				}
+				else
+				{
+					tu.outcomeClass = "multi_stage_action";
+				}
+				tu.rejectionPhase = "post_acceptance_execution";
+				tu.observationNote =
+					"MC fire passed preflight checkReservedTU for fire TU only; failure during facing or projectile init.";
+				json = applyResultJsonExtensions(json, terminal, std::string(), &tu);
+			}
+			writeResultFile(resultPath, json);
+			logTerminalOnce(g_active.commandId, terminal);
+			if (terminal == CompanionCommandCore::CMD_COMPLETED)
+			{
+				CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+			}
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			clearRosterCasualtyDeferClock();
+			return;
+		}
+
 		if (isHwpGuidedLaunchKind(g_active.kind))
 		{
 			BattleUnit *unit = findUnitById(battle, g_active.hwpGuidedLaunchParsed.actorUnitId);
@@ -6034,7 +6204,9 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "HWP_MOVE" && inboxCommandType != "HWP_TURN" && inboxCommandType != "HWP_FIRE" &&
 	    inboxCommandType != "HWP_GUIDED_LAUNCH" &&
 	    inboxCommandType != "MC_MOVE" && inboxCommandType != "MC_TURN_FACE" &&
-	    inboxCommandType != "MC_KNEEL" && inboxCommandType != "MC_STAND")
+	    inboxCommandType != "MC_KNEEL" && inboxCommandType != "MC_STAND" &&
+	    inboxCommandType != "MC_SNAP_SHOT" && inboxCommandType != "MC_AUTO_SHOT" &&
+	    inboxCommandType != "MC_AIMED_SHOT")
 	{
 		std::string inboxDigest;
 		CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
@@ -9184,6 +9356,168 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			inboxDigest);
 		writeResultFile(resultPath, executingJson);
 		appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "MC_SNAP_SHOT" || inboxCommandType == "MC_AUTO_SHOT" || inboxCommandType == "MC_AIMED_SHOT")
+	{
+		if (!CompanionTacticalMcHostileFireExecutionCore::mcFireRelayExecutionSupported())
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			CompanionCommandCore::SnapShotCommandParsed unsupported = {};
+			unsupported.rejectCode = "MC_EXECUTION_NOT_SUPPORTED";
+			unsupported.commandType = inboxCommandType;
+			CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &unsupported.commandId);
+			rejectSnapShotCommand(resultPath, unsupported, "MC_EXECUTION_NOT_SUPPORTED",
+				"MC hostile fire relay execution is not enabled.", inboxDigest);
+			logRejectOnce(unsupported.commandId.empty() ? "unknown" : unsupported.commandId,
+				"MC_EXECUTION_NOT_SUPPORTED");
+			return;
+		}
+
+		CompanionCommandCore::SnapShotCommandParsed mcFireParsed = {};
+		const bool mcFireParsedOk = inboxCommandType == "MC_AUTO_SHOT"
+			? CompanionCommandCore::parseMcAutoShotCommandJson(commandJson, &mcFireParsed)
+			: inboxCommandType == "MC_AIMED_SHOT"
+				? CompanionCommandCore::parseMcAimedShotCommandJson(commandJson, &mcFireParsed)
+				: CompanionCommandCore::parseMcSnapShotCommandJson(commandJson, &mcFireParsed);
+		if (!mcFireParsedOk)
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectSnapShotCommand(resultPath, mcFireParsed, mcFireParsed.rejectCode, mcFireParsed.rejectCode, inboxDigest);
+			logRejectOnce(mcFireParsed.commandId.empty() ? "unknown" : mcFireParsed.commandId, mcFireParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(mcFireParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, 0, &mcFireParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			logRejectOnce(mcFireParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, mcFireParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, mcFireParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, mcFireParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, &mcFireParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != mcFireParsed.commandId)
+		{
+			rejectSnapShotCommand(resultPath, mcFireParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest);
+			appendJournalEntry(journalPath, mcFireParsed.commandId);
+			logRejectOnce(mcFireParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, mcFireParsed.actorUnitId);
+		CompanionTacticalMcHostileFireExecutionCore::McDirectedFireValidationInput fireInput = {};
+		fillMcRemoteAuthorityInput(
+			&fireInput.authority, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+			mcFireParsed, actor);
+		fireInput.contract = CompanionTacticalMcHostileFireExecutionCore::buildMcDirectedFireContractInput(
+			game, battle, actor, mcFireParsed);
+		const CompanionCommandCore::MoveValidationResult fireVerdict =
+			CompanionTacticalMcHostileFireExecutionCore::validateMcDirectedFireExecutionPreflight(
+				fireInput,
+				mcFireUnsupportedModeReason(inboxCommandType),
+				mcFireInsufficientTuReason(inboxCommandType));
+		if (!fireVerdict.accepted)
+		{
+			BattleItem *preflightWeapon = actor != 0 ? actor->getItem(mcFireParsed.activeHand) : 0;
+			const BattleActionType preflightAction = battleActionTypeForDirectedFireKind(
+				directedFireKindForCommandType(inboxCommandType));
+			const int preflightFireTu = actor != 0 && preflightWeapon != 0
+				? actor->getActionTUs(preflightAction, preflightWeapon)
+				: -1;
+			const CompanionTuVisibilityCore::TuAccountingFields tuReject = tuFieldsForInsufficientReject(
+				actor, game, preflightFireTu, fireVerdict.rejectCode);
+			rejectSnapShotCommand(
+				resultPath, mcFireParsed, fireVerdict.rejectCode, fireVerdict.publicReason, inboxDigest,
+				fireVerdict.rejectCode == "INSUFFICIENT_TU" ? &tuReject : 0);
+			appendJournalEntry(journalPath, mcFireParsed.commandId);
+			logRejectOnce(mcFireParsed.commandId, fireVerdict.rejectCode);
+			return;
+		}
+
+		logCommandDiagnostic("accepted MC fire command_id=" + mcFireParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(mcFireParsed.actorUnitId) + " type=" + inboxCommandType);
+
+		BattleItem *weapon = actor != 0 ? actor->getItem(mcFireParsed.activeHand) : 0;
+		const BattleActionType actionType = battleActionTypeForDirectedFireKind(
+			directedFireKindForCommandType(inboxCommandType));
+		const int preAcceptFireTu = actor != 0 && weapon != 0 ? actor->getActionTUs(actionType, weapon) : -1;
+		const Position target(mcFireParsed.targetX, mcFireParsed.targetY, mcFireParsed.targetZ);
+
+		beginInFlightCommand();
+		g_active.kind = directedFireKindForCommandType(inboxCommandType);
+		g_active.commandId = mcFireParsed.commandId;
+		g_active.inboxDigest = inboxDigest;
+		g_active.snapParsed = mcFireParsed;
+		g_active.mcFireAuthority = fireInput.authority;
+		g_active.startPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		g_active.snapProjectileLaunched = false;
+		g_active.snapActionResult.clear();
+		g_active.tuAtAcceptance = actor != 0 ? actor->getTimeUnits() : -1;
+		g_active.directedFireTuCost = preAcceptFireTu;
+		g_active.directedFireFacingStepsEstimate =
+			CompanionTacticalMcHostileFireExecutionCore::estimateFacingStepsForMcFire(actor, target);
+
+		if (actor != 0 && actor->getActiveHand() != mcFireParsed.activeHand)
+		{
+			actor->setActiveHand(mcFireParsed.activeHand);
+		}
+		std::string rejectReason;
+		const std::string startFailedCode = inboxCommandType + "_START_FAILED";
+		if (!CompanionTacticalMcHostileFireExecutionCore::tryStartMcDirectedFire(
+				game, actor, target, weapon, actionType, &rejectReason))
+		{
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			rejectSnapShotCommand(resultPath, mcFireParsed, startFailedCode, rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, mcFireParsed.commandId);
+			logRejectOnce(mcFireParsed.commandId, startFailedCode);
+			return;
+		}
+
+		beginInFlightCommand();
+		g_active.kind = directedFireKindForCommandType(inboxCommandType);
+
+		logSnapShotStartedOnce(mcFireParsed.commandId, mcFireParsed.actorUnitId);
+		CompanionTuVisibilityCore::TuAccountingFields acceptTu;
+		acceptTu.timeUnitsAtAcceptance = g_active.tuAtAcceptance;
+		acceptTu.actionTuCost = g_active.directedFireTuCost;
+		acceptTu.facingTuStepsEstimated = g_active.directedFireFacingStepsEstimate;
+		if (g_active.directedFireFacingStepsEstimate >= 0)
+		{
+			acceptTu.facingTuEstimate = g_active.directedFireFacingStepsEstimate;
+		}
+		acceptTu.observationNote =
+			"Post-acceptance facing spends up to facing_tu_steps_estimated (1 TU per step) before projectile init.";
+		std::string executingJson = buildSnapShotResultJson(mcFireParsed, CompanionCommandCore::CMD_EXECUTING, std::string(),
+			g_active.startPos, g_active.startPos, actor->getTimeUnits(), actor->isKneeled(), g_lastSnapshotSha256, inboxDigest);
+		executingJson = applyResultJsonExtensions(executingJson, CompanionCommandCore::CMD_EXECUTING, std::string(), &acceptTu);
+		writeResultFile(resultPath, executingJson);
+		appendJournalEntry(journalPath, mcFireParsed.commandId);
 		return;
 	}
 
