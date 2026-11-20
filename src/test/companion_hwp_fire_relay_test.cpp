@@ -80,6 +80,19 @@ const int SOLDIER_RELAY_ID = 1;
 const int kMaxFireTicks = 250000;
 int g_failures = 0;
 
+struct FireRelayHarness;
+std::string describeNativeStack(BattlescapeGame *bg);
+void certInterruptMidFlightCancelProbe(BattlescapeGame *bg, FireRelayHarness &h);
+
+#ifdef _WIN32
+struct CancelInvokeOutcome
+{
+	DWORD exceptionCode;
+	bool trapped;
+};
+CancelInvokeOutcome invokeCancelCurrentActionSeh(BattlescapeGame *bg);
+DWORD invokeRelayCommandTickSeh(BattlescapeGame *bg);
+#endif
 
 void expect(bool ok, const char *msg)
 {
@@ -746,6 +759,35 @@ struct FireRelayHarness
 		return laser;
 	}
 
+	BattleUnit *addRocketTank(const Position &pos, int tu, int hullDir, int turretDir)
+	{
+		return addStockTank("STR_TANK_ROCKET_LAUNCHER", pos, tu, hullDir, turretDir);
+	}
+
+	BattleItem *mountStockRocket(BattleUnit *tank, int rounds = 8)
+	{
+		RuleItem *launcherRules = game->getMod()->getItem("STR_TANK_ROCKET_LAUNCHER", false);
+		RuleItem *ammoRules = game->getMod()->getItem("STR_HWP_ROCKETS", false);
+		RuleInventory *hand = game->getMod()->getInventory("STR_RIGHT_HAND", true);
+		expect(launcherRules != 0 && ammoRules != 0 && hand != 0, "stock rocket launcher + HWP_ROCKETS rules");
+		if (launcherRules == 0 || ammoRules == 0 || hand == 0)
+		{
+			return 0;
+		}
+		expect(ammoRules->getClipSize() == 8, "STR_HWP_ROCKETS ruleset clipSize 8");
+		BattleItem *launcher = new BattleItem(launcherRules, battle->getCurrentItemId());
+		BattleItem *clip = new BattleItem(ammoRules, battle->getCurrentItemId());
+		clip->setAmmoQuantity(rounds);
+		expect(launcher->setAmmoItem(clip) == 0, "rocket launcher loaded");
+		launcher->setSlot(hand);
+		launcher->setSlotX(0);
+		launcher->setSlotY(0);
+		launcher->moveToOwner(tank);
+		battle->getItems()->push_back(launcher);
+		battle->getItems()->push_back(clip);
+		return launcher;
+	}
+
 	std::string rejectCode() const
 	{
 		std::string code;
@@ -806,16 +848,29 @@ struct FireRelayHarness
 		return s;
 	}
 
-	int advanceUntilTerminal()
+	int advanceUntilTerminal(bool *sawExplosionState = 0)
 	{
 		BattlescapeGame *bg = battleGame();
 		expect(bg != 0, "battle game");
 		int ticks = 0;
 		while (ticks < kMaxFireTicks)
 		{
-			if (bg->isBusy())
+			if (battlescape != 0)
+			{
+				battlescape->think();
+			}
+			else if (bg->isBusy())
 			{
 				bg->handleState();
+			}
+			else
+			{
+				bg->think();
+			}
+			if (sawExplosionState != 0
+			    && describeNativeStack(bg).find("ExplosionBState") != std::string::npos)
+			{
+				*sawExplosionState = true;
 			}
 			tickRelay();
 			const std::string st = status();
@@ -957,6 +1012,321 @@ void certWeaponLayoutAndLookup()
 	logEvidence("weapon-layout",
 		"stock xcom1: inventory-mounted STR_TANK_CANNON; snapshot fixedWeapons; lookup includes inventory+spec slot");
 }
+
+void certRocketNativeStackDrains()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	BattleUnit *tank = h.addRocketTank(Position(3, 3, 0), 120, 4, 6);
+	BattleItem *launcher = h.mountStockRocket(tank, 8);
+	BattlescapeGame *bg = h.battleGame();
+	if (tank == 0 || launcher == 0 || bg == 0)
+	{
+		return;
+	}
+	const Position target(9, 3, 0);
+	const int ammoBefore = clipRounds(launcher);
+	const int tuBefore = tank->getTimeUnits();
+	std::string reject;
+	expect(preflightHwpFire(bg, tank, target, "snap", launcher->getId(), &reject, 0), "rocket native preflight");
+	HwpFireStartOutcome outcome = {};
+	expect(tryStartHwpFire(bg, tank, target, "snap", launcher->getId(), &reject, &outcome), "rocket native start");
+	expect(bg->isBusy(), "rocket native busy after start");
+	int ticks = 0;
+	bool sawExplosion = false;
+	while (ticks < kMaxFireTicks)
+	{
+		if (h.battlescape != 0)
+		{
+			h.battlescape->think();
+		}
+		else if (bg->isBusy())
+		{
+			bg->handleState();
+		}
+		else
+		{
+			break;
+		}
+		if (describeNativeStack(bg).find("ExplosionBState") != std::string::npos)
+		{
+			sawExplosion = true;
+		}
+		if (!bg->isBusy())
+		{
+			break;
+		}
+		++ticks;
+	}
+	const std::string stackEnd = describeNativeStack(bg);
+	logEvidence("rocket-native", "ticks=" + std::to_string(ticks) + " explosion=" + (sawExplosion ? "yes" : "no")
+	                                + " tu=" + std::to_string(tuBefore) + "->" + std::to_string(tank->getTimeUnits())
+	                                + " busy=" + (bg->isBusy() ? "true" : "false") + " stack=" + stackEnd
+	                                + " ammo=" + std::to_string(clipRounds(launcher)));
+	expect(!bg->isBusy(), "rocket native stack idle after handleState");
+	expect(clipRounds(launcher) == ammoBefore - 1, "rocket native one round spent");
+	expect(tank->getTimeUnits() < tuBefore, "rocket native TU spent");
+}
+
+void certRocketSnapRelayTerminal()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	const Position tankPos(3, 3, 0);
+	const Position target(8, 3, 0);
+	BattleUnit *tank = h.addRocketTank(tankPos, 120, 4, 6);
+	BattleItem *launcher = h.mountStockRocket(tank, 8);
+	if (tank == 0 || launcher == 0)
+	{
+		return;
+	}
+	expect(clipRounds(launcher) == 8, "rocket magazine starts at 8 rounds");
+	logEvidence("rocket-turret-type", "turretType=" + std::to_string(tank->getTurretType()));
+	const int snapTu = tank->getActionTUs(BA_SNAPSHOT, launcher);
+	expect(snapTu > 0, "rocket snap TU from stock rules");
+	const int tuBefore = tank->getTimeUnits();
+	const int ammoBefore = clipRounds(launcher);
+	const int turretBefore = tank->getTurretDirection();
+	h.writeControl(true);
+	expect(h.exportBinding(), "rocket snapshot export");
+	const std::string snapBefore = fireRead(h.snapshotPath);
+	expect(snapBefore.find("STR_TANK_ROCKET_LAUNCHER") != std::string::npos, "export lists rocket launcher");
+	expect(snapBefore.find("STR_HWP_ROCKETS") != std::string::npos, "export lists HWP rockets ammo");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-snap-s6", "snap", launcher->getId(), target.x, target.y, target.z));
+	h.tickRelay();
+	expect(h.status() == "EXECUTING", "rocket snap EXECUTING");
+	expect(h.battleGame()->isBusy(), "native stack busy after rocket start");
+	bool sawExplosion = false;
+	const int ticks = h.advanceUntilTerminal(&sawExplosion);
+	expect(h.status() == "COMPLETED", "rocket snap COMPLETED after projectile stack");
+	expect(h.resultJson().find("\"projectile_launched\": true") != std::string::npos, "rocket projectile launched");
+	expect(clipRounds(launcher) == ammoBefore - 1, "rocket single-round consumption");
+	expect(tank->getTimeUnits() < tuBefore, "rocket snap TU spent");
+	int tuSpentJson = -1;
+	expect(CompanionJsonLite::extractJsonIntField(h.resultJson(), "tu_spent", &tuSpentJson), "rocket tu_spent");
+	expect(tuSpentJson == tuBefore - tank->getTimeUnits(), "rocket tu_spent matches engine");
+	if (tank->getTurretDirection() != turretBefore)
+	{
+		int turretJson = -1;
+		expect(CompanionJsonLite::extractJsonIntField(h.resultJson(), "final_turret_direction", &turretJson),
+			"rocket final_turret_direction");
+		expect(turretJson == tank->getTurretDirection(), "rocket turret json");
+	}
+	logEvidence("rocket-snap-explosion", sawExplosion ? "ExplosionBState observed during terminal" : "no ExplosionBState in stack trace (limitation)");
+	expect(sawExplosion, "HE rocket should queue ExplosionBState during relay terminal");
+	expect(h.exportBinding(), "post-shot snapshot export");
+	const std::string snapAfter = fireRead(h.snapshotPath);
+	expect(snapAfter.find("\"rounds\": 7") != std::string::npos || snapAfter.find("rounds: 7") != std::string::npos,
+		"snapshot export reflects 7 rounds after one shot");
+	logEvidence("rocket-snap", "ammo " + std::to_string(ammoBefore) + "->" + std::to_string(clipRounds(launcher))
+	                              + " tu " + std::to_string(tuBefore) + "->" + std::to_string(tank->getTimeUnits())
+	                              + " snapTu=" + std::to_string(snapTu) + " ticks=" + std::to_string(ticks));
+	h.endCase();
+}
+
+void certRocketAimedRelayTerminal()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	BattleUnit *tank = h.addRocketTank(Position(3, 3, 0), 120, 4, 6);
+	BattleItem *launcher = h.mountStockRocket(tank, 8);
+	if (tank == 0 || launcher == 0)
+	{
+		return;
+	}
+	const int aimedTu = tank->getActionTUs(BA_AIMEDSHOT, launcher);
+	expect(aimedTu > 0, "rocket aimed TU from stock rules");
+	const int ammoBefore = clipRounds(launcher);
+	const int tuBefore = tank->getTimeUnits();
+	h.writeControl(true);
+	expect(h.exportBinding(), "snapshot");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-aimed-s6", "aimed", launcher->getId(), 8, 3, 0));
+	h.tickRelay();
+	expect(h.status() == "EXECUTING", "rocket aimed EXECUTING");
+	bool sawExplosion = false;
+	h.advanceUntilTerminal(&sawExplosion);
+	expect(h.status() == "COMPLETED", "rocket aimed COMPLETED");
+	expect(h.resultJson().find("\"projectile_launched\": true") != std::string::npos, "rocket aimed projectile");
+	expect(clipRounds(launcher) == ammoBefore - 1, "rocket aimed one round spent");
+	expect(tank->getTimeUnits() < tuBefore, "rocket aimed TU spent");
+	logEvidence("rocket-aimed", "aimedTu=" + std::to_string(aimedTu) + " explosion=" + (sawExplosion ? "yes" : "no"));
+	h.endCase();
+}
+
+void certRocketRejectEmptyAmmo()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	BattleUnit *tank = h.addRocketTank(Position(2, 2, 0), 80, 4, 6);
+	BattleItem *launcher = h.mountStockRocket(tank, 0);
+	launcher->getAmmoItem()->setAmmoQuantity(0);
+	const int tuBefore = tank->getTimeUnits();
+	h.writeControl(true);
+	expect(h.exportBinding(), "snapshot");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-empty", "snap", launcher->getId(), 6, 2, 0));
+	h.tickRelay();
+	expect(h.status() == "REJECTED", "empty rocket magazine REJECTED");
+	expect(tank->getTimeUnits() == tuBefore, "no TU on empty rocket reject");
+	h.endCase();
+}
+
+void certRocketRejectInvalidTarget()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	BattleUnit *tank = h.addRocketTank(Position(2, 2, 0), 80, 4, 6);
+	BattleItem *launcher = h.mountStockRocket(tank);
+	h.writeControl(true);
+	expect(h.exportBinding(), "snapshot");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-oob", "snap", launcher->getId(), 99, 2, 0));
+	h.tickRelay();
+	expect(h.status() == "REJECTED", "rocket OOB target REJECTED");
+	h.endCase();
+}
+
+void certRocketTurretRotation()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	const int hullBefore = 4;
+	const int turretBefore = 2;
+	BattleUnit *tank = h.addRocketTank(Position(3, 3, 0), 120, hullBefore, turretBefore);
+	BattleItem *launcher = h.mountStockRocket(tank);
+	if (launcher == 0)
+	{
+		return;
+	}
+	const Position target(3, 7, 0);
+	const int facingSteps = estimateDirectedFireFacingSteps(tank, target);
+	expect(facingSteps >= 0, "rocket turret facing steps computable");
+	h.writeControl(true);
+	expect(h.exportBinding(), "snapshot");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-turret", "snap", launcher->getId(), target.x, target.y, target.z));
+	h.tickRelay();
+	h.advanceUntilTerminal();
+	expect(h.status() == "COMPLETED", "rocket turret snap COMPLETED");
+	expect(tank->getTurretDirection() != turretBefore, "rocket turret rotated");
+	logEvidence("rocket-turret", "facingSteps=" + std::to_string(facingSteps));
+	h.endCase();
+}
+
+void certRocketInterruptMidFlight()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	BattleUnit *tank = h.addRocketTank(Position(3, 3, 0), 120, 4, 6);
+	BattleItem *launcher = h.mountStockRocket(tank);
+	const int ammoBefore = clipRounds(launcher);
+	h.writeControl(true);
+	expect(h.exportBinding(), "snapshot");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-interrupt", "snap", launcher->getId(), 8, 3, 0));
+	h.tickRelay();
+	expect(h.status() == "EXECUTING", "rocket interrupt EXECUTING");
+	BattlescapeGame *bg = h.battleGame();
+	bool projectileLive = false;
+	for (int i = 0; i < 32 && bg->isBusy(); ++i)
+	{
+		if (bg->getMap() != 0 && bg->getMap()->getProjectile() != 0)
+		{
+			projectileLive = true;
+		}
+		bg->handleState();
+		h.tickRelay();
+	}
+	logEvidence("rocket-interrupt", "projectileLive=" + std::string(projectileLive ? "true" : "false"));
+#ifdef _WIN32
+	certInterruptMidFlightCancelProbe(bg, h);
+#else
+	logEvidence("rocket-interrupt", "cancel probe Windows-only");
+#endif
+	CompanionCommandRuntime::abandonInFlightCommandForTestHarness();
+	if (clipRounds(launcher) == ammoBefore)
+	{
+		logEvidence("rocket-interrupt", "ammo unchanged after mid-flight cancel (before spend)");
+	}
+	h.endCase();
+}
+
+void certRocketCancelBeforeProjectileLaunch()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	BattleUnit *tank = h.addRocketTank(Position(3, 3, 0), 120, 4, 0);
+	BattleItem *launcher = h.mountStockRocket(tank);
+	const int ammoBefore = clipRounds(launcher);
+	const int tuBefore = tank->getTimeUnits();
+	h.writeControl(true);
+	expect(h.exportBinding(), "snapshot");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-cancel-pre", "snap", launcher->getId(), 8, 3, 0));
+	h.tickRelay();
+	expect(h.status() == "EXECUTING", "pre-cancel EXECUTING");
+	BattlescapeGame *bg = h.battleGame();
+	bool canceledBeforeProjectile = false;
+	for (int i = 0; i < 24 && bg != 0 && bg->isBusy(); ++i)
+	{
+		const bool projectileLive = bg->getMap() != 0 && bg->getMap()->getProjectile() != 0;
+		const std::string stack = describeNativeStack(bg);
+		if (!projectileLive && stack.find("UnitTurnBState") != std::string::npos)
+		{
+#ifdef _WIN32
+			const CancelInvokeOutcome cancel = invokeCancelCurrentActionSeh(bg);
+			expect(!cancel.trapped, "cancel before projectile lift-off must not SEH");
+#else
+			bg->cancelCurrentAction();
+#endif
+			canceledBeforeProjectile = true;
+			break;
+		}
+		bg->handleState();
+		h.tickRelay();
+	}
+	logEvidence("rocket-cancel-pre", canceledBeforeProjectile ? "canceled during turret align" : "OPEN: no pre-projectile window");
+	if (canceledBeforeProjectile)
+	{
+		expect(clipRounds(launcher) == ammoBefore, "ammo unchanged cancel before projectile");
+	}
+	h.tickRelay();
+	CompanionCommandRuntime::abandonInFlightCommandForTestHarness();
+	expect(tank->getTimeUnits() <= tuBefore, "TU not increased by cancel path");
+	h.endCase();
+}
+
+#ifdef _WIN32
+void certRocketAuthorityLossCancel()
+{
+	FireRelayHarness &h = harness();
+	h.setupBattle(12, 12);
+	h.resetRelayFiles();
+	BattleUnit *tank = h.addRocketTank(Position(3, 3, 0), 120, 4, 6);
+	BattleItem *launcher = h.mountStockRocket(tank);
+	h.writeControl(true);
+	expect(h.exportBinding(), "snapshot");
+	h.publish(h.hwpFireJson("hwp-fire-rocket-auth-cancel", "snap", launcher->getId(), 8, 3, 0));
+	h.tickRelay();
+	BattlescapeGame *bg = h.battleGame();
+	for (int i = 0; i < 6 && bg != 0 && bg->isBusy(); ++i)
+	{
+		bg->handleState();
+		h.tickRelay();
+	}
+	h.writeControl(false);
+	for (int i = 0; i < 4; ++i)
+	{
+		const DWORD authoritySeh = invokeRelayCommandTickSeh(bg);
+		expect(authoritySeh == 0, "rocket authority-loss tick must not SEH");
+	}
+	logEvidence("rocket-auth-cancel", "status=" + h.status());
+	CompanionCommandRuntime::abandonInFlightCommandForTestHarness();
+	h.endCase();
+}
+#endif
 
 void certCannonAimedRelay()
 {
@@ -1775,12 +2145,6 @@ void logNativeBacktrace(const char *tag)
 	}
 }
 
-struct CancelInvokeOutcome
-{
-	DWORD exceptionCode;
-	bool trapped;
-};
-
 CancelInvokeOutcome invokeCancelCurrentActionSeh(BattlescapeGame *bg)
 {
 	CancelInvokeOutcome outcome = {0, false};
@@ -2110,6 +2474,17 @@ int main(int argc, char **argv)
 	certWeaponLayoutAndLookup();
 	certCannonSnapRelay();
 	certCannonAimedRelay();
+	certRocketNativeStackDrains();
+	certRocketSnapRelayTerminal();
+	certRocketAimedRelayTerminal();
+	certRocketTurretRotation();
+	certRocketRejectEmptyAmmo();
+	certRocketRejectInvalidTarget();
+	certRocketCancelBeforeProjectileLaunch();
+	certRocketInterruptMidFlight();
+#ifdef _WIN32
+	certRocketAuthorityLossCancel();
+#endif
 	certLaserSnapRelay();
 	certWeaponBattleItemIdZero();
 	certTurretRotationPreservesHullWhenPossible();

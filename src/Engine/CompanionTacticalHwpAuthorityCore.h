@@ -30,6 +30,9 @@ bool hwpTurnRelayExecutionSupported();
 /// False until HWP_FIRE relay certification (S5-1c).
 bool hwpFireRelayExecutionSupported();
 
+/// True when HWP_GUIDED_LAUNCH relay execution is enabled (S6-GUIDED).
+bool hwpGuidedLaunchRelayExecutionSupported();
+
 struct HwpRemoteAuthorityInput
 {
 	SavedGame *campaign;
@@ -94,6 +97,15 @@ struct HwpFireValidationInput
 };
 
 CompanionCommandCore::MoveValidationResult validateHwpFireExecutionPreflight(const HwpFireValidationInput &input);
+
+struct HwpGuidedLaunchValidationInput
+{
+	HwpRemoteAuthorityInput authority;
+	CompanionCommandCore::HwpGuidedLaunchValidationInput contract;
+};
+
+CompanionCommandCore::MoveValidationResult validateHwpGuidedLaunchExecutionPreflight(
+	const HwpGuidedLaunchValidationInput &input);
 
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId);
 

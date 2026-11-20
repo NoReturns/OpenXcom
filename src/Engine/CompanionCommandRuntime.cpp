@@ -22,6 +22,7 @@
 #include "../Savegame/Tile.h"
 #include <vector>
 #include <algorithm>
+#include "../Mod/Mod.h"
 #include "../Mod/RuleItem.h"
 #include "../Mod/RuleInventory.h"
 #include "../Savegame/Soldier.h"
@@ -34,6 +35,7 @@
 #include "CompanionTacticalHwpMoveExecutionCore.h"
 #include "CompanionHwpTurnExecutionCore.h"
 #include "CompanionHwpFireExecutionCore.h"
+#include "CompanionHwpGuidedLaunchExecutionCore.h"
 #include "Logger.h"
 #include <map>
 #include "CrossPlatform.h"
@@ -65,6 +67,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 			KIND_MOVE,
 			KIND_HWP_MOVE,
 			KIND_HWP_FIRE,
+			KIND_HWP_GUIDED_LAUNCH,
 			KIND_SNAP_SHOT,
 			KIND_AUTO_SHOT,
 			KIND_AIMED_SHOT,
@@ -83,8 +86,12 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	CompanionCommandCore::GuidedLaunchCommandParsed guidedLaunchParsed;
 	CompanionCommandCore::MeleeAttackCommandParsed meleeParsed;
 	CompanionCommandCore::HwpFireCommandParsed hwpFireParsed;
+	CompanionCommandCore::HwpGuidedLaunchCommandParsed hwpGuidedLaunchParsed;
 	int hwpFireAmmoAtAcceptance;
+	int hwpGuidedLaunchAmmoAtAcceptance;
 	BattleItem *hwpFireWeaponAtAcceptance;
+	BattleItem *hwpGuidedLaunchWeaponAtAcceptance;
+	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput hwpGuidedLaunchAuthority;
 	bool meleeAttackResolved;
 	bool meleeHit;
 	bool targetIncapacitated;
@@ -114,6 +121,7 @@ static bool shouldDelayInFlightTerminalCompletion(
 	SavedBattleGame *battle,
 	CompanionCommandCore::CommandLifecycleStatus terminal);
 std::string g_lastSnapshotSha256;
+Mod *g_rulesReferenceExportMod = 0;
 
 namespace
 {
@@ -129,6 +137,11 @@ struct CommandTickDepthGuard
 static bool isHwpFireKind(ActiveCommand::Kind kind)
 {
 	return kind == ActiveCommand::KIND_HWP_FIRE;
+}
+
+static bool isHwpGuidedLaunchKind(ActiveCommand::Kind kind)
+{
+	return kind == ActiveCommand::KIND_HWP_GUIDED_LAUNCH;
 }
 
 static bool isDirectedFireKind(ActiveCommand::Kind kind)
@@ -956,6 +969,96 @@ void rejectHwpFireCommand(
 		publicReason.empty() ? reasonCode : publicReason, startPos, actor, weapon, -1, tuAtAcceptance,
 		false, std::string(), inboxSha256);
 	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, tuFields);
+	writeResultFile(resultPath, json);
+}
+
+static CompanionCommandCore::GuidedLaunchCommandParsed guidedLaunchViewFromHwp(
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed &hwp)
+{
+	CompanionCommandCore::GuidedLaunchCommandParsed view = {};
+	view.commandId = hwp.commandId;
+	view.commandType = hwp.commandType.empty() ? "HWP_GUIDED_LAUNCH" : hwp.commandType;
+	view.actorUnitId = hwp.actorUnitId;
+	view.waypoints = hwp.waypoints;
+	view.activeHand = "STR_RIGHT_HAND";
+	view.sessionId = hwp.sessionId;
+	view.turn = hwp.turn;
+	view.snapshotSha256 = hwp.snapshotSha256;
+	view.stateVersion = hwp.stateVersion;
+	return view;
+}
+
+std::string buildHwpGuidedLaunchResultJson(
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	const Position &startPos,
+	BattleUnit *actor,
+	BattleItem *weapon,
+	int ammoAtAcceptance,
+	int tuAtAcceptance,
+	bool projectileLaunched,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256)
+{
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
+	     << "  \"command_type\": \"HWP_GUIDED_LAUNCH\",\n"
+	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
+	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
+	     << "  \"turn\": " << cmd.turn << ",\n"
+	     << "  \"actor_unit_id\": " << cmd.actorUnitId << ",\n"
+	     << "  \"waypoint_count\": " << cmd.waypoints.size() << ",\n";
+	if (!publicReason.empty())
+	{
+		json << "  \"public_reason\": \"" << publicReason << "\",\n";
+	}
+	json << "  \"weapon_battle_item_id\": " << cmd.weaponBattleItemId << ",\n";
+	if (status == CompanionCommandCore::CMD_EXECUTING ||
+	    status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		appendHwpFireObservedFields(json, startPos, actor, weapon, ammoAtAcceptance, tuAtAcceptance,
+			status != CompanionCommandCore::CMD_EXECUTING, projectileLaunched);
+	}
+	if (!snapshotSha256.empty())
+	{
+		json << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n";
+	}
+	if (!inboxSha256.empty())
+	{
+		json << "  \"inbox_sha256\": \"" << inboxSha256 << "\",\n";
+	}
+	json << "  \"completed_at\": \"engine-local\"\n"
+	     << "}\n";
+	return json.str();
+}
+
+void rejectHwpGuidedLaunchCommand(
+	const std::string &resultPath,
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed &parsed,
+	const std::string &reasonCode,
+	const std::string &publicReason,
+	const std::string &inboxSha256,
+	const Position &startPos,
+	BattleUnit *actor,
+	BattleItem *weapon,
+	int tuAtAcceptance)
+{
+	CompanionCommandCore::HwpGuidedLaunchCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "HWP_GUIDED_LAUNCH";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+	}
+	const std::string json = buildHwpGuidedLaunchResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, startPos, actor, weapon, -1, tuAtAcceptance,
+		false, std::string(), inboxSha256);
 	writeResultFile(resultPath, json);
 }
 
@@ -2089,7 +2192,8 @@ static bool rejectUnreadableCommandJournal(
 	const CompanionCommandCore::MeleeAttackCommandParsed *meleeRejectTemplate = 0,
 	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0,
 	const CompanionCommandCore::HwpTurnCommandParsed *hwpTurnRejectTemplate = 0,
-	const CompanionCommandCore::HwpFireCommandParsed *hwpFireRejectTemplate = 0)
+	const CompanionCommandCore::HwpFireCommandParsed *hwpFireRejectTemplate = 0,
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed *hwpGuidedLaunchRejectTemplate = 0)
 {
 	if (CompanionCommandJournalCore::classifyExistingJournalJson(journalJson) !=
 		CompanionCommandJournalCore::JOURNAL_UNREADABLE)
@@ -2181,6 +2285,11 @@ static bool rejectUnreadableCommandJournal(
 		rejectHwpFireCommand(resultPath, *hwpFireRejectTemplate, "JOURNAL_MALFORMED",
 			"Tactical command journal is unreadable.", inboxDigest, Position(0, 0, 0), 0, 0, -1);
 	}
+	else if (hwpGuidedLaunchRejectTemplate != 0)
+	{
+		rejectHwpGuidedLaunchCommand(resultPath, *hwpGuidedLaunchRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest, Position(0, 0, 0), 0, 0, -1);
+	}
 	else if (moveRejectTemplate != 0)
 	{
 		rejectCommand(resultPath, *moveRejectTemplate, "JOURNAL_MALFORMED",
@@ -2213,7 +2322,8 @@ bool applyDuplicateInboxDecision(
 	const CompanionCommandCore::MeleeAttackCommandParsed *meleeRejectTemplate = 0,
 	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0,
 	const CompanionCommandCore::HwpTurnCommandParsed *hwpTurnRejectTemplate = 0,
-	const CompanionCommandCore::HwpFireCommandParsed *hwpFireRejectTemplate = 0)
+	const CompanionCommandCore::HwpFireCommandParsed *hwpFireRejectTemplate = 0,
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed *hwpGuidedLaunchRejectTemplate = 0)
 {
 	switch (duplicateDecision)
 	{
@@ -2322,6 +2432,11 @@ bool applyDuplicateInboxDecision(
 			rejectHwpFireCommand(resultPath, *hwpFireRejectTemplate, "DUPLICATE_COMMAND_ID",
 				"Command ID already used.", inboxDigest, Position(0, 0, 0), 0, 0, -1);
 		}
+		else if (hwpGuidedLaunchRejectTemplate != 0)
+		{
+			rejectHwpGuidedLaunchCommand(resultPath, *hwpGuidedLaunchRejectTemplate, "DUPLICATE_COMMAND_ID",
+				"Command ID already used.", inboxDigest, Position(0, 0, 0), 0, 0, -1);
+		}
 		else if (moveRejectTemplate != 0)
 		{
 			rejectCommand(resultPath, *moveRejectTemplate, "DUPLICATE_COMMAND_ID", "Command ID already used.", inboxDigest);
@@ -2428,6 +2543,52 @@ static void fillHwpRemoteAuthorityInput(
 	bool controlReadOk,
 	const std::string &sessionId,
 	const CompanionCommandCore::HwpFireCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	if (out == 0)
+	{
+		return;
+	}
+	*out = {};
+	out->campaign = campaign;
+	out->battle = battle;
+	out->actorUnitId = parsed.actorUnitId;
+	out->controlFileJson = controlJson;
+	out->controlFileReadOk = controlReadOk;
+	out->battleSessionId = sessionId;
+	out->relayCampaignId = campaign != 0 ? campaign->getCompanionCampaignId() : std::string();
+	out->relayTacticalBattleId = battle != 0 ? battle->getCompanionTacticalBattleId() : std::string();
+	out->commandSnapshotSha256 = parsed.snapshotSha256;
+	out->lastSnapshotSha256 = g_lastSnapshotSha256;
+	out->commandSessionId = parsed.sessionId;
+	out->commandTurn = parsed.turn;
+	out->turn = battle != 0 ? battle->getTurn() : 0;
+	out->commandStateVersion = parsed.stateVersion;
+	out->lastExportedStateVersion = g_lastExportedStateVersion;
+	out->battleInitialized = battleInitialized;
+	out->playerTurn = battle != 0 && battle->getSide() == FACTION_PLAYER;
+	out->battleBusy = game != 0 && game->isBusy();
+	out->unitsFalling = battle != 0 && battle->getUnitsFalling();
+	out->requireBindingFreshness = true;
+	out->actorNativeActionInProgress = false;
+	if (actor != 0 && game != 0)
+	{
+		const int status = actor->getStatus();
+		out->actorNativeActionInProgress = game->isBusy() &&
+			(status == STATUS_WALKING || status == STATUS_TURNING);
+	}
+}
+
+static void fillHwpRemoteAuthorityInput(
+	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed &parsed,
 	BattleUnit *actor)
 {
 	if (out == 0)
@@ -4083,7 +4244,7 @@ std::string snapshotSha256ForTerminalCommandResult(
 	if (battle != 0 &&
 	    CompanionCommandRuntimeSupport::shouldExportSnapshotBeforeTerminalCommandResult(terminalStatus))
 	{
-		CompanionSnapshot::tryExport(battle, &snapshotSha256);
+		CompanionSnapshot::tryExport(battle, &snapshotSha256, g_rulesReferenceExportMod);
 	}
 	return snapshotSha256;
 }
@@ -4234,6 +4395,8 @@ static std::string activeInFlightCommandSessionId()
 		return g_active.snapParsed.sessionId;
 	case ActiveCommand::KIND_HWP_FIRE:
 		return g_active.hwpFireParsed.sessionId;
+	case ActiveCommand::KIND_HWP_GUIDED_LAUNCH:
+		return g_active.hwpGuidedLaunchParsed.sessionId;
 	case ActiveCommand::KIND_THROW:
 		return g_active.throwParsed.sessionId;
 	case ActiveCommand::KIND_GUIDED_LAUNCH:
@@ -4664,6 +4827,8 @@ int getInFlightActorUnitId()
 		return g_active.snapParsed.actorUnitId;
 	case ActiveCommand::KIND_HWP_FIRE:
 		return g_active.hwpFireParsed.actorUnitId;
+	case ActiveCommand::KIND_HWP_GUIDED_LAUNCH:
+		return g_active.hwpGuidedLaunchParsed.actorUnitId;
 	case ActiveCommand::KIND_THROW:
 		return g_active.throwParsed.actorUnitId;
 	case ActiveCommand::KIND_GUIDED_LAUNCH:
@@ -4697,13 +4862,24 @@ void notifySnapShotProjectileLaunched(int actorUnitId)
 
 void notifyThrowProjectileLaunched(int actorUnitId)
 {
-	if (!g_active.inFlight || !isThrowOrGuidedLaunchKind(g_active.kind))
+	if (!g_active.inFlight)
+	{
+		return;
+	}
+	if (!isThrowOrGuidedLaunchKind(g_active.kind) && !isHwpGuidedLaunchKind(g_active.kind))
 	{
 		return;
 	}
 	if (isThrowKind(g_active.kind))
 	{
 		if (actorUnitId != g_active.throwParsed.actorUnitId)
+		{
+			return;
+		}
+	}
+	else if (isHwpGuidedLaunchKind(g_active.kind))
+	{
+		if (actorUnitId != g_active.hwpGuidedLaunchParsed.actorUnitId)
 		{
 			return;
 		}
@@ -5047,6 +5223,7 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	{
 		return;
 	}
+	g_rulesReferenceExportMod = game->getMod();
 	const std::string dir = snapshotDirectory();
 	if (dir.empty())
 	{
@@ -5412,6 +5589,74 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			return;
 		}
 
+		if (isHwpGuidedLaunchKind(g_active.kind))
+		{
+			BattleUnit *unit = findUnitById(battle, g_active.hwpGuidedLaunchParsed.actorUnitId);
+			const bool aiCommandPermitted =
+				CompanionTacticalHwpAuthorityCore::evaluateHwpRemoteCommandAuthority(
+					g_active.hwpGuidedLaunchAuthority).accepted;
+			if (unit != 0 && !aiCommandPermitted)
+			{
+				game->cancelCurrentAction();
+			}
+			CompanionCommandCore::SnapShotCompletionInput done = {};
+			done.battleBusy = game->isBusy();
+			done.actorAlive = unit != 0 && !unit->isOut();
+			done.actorStillAiControlled = aiCommandPermitted;
+			done.projectileLaunched = g_active.snapProjectileLaunched;
+			done.actionResult = g_active.snapActionResult;
+
+			const CompanionCommandCore::CommandLifecycleStatus terminal =
+				CompanionCommandCore::evaluateGuidedLaunchTerminalStatus(done);
+			if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
+			{
+				return;
+			}
+
+			std::string publicReason;
+			if (terminal == CompanionCommandCore::CMD_INTERRUPTED)
+			{
+				publicReason = "HWP guided launch interrupted or incomplete.";
+			}
+			else if (terminal == CompanionCommandCore::CMD_FAILED)
+			{
+				publicReason = !done.actionResult.empty()
+					? done.actionResult
+					: "HWP guided launch did not resolve.";
+			}
+
+			const std::string resultSnapshotSha256 =
+				snapshotSha256ForTerminalCommandResult(battle, terminal);
+			BattleItem *weapon = g_active.hwpGuidedLaunchWeaponAtAcceptance;
+			if (weapon == 0 && unit != 0)
+			{
+				weapon = CompanionHwpFireExecutionCore::findBattleItemOnActorById(
+					unit, g_active.hwpGuidedLaunchParsed.weaponBattleItemId);
+			}
+			const std::string json = buildHwpGuidedLaunchResultJson(
+				g_active.hwpGuidedLaunchParsed,
+				terminal,
+				publicReason,
+				g_active.startPos,
+				unit,
+				weapon,
+				g_active.hwpGuidedLaunchAmmoAtAcceptance,
+				g_active.tuAtAcceptance,
+				g_active.snapProjectileLaunched,
+				resultSnapshotSha256,
+				g_active.inboxDigest);
+			writeResultFile(resultPath, json);
+			logTerminalOnce(g_active.commandId, terminal);
+			if (terminal == CompanionCommandCore::CMD_COMPLETED)
+			{
+				CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+			}
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			clearRosterCasualtyDeferClock();
+			return;
+		}
+
 		if (g_active.kind == ActiveCommand::KIND_HWP_MOVE)
 		{
 			BattleUnit *unit = findUnitById(battle, g_active.moveParsed.actorUnitId);
@@ -5578,7 +5823,8 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "HEAL" && inboxCommandType != "STIMULANT" && inboxCommandType != "PAINKILLER" &&
 	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL" &&
 	    inboxCommandType != "MELEE_ATTACK" && inboxCommandType != "TURN_FACE" &&
-	    inboxCommandType != "HWP_MOVE" && inboxCommandType != "HWP_TURN" && inboxCommandType != "HWP_FIRE")
+	    inboxCommandType != "HWP_MOVE" && inboxCommandType != "HWP_TURN" && inboxCommandType != "HWP_FIRE" &&
+	    inboxCommandType != "HWP_GUIDED_LAUNCH")
 	{
 		std::string inboxDigest;
 		CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
@@ -8230,6 +8476,186 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		executingJson = applyResultJsonExtensions(executingJson, CompanionCommandCore::CMD_EXECUTING, std::string(), &acceptTu);
 		writeResultFile(resultPath, executingJson);
 		appendJournalEntry(journalPath, hwpFireParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "HWP_GUIDED_LAUNCH")
+	{
+		if (!CompanionTacticalHwpAuthorityCore::hwpGuidedLaunchRelayExecutionSupported())
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			CompanionCommandCore::HwpGuidedLaunchCommandParsed unsupported = {};
+			unsupported.rejectCode = "HWP_EXECUTION_NOT_SUPPORTED";
+			unsupported.commandType = "HWP_GUIDED_LAUNCH";
+			CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &unsupported.commandId);
+			rejectHwpGuidedLaunchCommand(resultPath, unsupported, "HWP_EXECUTION_NOT_SUPPORTED",
+				"HWP_GUIDED_LAUNCH relay execution is not enabled.", inboxDigest, Position(0, 0, 0), 0, 0, -1);
+			logRejectOnce(unsupported.commandId.empty() ? "unknown" : unsupported.commandId,
+				"HWP_EXECUTION_NOT_SUPPORTED");
+			return;
+		}
+
+		CompanionCommandCore::HwpGuidedLaunchCommandParsed hwpGuidedParsed = {};
+		if (!CompanionCommandCore::parseHwpGuidedLaunchCommandJson(commandJson, &hwpGuidedParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectHwpGuidedLaunchCommand(resultPath, hwpGuidedParsed, hwpGuidedParsed.rejectCode, hwpGuidedParsed.rejectCode,
+				inboxDigest, Position(0, 0, 0), 0, 0, -1);
+			logRejectOnce(hwpGuidedParsed.commandId.empty() ? "unknown" : hwpGuidedParsed.commandId,
+				hwpGuidedParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(hwpGuidedParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &hwpGuidedParsed))
+		{
+			logRejectOnce(hwpGuidedParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, hwpGuidedParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, hwpGuidedParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+				duplicateDecision, hwpGuidedParsed.commandId, inboxDigest, resultPath, conflictPath,
+				existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &hwpGuidedParsed))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != hwpGuidedParsed.commandId)
+		{
+			rejectHwpGuidedLaunchCommand(resultPath, hwpGuidedParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest, Position(0, 0, 0), 0, 0, -1);
+			appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
+			logRejectOnce(hwpGuidedParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, hwpGuidedParsed.actorUnitId);
+		const Position actorPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+
+		CompanionTacticalHwpAuthorityCore::HwpGuidedLaunchValidationInput guidedInput = {};
+		fillHwpRemoteAuthorityInput(
+			&guidedInput.authority,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			controlJson,
+			controlReadOk,
+			sessionId,
+			hwpGuidedParsed,
+			actor);
+		const CompanionCommandCore::MoveValidationResult contractVerdict =
+			CompanionHwpGuidedLaunchExecutionCore::buildHwpGuidedLaunchContractValidation(
+				game, actor, hwpGuidedParsed.waypoints, hwpGuidedParsed.weaponBattleItemId);
+		const CompanionCommandCore::MoveValidationResult authorityVerdict =
+			CompanionTacticalHwpAuthorityCore::evaluateHwpRemoteCommandAuthority(guidedInput.authority);
+		if (!contractVerdict.accepted)
+		{
+			rejectHwpGuidedLaunchCommand(resultPath, hwpGuidedParsed, contractVerdict.rejectCode,
+				contractVerdict.publicReason, inboxDigest, actorPos, actor,
+				CompanionHwpFireExecutionCore::findBattleItemOnActorById(
+					actor, hwpGuidedParsed.weaponBattleItemId),
+				actor != 0 ? actor->getTimeUnits() : -1);
+			appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
+			logRejectOnce(hwpGuidedParsed.commandId, contractVerdict.rejectCode);
+			return;
+		}
+		if (!authorityVerdict.accepted)
+		{
+			rejectHwpGuidedLaunchCommand(resultPath, hwpGuidedParsed, authorityVerdict.rejectCode,
+				authorityVerdict.publicReason, inboxDigest, actorPos, actor,
+				CompanionHwpFireExecutionCore::findBattleItemOnActorById(
+					actor, hwpGuidedParsed.weaponBattleItemId),
+				actor != 0 ? actor->getTimeUnits() : -1);
+			appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
+			logRejectOnce(hwpGuidedParsed.commandId, authorityVerdict.rejectCode);
+			return;
+		}
+
+		std::string preflightReject;
+		if (!CompanionHwpGuidedLaunchExecutionCore::preflightHwpGuidedLaunch(
+				game, actor, hwpGuidedParsed.waypoints, hwpGuidedParsed.weaponBattleItemId, &preflightReject))
+		{
+			rejectHwpGuidedLaunchCommand(resultPath, hwpGuidedParsed, "HWP_GUIDED_LAUNCH_PREFLIGHT_FAILED",
+				preflightReject, inboxDigest, actorPos, actor,
+				CompanionHwpFireExecutionCore::findBattleItemOnActorById(
+					actor, hwpGuidedParsed.weaponBattleItemId),
+				actor != 0 ? actor->getTimeUnits() : -1);
+			appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
+			logRejectOnce(hwpGuidedParsed.commandId, "HWP_GUIDED_LAUNCH_PREFLIGHT_FAILED");
+			return;
+		}
+
+		BattleItem *weapon = CompanionHwpFireExecutionCore::findBattleItemOnActorById(
+			actor, hwpGuidedParsed.weaponBattleItemId);
+		const int launchTu = actor != 0 && weapon != 0 ? actor->getActionTUs(BA_LAUNCH, weapon) : -1;
+		const int ammoAtAcceptance = weapon != 0 && weapon->needsAmmo() && weapon->getAmmoItem() != 0
+			? weapon->getAmmoItem()->getAmmoQuantity() : -1;
+
+		beginInFlightCommand();
+		g_active.kind = ActiveCommand::KIND_HWP_GUIDED_LAUNCH;
+		g_active.commandId = hwpGuidedParsed.commandId;
+		g_active.inboxDigest = inboxDigest;
+		g_active.hwpGuidedLaunchParsed = hwpGuidedParsed;
+		g_active.hwpGuidedLaunchAuthority = guidedInput.authority;
+		g_active.hwpGuidedLaunchWeaponAtAcceptance = weapon;
+		g_active.hwpGuidedLaunchAmmoAtAcceptance = ammoAtAcceptance;
+		g_active.startPos = actorPos;
+		g_active.snapProjectileLaunched = false;
+		g_active.snapActionResult.clear();
+		g_active.tuAtAcceptance = actor != 0 ? actor->getTimeUnits() : -1;
+		g_active.directedFireTuCost = launchTu;
+
+		CompanionHwpGuidedLaunchExecutionCore::HwpGuidedLaunchStartOutcome startOutcome = {};
+		std::string startReject;
+		if (!CompanionHwpGuidedLaunchExecutionCore::tryStartHwpGuidedLaunch(
+				game, actor, hwpGuidedParsed.waypoints, hwpGuidedParsed.weaponBattleItemId,
+				&startReject, &startOutcome))
+		{
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			rejectHwpGuidedLaunchCommand(resultPath, hwpGuidedParsed, "HWP_GUIDED_LAUNCH_START_FAILED",
+				startReject, inboxDigest, actorPos, actor, weapon, g_active.tuAtAcceptance);
+			appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
+			logRejectOnce(hwpGuidedParsed.commandId, "HWP_GUIDED_LAUNCH_START_FAILED");
+			return;
+		}
+
+		beginInFlightCommand();
+		g_active.kind = ActiveCommand::KIND_HWP_GUIDED_LAUNCH;
+
+		const std::string executingJson = buildHwpGuidedLaunchResultJson(
+			hwpGuidedParsed,
+			CompanionCommandCore::CMD_EXECUTING,
+			std::string(),
+			g_active.startPos,
+			actor,
+			weapon,
+			ammoAtAcceptance,
+			g_active.tuAtAcceptance,
+			false,
+			g_lastSnapshotSha256,
+			inboxDigest);
+		writeResultFile(resultPath, executingJson);
+		appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
 		return;
 	}
 

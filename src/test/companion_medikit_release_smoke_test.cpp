@@ -28,6 +28,7 @@
 #include "../Savegame/Soldier.h"
 #include "../Savegame/Tile.h"
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -202,6 +203,127 @@ static void wireReleaseSmokeOpenFloor(Mod *mod, SavedBattleGame *battle, int x0,
 	}
 }
 
+static bool mapDataHasRenderableSurfaces(MapData *md)
+{
+	return md != 0 && md->getDataset() != 0 && md->getDataset()->getSurfaceset() != 0;
+}
+
+static MapDataSet *loadModMapDataSet(Mod *mod, const char *name)
+{
+	if (mod == 0 || name == 0)
+	{
+		return 0;
+	}
+	MapDataSet *set = mod->getMapDataSet(name);
+	if (set == 0)
+	{
+		return 0;
+	}
+	if (set->getSurfaceset() == 0)
+	{
+		set->loadData(mod->getMCDPatch(set->getName()));
+	}
+	return set->getSurfaceset() != 0 ? set : 0;
+}
+
+/** HWP relay harness parity — mod-backed floor tile with loaded MCD/SurfaceSet. */
+static MapData *renderableRulesetFloorTile(Mod *mod)
+{
+	if (mod != 0)
+	{
+		const char *setNames[] = { "URBAN", "UFO1", "PLAINS", "JUNGLE", "BLANKS" };
+		for (size_t s = 0; s < sizeof(setNames) / sizeof(setNames[0]); ++s)
+		{
+			MapDataSet *set = loadModMapDataSet(mod, setNames[s]);
+			if (set == 0)
+			{
+				continue;
+			}
+			for (size_t i = 0; i < set->getSize(); ++i)
+			{
+				MapData *md = set->getObject(i);
+				if (md != 0 && md->getObjectType() == O_FLOOR && mapDataHasRenderableSurfaces(md))
+				{
+					return md;
+				}
+			}
+		}
+	}
+	MapData *scorched = MapDataSet::getScorchedEarthTile();
+	if (mapDataHasRenderableSurfaces(scorched))
+	{
+		return scorched;
+	}
+	if (mod != 0 && loadModMapDataSet(mod, "BLANKS") != 0)
+	{
+		MapData *blank = MapDataSet::getBlankFloorTile();
+		if (mapDataHasRenderableSurfaces(blank))
+		{
+			return blank;
+		}
+	}
+	return 0;
+}
+
+/** ASTER-M1-MEDIKIT-ADJ-02 — single ruleset-backed floor fixture (no synthetic MapData). */
+static void wireRulesetBackedFloor(Mod *mod, SavedBattleGame *battle, int x0, int y0, int x1, int y1, int z)
+{
+	MapData *floor = renderableRulesetFloorTile(mod);
+	expect(floor != 0 && mapDataHasRenderableSurfaces(floor), "ADJ-02 ruleset-backed floor tile available");
+	if (floor == 0)
+	{
+		return;
+	}
+	MapDataSet *ds = floor->getDataset();
+	std::vector<MapDataSet *> *sets = battle->getMapDataSets();
+	if (ds != 0 && sets != 0)
+	{
+		bool registered = false;
+		for (std::vector<MapDataSet *>::const_iterator i = sets->begin(); i != sets->end(); ++i)
+		{
+			if (*i == ds)
+			{
+				registered = true;
+				break;
+			}
+		}
+		if (!registered)
+		{
+			sets->push_back(ds);
+		}
+	}
+	int mdsId = 0;
+	if (ds != 0 && sets != 0)
+	{
+		for (size_t i = 0; i < sets->size(); ++i)
+		{
+			if ((*sets)[i] == ds)
+			{
+				mdsId = static_cast<int>(i);
+				break;
+			}
+		}
+	}
+	for (int y = y0; y <= y1; ++y)
+	{
+		for (int x = x0; x <= x1; ++x)
+		{
+			Tile *tile = battle->getTile(Position(x, y, z));
+			if (tile == 0)
+			{
+				continue;
+			}
+			tile->setDiscovered(true, 2);
+			tile->setMapData(floor, 1, mdsId, O_FLOOR);
+		}
+	}
+	battle->initUtilities(mod);
+	if (battle->getTileEngine() != 0)
+	{
+		battle->getTileEngine()->recalculateFOV();
+	}
+}
+
 /** Informational — homogenous DESERT grids are not used as the release smoke fixture. */
 static void logDesertHomogeneousGridAdjacentNote()
 {
@@ -246,6 +368,15 @@ static void configureUnconsciousPatient(BattleUnit *patient)
 {
 	YAML::Node node = YAML::Load(
 		"status: 7\nhealth: 20\ntu: 0\nenergy: 50\nmorale: 100\nstunlevel: 80\n"
+		"armor: [0,0,0,0,0]\n"
+		"fatalWounds: [0,1,0,0,0,0]\n");
+	patient->load(node);
+}
+
+static void configureConsciousPatientFatalTorso(BattleUnit *patient)
+{
+	YAML::Node node = YAML::Load(
+		"health: 45\ntu: 40\nenergy: 50\nmorale: 100\nstunlevel: 0\n"
 		"armor: [0,0,0,0,0]\n"
 		"fatalWounds: [0,1,0,0,0,0]\n");
 	patient->load(node);
@@ -378,6 +509,33 @@ struct ProductionSmokeHarness
 			return false;
 		}
 		publishInbox(medikitCommandJson(commandId, type, targetId, bodyPart));
+		return true;
+	}
+
+	std::string turnFaceCommandJson(const std::string &commandId, int tx, int ty, int tz) const
+	{
+		std::ostringstream json;
+		json << "{\n"
+		     << "  \"schema_version\": 1,\n"
+		     << "  \"command_id\": \"" << commandId << "\",\n"
+		     << "  \"command_type\": \"TURN_FACE\",\n"
+		     << "  \"actor_unit_id\": 1,\n"
+		     << "  \"target\": {\"x\": " << tx << ", \"y\": " << ty << ", \"z\": " << tz << "},\n"
+		     << "  \"snapshot_sha256\": \"" << bindingSha256 << "\",\n"
+		     << "  \"session_id\": \"" << sessionId << "\",\n"
+		     << "  \"turn\": 1,\n"
+		     << "  \"state_version\": " << bindingStateVersion << "\n"
+		     << "}\n";
+		return json.str();
+	}
+
+	bool publishTurnFace(const std::string &commandId, int tx, int ty, int tz)
+	{
+		if (!exportSnapshotBinding())
+		{
+			return false;
+		}
+		publishInbox(turnFaceCommandJson(commandId, tx, ty, tz));
 		return true;
 	}
 
@@ -519,6 +677,83 @@ static void runProductionCoTileHealSmoke(ProductionSmokeHarness *h)
 		"tu_spent in terminal json");
 }
 
+/**
+ * ASTER-M1-MEDIKIT-ADJ-02 — adjacent conscious heal on ruleset-backed floor; relay TURN_FACE → HEAL.
+ * STOP on native resolve abort; no production targeting changes.
+ */
+static void runMedikitAdj02AdjacentConsciousCert(ProductionSmokeHarness *h, Mod *mod)
+{
+	h->resetRelayArtifacts();
+	configureConsciousPatientFatalTorso(h->patient);
+	wireRulesetBackedFloor(mod, h->battle, 0, 5, 0, 5, kSmokeFloorZ);
+	const Position medicPos(kSmokeMedicX, kSmokeMedicY, kSmokeFloorZ);
+	const Position patientPos(kSmokePatientX, kSmokePatientY, kSmokeFloorZ);
+	h->medic->setDirection(0);
+	wireUnitOnTile(h->battle, h->medic, medicPos);
+	wireUnitOnTile(h->battle, h->patient, patientPos);
+	if (h->medikit == 0)
+	{
+		h->medikit = equipProductionMedikit(mod, h->battle, h->medic);
+		if (h->medikit != 0)
+		{
+			h->medikitBattleItemId = h->medikit->getId();
+		}
+	}
+
+	expect(h->patient->getStatus() != STATUS_UNCONSCIOUS, "ADJ-02 patient conscious");
+	expect(h->patient->getFatalWound(1) > 0, "ADJ-02 patient has torso fatal wound");
+	expect(h->medic->getDirection() != h->medic->directionTo(patientPos),
+		"ADJ-02 medic initially faces away");
+
+	expect(h->publishTurnFace("wp9-adj02-turn", patientPos.x, patientPos.y, patientPos.z),
+		"ADJ-02 TURN_FACE snapshot export");
+	h->tickRelay();
+	if (!h->resultStatusIs("COMPLETED"))
+	{
+		std::string reason;
+		CompanionJsonLite::extractJsonStringField(h->resultJson(), "public_reason", &reason);
+		std::cerr << "ADJ-02 STOP: TURN_FACE not COMPLETED"
+		          << (reason.empty() ? "" : " — ") << reason << std::endl;
+		return;
+	}
+	expect(h->medic->getDirection() == h->medic->directionTo(patientPos), "ADJ-02 medic faces patient");
+
+	BattleUnit *nativeTarget = CompanionMedikitExecutionCore::resolveNativeMedikitTarget(h->battle, h->medic);
+	if (nativeTarget == 0 || nativeTarget->getId() != 2)
+	{
+		std::cerr << "ADJ-02 STOP: native medikit target "
+		          << (nativeTarget == 0 ? "null" : std::to_string(nativeTarget->getId()))
+		          << " expected id 2 after TURN_FACE" << std::endl;
+		++g_failures;
+		return;
+	}
+
+	const int chargesBefore = h->medikit->getHealQuantity();
+	const int tuBeforeHeal = h->medic->getTimeUnits();
+	expect(h->publishMedikit("wp9-adj02-heal", "HEAL", 2, 1), "ADJ-02 HEAL snapshot export");
+	h->tickRelay();
+
+	if (!h->resultStatusIs("COMPLETED"))
+	{
+		std::string reason;
+		CompanionJsonLite::extractJsonStringField(h->resultJson(), "public_reason", &reason);
+		std::cerr << "ADJ-02 STOP: HEAL not COMPLETED"
+		          << (reason.empty() ? "" : " — ") << reason << std::endl;
+		++g_failures;
+		return;
+	}
+	expect(h->journalJson().find("wp9-adj02-heal") != std::string::npos, "ADJ-02 journal lists heal command");
+	int targetId = 0;
+	expect(CompanionJsonLite::extractJsonIntField(h->resultJson(), "target_unit_id", &targetId) && targetId == 2,
+		"ADJ-02 terminal target_unit_id 2");
+	expect(h->patient->getFatalWound(1) == 0, "ADJ-02 wound healed");
+	expect(h->medikit->getHealQuantity() == chargesBefore - 1, "ADJ-02 charge consumed");
+	expect(h->medic->getTimeUnits() == tuBeforeHeal - 10, "ADJ-02 medic TU spent");
+	int tuSpent = -1;
+	expect(CompanionJsonLite::extractJsonIntField(h->resultJson(), "tu_spent", &tuSpent) && tuSpent == 10,
+		"ADJ-02 tu_spent in terminal json");
+}
+
 static void runAdjacentMisAimSmoke(ProductionSmokeHarness *h)
 {
 	h->resetRelayArtifacts();
@@ -537,6 +772,12 @@ static void runAdjacentMisAimSmoke(ProductionSmokeHarness *h)
 	expect(h->medic->getTimeUnits() == tuBefore, "mis-aim leaves TU");
 }
 
+static bool medikitAdj02CertEnabled()
+{
+	const char *v = std::getenv("OPENXCOM_MEDIKIT_ADJ02_CERT");
+	return v != 0 && v[0] == '1';
+}
+
 static int runSmokeBody(int argc, char **argv)
 {
 	const std::string dataDir = argc > 1 ? argv[1] : defaultDataDir(argv[0]);
@@ -546,6 +787,19 @@ static int runSmokeBody(int argc, char **argv)
 	{
 		return 2;
 	}
+	if (medikitAdj02CertEnabled())
+	{
+		Mod *mod = harness.game.get()->getMod();
+		std::cerr << "wp9 release smoke: OPENXCOM_MEDIKIT_ADJ02_CERT=1 — running ADJ-02 experimental cert" << std::endl;
+		runMedikitAdj02AdjacentConsciousCert(&harness, mod);
+		if (g_failures != 0)
+		{
+			std::cerr << "ASTER-M1-MEDIKIT-ADJ-02: FAIL" << std::endl;
+			return 1;
+		}
+		std::cout << "ASTER-M1-MEDIKIT-ADJ-02: PASS (adjacent conscious relay heal on ruleset floor)" << std::endl;
+	}
+
 	runProductionCoTileHealSmoke(&harness);
 	runAdjacentMisAimSmoke(&harness);
 

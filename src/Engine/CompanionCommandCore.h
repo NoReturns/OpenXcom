@@ -195,6 +195,38 @@ struct HwpFireValidationInput
 	bool visibleUnitTargetDefinitelyBlocked;
 };
 
+struct HwpGuidedLaunchCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	std::vector<Position> waypoints;
+	int weaponBattleItemId;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct HwpGuidedLaunchValidationInput
+{
+	int mapSizeX;
+	int mapSizeY;
+	int mapSizeZ;
+	std::vector<Position> waypoints;
+	bool actorIsRosterSoldier;
+	bool weaponResolved;
+	bool weaponBelongsToActor;
+	bool weaponSupportsGuidedLaunch;
+	bool weaponHasAmmo;
+	bool weaponUsable;
+	bool waypointOutOfBounds;
+	bool waypointCountExceedsLimit;
+	bool insufficientTuForLaunch;
+};
+
 struct StandValidationInput : TacticalCommandBindingValidationInput
 {
 	bool actorKneeling;
@@ -741,6 +773,7 @@ MoveValidationResult validateMeleeAttackCommand(const MeleeAttackValidationInput
 MoveValidationResult validateTurnFaceCommand(const TurnFaceValidationInput &input);
 MoveValidationResult validateHwpTurnContract(const HwpTurnValidationInput &input);
 MoveValidationResult validateHwpFireContract(const HwpFireValidationInput &input);
+MoveValidationResult validateHwpGuidedLaunchContract(const HwpGuidedLaunchValidationInput &input);
 CommandLifecycleStatus evaluateWalkTerminalStatus(const WalkCompletionInput &input);
 WalkStopDiagnostics resolveWalkStopDiagnostics(
 	CommandLifecycleStatus terminal,
@@ -767,6 +800,7 @@ bool parseStandCommandJson(const std::string &json, StandCommandParsed *out);
 bool parseTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *out);
 bool parseHwpTurnCommandJson(const std::string &json, HwpTurnCommandParsed *out);
 bool parseHwpFireCommandJson(const std::string &json, HwpFireCommandParsed *out);
+bool parseHwpGuidedLaunchCommandJson(const std::string &json, HwpGuidedLaunchCommandParsed *out);
 bool parseSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out);

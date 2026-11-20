@@ -1315,7 +1315,7 @@ void BattlescapeGame::popState()
 
 	if (_states.empty() && _save->getSide() == FACTION_PLAYER && !_save->getUnitsFalling() && !_save->getDebugMode())
 	{
-		CompanionSnapshot::tryExport(_save);
+		CompanionSnapshot::tryExport(_save, 0, getMod());
 	}
 }
 
@@ -2615,7 +2615,7 @@ void BattlescapeGame::requestCompanionBriefing(bool battleInitialized)
 	case CompanionBriefingTestSupport::BRIEFING_PRESS_FULFILL_NOW:
 		{
 			std::string briefingRequestId;
-			if (CompanionBriefingRequest::fulfill(_save, &briefingRequestId))
+			if (CompanionBriefingRequest::fulfill(_save, &briefingRequestId, getMod()))
 			{
 				_companionBriefingPending = false;
 				enqueueCompanionOnDemandTacticalSend(briefingRequestId);

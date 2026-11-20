@@ -776,6 +776,95 @@ bool parseHwpFireCommandJson(const std::string &json, HwpFireCommandParsed *out)
 	return true;
 }
 
+bool parseHwpGuidedLaunchCommandJson(const std::string &json, HwpGuidedLaunchCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	HwpGuidedLaunchCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "HWP_GUIDED_LAUNCH")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!extractWaypointsFromJson(json, &parsed.waypoints))
+	{
+		parsed.rejectCode = "INVALID_WAYPOINTS";
+		*out = parsed;
+		return false;
+	}
+	if (parsed.waypoints.empty())
+	{
+		parsed.rejectCode = "INVALID_WAYPOINTS";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "weapon_battle_item_id", &parsed.weaponBattleItemId) ||
+	    parsed.weaponBattleItemId < 0)
+	{
+		parsed.rejectCode = "INVALID_WEAPON_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
 static bool parseDirectedFireCommandJson(const std::string &json, const char *expectedCommandType, SnapShotCommandParsed *out)
 {
 	if (out == 0 || expectedCommandType == 0)
@@ -2366,6 +2455,62 @@ MoveValidationResult validateHwpFireContract(const HwpFireValidationInput &input
 	{
 		result.rejectCode = "NO_LINE_OF_FIRE";
 		result.publicReason = "No line of fire to visible target.";
+		return result;
+	}
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validateHwpGuidedLaunchContract(const HwpGuidedLaunchValidationInput &input)
+{
+	MoveValidationResult result = {};
+	result.accepted = false;
+	if (input.actorIsRosterSoldier)
+	{
+		result.rejectCode = "INVALID_ACTOR";
+		result.publicReason = "Actor is a roster soldier, not a friendly HWP.";
+		return result;
+	}
+	if (input.waypointOutOfBounds)
+	{
+		result.rejectCode = "INVALID_WAYPOINT";
+		result.publicReason = "One or more waypoints are out of map bounds.";
+		return result;
+	}
+	if (!input.weaponResolved || !input.weaponBelongsToActor)
+	{
+		result.rejectCode = "WEAPON_NOT_FOUND";
+		result.publicReason = "weapon_battle_item_id must match exactly one fixed weapon on HWP.";
+		return result;
+	}
+	if (!input.weaponSupportsGuidedLaunch)
+	{
+		result.rejectCode = "UNSUPPORTED_WEAPON";
+		result.publicReason = "Weapon does not support guided launch.";
+		return result;
+	}
+	if (!input.weaponHasAmmo)
+	{
+		result.rejectCode = "NO_AMMUNITION";
+		result.publicReason = "Guided launcher has no ammunition loaded.";
+		return result;
+	}
+	if (!input.weaponUsable)
+	{
+		result.rejectCode = "UNSUPPORTED_WEAPON";
+		result.publicReason = "Weapon is not usable for guided launch.";
+		return result;
+	}
+	if (input.waypointCountExceedsLimit)
+	{
+		result.rejectCode = "WAYPOINT_LIMIT_EXCEEDED";
+		result.publicReason = "Waypoint count exceeds ruleset maximum.";
+		return result;
+	}
+	if (input.insufficientTuForLaunch)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for guided launch.";
 		return result;
 	}
 	result.accepted = true;

@@ -8,6 +8,7 @@ namespace OpenXcom
 {
 
 class SavedBattleGame;
+class Mod;
 
 class CompanionBriefingRequest
 {
@@ -16,7 +17,8 @@ public:
 	/// Player-legitimate idle export gates (includes configured snapshot path).
 	static bool canFulfill(SavedBattleGame *battle, bool battleBusy, bool battleInitialized);
 	/// Writes snapshot then briefing-request.json; returns false without leaving a ready request.
-	static bool fulfill(SavedBattleGame *battle, std::string *outBriefingRequestId = 0);
+	/// When @p mod is set, companion-rules-reference.json is refreshed with the tactical snapshot.
+	static bool fulfill(SavedBattleGame *battle, std::string *outBriefingRequestId = 0, Mod *mod = 0);
 };
 
 } // namespace OpenXcom

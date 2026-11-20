@@ -117,6 +117,11 @@ bool hwpFireRelayExecutionSupported()
 	return true;
 }
 
+bool hwpGuidedLaunchRelayExecutionSupported()
+{
+	return true;
+}
+
 const BattleUnit *findBattleUnitById(SavedBattleGame *battle, int unitId)
 {
 	if (battle == 0 || unitId <= 0)
@@ -319,6 +324,20 @@ MoveValidationResult validateHwpFireExecutionPreflight(const HwpFireValidationIn
 		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP_FIRE relay execution is not enabled.");
 	}
 	return CompanionCommandCore::validateHwpFireContract(input.contract);
+}
+
+MoveValidationResult validateHwpGuidedLaunchExecutionPreflight(const HwpGuidedLaunchValidationInput &input)
+{
+	MoveValidationResult authority = evaluateHwpRemoteCommandAuthority(input.authority);
+	if (!authority.accepted)
+	{
+		return authority;
+	}
+	if (!hwpGuidedLaunchRelayExecutionSupported())
+	{
+		return reject("HWP_EXECUTION_NOT_SUPPORTED", "HWP_GUIDED_LAUNCH relay execution is not enabled.");
+	}
+	return CompanionCommandCore::validateHwpGuidedLaunchContract(input.contract);
 }
 
 } // namespace CompanionTacticalHwpAuthorityCore

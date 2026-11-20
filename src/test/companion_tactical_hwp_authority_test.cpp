@@ -289,6 +289,7 @@ static void testExecutionStillUnavailable()
 	expect(hwpMoveRelayExecutionSupported(), "HWP_MOVE relay execution enabled");
 	expect(hwpTurnRelayExecutionSupported(), "HWP_TURN relay execution enabled");
 	expect(hwpFireRelayExecutionSupported(), "HWP_FIRE relay execution enabled");
+	expect(hwpGuidedLaunchRelayExecutionSupported(), "HWP_GUIDED_LAUNCH relay execution enabled");
 	TacticalFixture fx;
 	fx.addHwp(1000000, Position(2, 2, 0));
 	fx.battle->assignCompanionTacticalHwpToAi(1000000);

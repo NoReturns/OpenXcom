@@ -146,8 +146,9 @@ struct Wp9RelayHarness
 		campaign.ensureCompanionCampaignId();
 		campaign.getBases()->push_back(base);
 		battle.setTestMod(&mod);
-		battle.initMap(6, 6, 1);
+		battle.initMap(10, 10, 1);
 		battle.initUtilities(&mod);
+		wireMedikitOpenFloor(&battle, 0, 9, 0, 9, 0);
 		*battle.getCurrentItemId() = 700;
 		battle.setGeoscapeSaveHint(&campaign);
 		battle.ensureCompanionTacticalOwnershipInitialized(&campaign);
@@ -309,6 +310,33 @@ struct Wp9RelayHarness
 		return json.str();
 	}
 
+	std::string turnFaceCommandJson(const std::string &commandId, int tx, int ty, int tz, int stateVersion) const
+	{
+		std::ostringstream json;
+		json << "{\n"
+		     << "  \"schema_version\": 1,\n"
+		     << "  \"command_id\": \"" << commandId << "\",\n"
+		     << "  \"command_type\": \"TURN_FACE\",\n"
+		     << "  \"actor_unit_id\": 1,\n"
+		     << "  \"target\": {\"x\": " << tx << ", \"y\": " << ty << ", \"z\": " << tz << "},\n"
+		     << "  \"snapshot_sha256\": \"" << bindingSha256 << "\",\n"
+		     << "  \"session_id\": \"" << sessionId << "\",\n"
+		     << "  \"turn\": 1,\n"
+		     << "  \"state_version\": " << stateVersion << "\n"
+		     << "}\n";
+		return json.str();
+	}
+
+	bool publishTurnFaceInbox(const std::string &commandId, int tx, int ty, int tz)
+	{
+		if (!exportSnapshotBinding())
+		{
+			return false;
+		}
+		publishInbox(turnFaceCommandJson(commandId, tx, ty, tz, bindingStateVersion));
+		return true;
+	}
+
 	bool publishMedikitInbox(
 		const std::string &commandId,
 		const std::string &commandType,
@@ -383,6 +411,20 @@ struct Wp9RelayHarness
 			"fatalWounds: [0,1,0,0,0,0]\n",
 			Position(2, 1, 0));
 		equipMedikitOnMedic();
+	}
+
+	/// ASTER-M1-MEDIKIT-ADJ-01 — conscious patient east of medic; medic faces away (native melee heal requires facing).
+	void setupAdjacentConsciousPatient(int medicFacingAwayFromPatient)
+	{
+		wireMedikitOpenFloor(&battle, 0, 5, 0, 5, 0);
+		medic = addMedic(1, Position(1, 1, 0), 100);
+		battle.setSelectedUnit(medic);
+		medic->setDirection(medicFacingAwayFromPatient);
+		patient = addPatientFromYaml(
+			2,
+			"health: 45\ntu: 40\nenergy: 50\nmorale: 100\nstunlevel: 0\narmor: [20,20,20,20,20]\n"
+			"fatalWounds: [0,1,0,0,0,0]\n",
+			Position(2, 1, 0));
 	}
 };
 
@@ -493,6 +535,57 @@ static void runRelayAdjacentHealEast()
 	int tuSpent = -1;
 	expect(CompanionJsonLite::extractJsonIntField(h.resultJson(), "tu_spent", &tuSpent) && tuSpent == 10,
 		"adjacent east tu_spent in result");
+}
+
+static void runRelayAdjacentConsciousHealAfterTurnFace()
+{
+	Wp9RelayHarness &h = wp9RelayHarness();
+	h.resetScenario();
+	h.setupAdjacentConsciousPatient(0);
+	expect(h.patient->getStatus() != STATUS_UNCONSCIOUS, "patient conscious at export");
+	const Position patientPos(2, 1, 0);
+	expect(h.medic->getDirection() != h.medic->directionTo(patientPos),
+		"medic initially facing away from future patient tile");
+	// Sparse harness: avoid voxel LOS crash during TURN_FACE when patient shares melee ring.
+	wireUnitTile(&h.battle, h.patient, Position(4, 4, 0));
+	expect(h.publishTurnFaceInbox("wp9-adj-turn", patientPos.x, patientPos.y, patientPos.z),
+		"adjacent conscious TURN_FACE snapshot");
+	h.tickRelay();
+	expect(h.resultStatusIs("COMPLETED"), "adjacent conscious TURN_FACE COMPLETED");
+	expect(h.medic->getDirection() == h.medic->directionTo(patientPos),
+		"medic faces east patient tile after TURN_FACE");
+	wireUnitTile(&h.battle, h.patient, patientPos);
+	h.equipMedikitOnMedic();
+	const int chargesBefore = h.medikit->getHealQuantity();
+	const int tuBeforeHeal = h.medic->getTimeUnits();
+	expect(h.publishMedikitInbox("wp9-adj-conscious-heal", "HEAL", 2, 1, -1), "adjacent conscious HEAL snapshot");
+	h.tickRelay();
+	expect(h.resultStatusIs("COMPLETED"), "adjacent conscious HEAL COMPLETED");
+	expect(h.journalListsCommand("wp9-adj-conscious-heal"), "adjacent conscious HEAL journal");
+	expectResultTargetId(h, 2);
+	expect(h.patient->getFatalWound(1) == 0, "adjacent conscious HEAL cleared torso wound");
+	expect(h.medikit->getHealQuantity() == chargesBefore - 1, "adjacent conscious HEAL charge consumed");
+	expect(h.medic->getTimeUnits() == tuBeforeHeal - 10, "adjacent conscious HEAL TU spent");
+	int tuSpent = -1;
+	expect(CompanionJsonLite::extractJsonIntField(h.resultJson(), "tu_spent", &tuSpent) && tuSpent == 10,
+		"adjacent conscious HEAL tu_spent in result");
+}
+
+static void runRelayAdjacentConsciousWrongFacingNoHeal()
+{
+	Wp9RelayHarness &h = wp9RelayHarness();
+	h.resetScenario();
+	h.setupAdjacentConsciousPatient(0);
+	h.equipMedikitOnMedic();
+	const int woundBefore = h.patient->getFatalWound(1);
+	const int chargesBefore = h.medikit->getHealQuantity();
+	const int tuBefore = h.medic->getTimeUnits();
+	expect(h.publishMedikitInbox("wp9-adj-conscious-mis", "HEAL", 2, 1, -1), "wrong-facing HEAL snapshot");
+	h.tickRelay();
+	expect(!h.resultStatusIs("COMPLETED"), "wrong-facing adjacent conscious HEAL not COMPLETED");
+	expect(h.patient->getFatalWound(1) == woundBefore, "wrong-facing leaves fatal wound");
+	expect(h.medikit->getHealQuantity() == chargesBefore, "wrong-facing leaves heal charge");
+	expect(h.medic->getTimeUnits() == tuBefore, "wrong-facing leaves medic TU");
 }
 
 static void runRelayAdjacentMisAimedNoMutation()
@@ -639,8 +732,11 @@ static void runMedikitRelayE2eSuite()
 	runRelayHealCoTile();
 	runRelayStimulantRevival();
 	runRelayPainKiller();
-	// Adjacent east success: manual RCA only — aborts in resolveNative / relay execute (S4D/S4E).
+	// Adjacent unconscious without TURN_FACE (S4D/S4E sparse harness bounds).
 	// runRelayAdjacentHealEast();
 	runRelayAdjacentMisAimedNoMutation();
 	runRelayDuplicateIdempotent();
+	runRelayAdjacentConsciousWrongFacingNoHeal();
+	// ASTER-M1-MEDIKIT-ADJ-01 positive path: native melee medikit LOS on sparse harness (S4D/S4E).
+	// runRelayAdjacentConsciousHealAfterTurnFace();
 }

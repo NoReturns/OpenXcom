@@ -9,6 +9,7 @@ namespace OpenXcom
 
 class SavedBattleGame;
 class SavedGame;
+class Mod;
 
 class CompanionSnapshot
 {
@@ -16,7 +17,8 @@ public:
 	/// Writes schema v5 YAML when under the 256 KiB cap; otherwise schema v4 without terrain (same intelligence).
 	/// When OPENXCOM_COMPANION_SNAPSHOT_PATH is set and battle state qualifies.
 	/// When @p outSnapshotSha256 is non-null, receives 64-char lowercase hex SHA-256 of the final written UTF-8 YAML.
-	static bool tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256 = 0);
+	/// When @p mod is set, also refreshes companion-rules-reference.json beside the snapshot (same as Ctrl+Shift+R).
+	static bool tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256 = 0, Mod *mod = 0);
 	/// Publishes companion-soldier-control.json beside OPENXCOM_COMPANION_SNAPSHOT_PATH (engine authoritative).
 	static bool tryPublishSoldierControl(SavedBattleGame *battle, SavedGame *campaign);
 };

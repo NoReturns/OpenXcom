@@ -21,6 +21,7 @@
 #include "CompanionGroundInventoryCore.h"
 #include "CompanionItemResearchEligibilityCore.h"
 #include "CompanionSha256.h"
+#include "CompanionRulesReferenceExport.h"
 #include "CompanionEventLog.h"
 #include "CompanionPerceptionLog.h"
 #include "CompanionPerceptionLogCore.h"
@@ -1338,7 +1339,7 @@ YAML::Node CompanionSnapshotBuild::buildAarTacticalTerminal(SavedBattleGame *bat
 	return buildAarTacticalTerminalYaml(battle, resolvedCampaign);
 }
 
-bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256)
+bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnapshotSha256, Mod *mod)
 {
 	if (battle == 0)
 	{
@@ -1467,6 +1468,13 @@ bool CompanionSnapshot::tryExport(SavedBattleGame *battle, std::string *outSnaps
 	if (!tryPublishSoldierControlBesideSnapshot(battle, campaign, snapshotDir))
 	{
 		Log(LOG_WARNING) << "Companion soldier control: publication failed (snapshot export succeeded)";
+	}
+	if (mod != 0 && campaign != 0)
+	{
+		if (!CompanionRulesReferenceExport::tryExport(campaign, mod))
+		{
+			Log(LOG_WARNING) << "Companion rules reference: export failed (snapshot export succeeded)";
+		}
 	}
 	if (!archiveDigest.empty())
 	{

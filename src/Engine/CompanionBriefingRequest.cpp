@@ -4,6 +4,7 @@
 #include "CompanionBriefingRequest.h"
 #include "CompanionBriefingTestSupport.h"
 #include "CompanionSnapshot.h"
+#include "../Mod/Mod.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "Logger.h"
 #include <chrono>
@@ -42,7 +43,7 @@ bool CompanionBriefingRequest::canFulfill(SavedBattleGame *battle, bool battleBu
 	return CompanionBriefingTestSupport::canFulfillBriefing(input);
 }
 
-bool CompanionBriefingRequest::fulfill(SavedBattleGame *battle, std::string *outBriefingRequestId)
+bool CompanionBriefingRequest::fulfill(SavedBattleGame *battle, std::string *outBriefingRequestId, Mod *mod)
 {
 	if (battle == 0 || !snapshotPathConfigured())
 	{
@@ -51,7 +52,7 @@ bool CompanionBriefingRequest::fulfill(SavedBattleGame *battle, std::string *out
 
 	const char *snapshotPath = std::getenv(SNAPSHOT_ENV);
 	std::string snapshotSha256;
-	if (!CompanionSnapshot::tryExport(battle, &snapshotSha256))
+	if (!CompanionSnapshot::tryExport(battle, &snapshotSha256, mod))
 	{
 		Log(LOG_INFO) << "Companion briefing: snapshot export failed";
 		return false;
