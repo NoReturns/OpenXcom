@@ -48,8 +48,10 @@
 #include "../Mod/RuleInterface.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
 #include "../Engine/CompanionBattlescapeOwnershipCore.h"
+#include "../Engine/CompanionSoldierOwnershipCore.h"
 #include "../Interface/TextButton.h"
 #include "CompanionSquadOwnershipState.h"
+#include "../Engine/CompanionCommandRuntime.h"
 
 namespace OpenXcom
 {
@@ -84,6 +86,11 @@ static const int _createTemplateBtnY = 79;
 static const int _applyTemplateBtnY  = 101;
 static const int _companionSquadBtnX = 289;
 static const int _companionSquadBtnY = 124;
+static const int _companionMcBtnW = 40;
+static const int _companionMcBtnH = 12;
+/** Left of SQUAD (289) with clear gap; matches squad-panel TextButton height. */
+static const int _companionMcBtnX = 245;
+static const int _companionMcBtnY = 124;
 
 /**
  * Initializes all the elements in the Inventory screen.
@@ -128,6 +135,8 @@ InventoryState::InventoryState(bool tu, BattlescapeState *parent) : _tu(tu), _pa
 	_btnCreateTemplate = new BattlescapeButton(32, 22, _templateBtnX, _createTemplateBtnY);
 	_btnApplyTemplate = new BattlescapeButton(32, 22, _templateBtnX, _applyTemplateBtnY);
 	_btnCompanionSquad = new TextButton(32, 12, _companionSquadBtnX, _companionSquadBtnY);
+	_btnCompanionMcCommand = new TextButton(_companionMcBtnW, _companionMcBtnH, _companionMcBtnX, _companionMcBtnY);
+	_txtCompanionMcFeedback = new Text(150, 10, 28, 138);
 	_selAmmo = new Surface(RuleInventory::HAND_W * RuleInventory::SLOT_W, RuleInventory::HAND_H * RuleInventory::SLOT_H, 272, 88);
 	_inv = new Inventory(_game, 320, 200, 0, 0, _parent == 0);
 
@@ -158,6 +167,8 @@ InventoryState::InventoryState(bool tu, BattlescapeState *parent) : _tu(tu), _pa
 	add(_btnCreateTemplate, "buttonCreate", "inventory", _bg);
 	add(_btnApplyTemplate, "buttonApply", "inventory", _bg);
 	add(_btnCompanionSquad, "button", "battlescape", _bg);
+	add(_btnCompanionMcCommand, "button", "battlescape", _bg);
+	add(_txtCompanionMcFeedback, "text", "battlescape", _bg);
 	add(_selAmmo);
 	add(_inv);
 
@@ -225,6 +236,16 @@ InventoryState::InventoryState(bool tu, BattlescapeState *parent) : _tu(tu), _pa
 	_btnCompanionSquad->onMouseClick((ActionHandler)&InventoryState::btnCompanionSquadClick);
 	_btnCompanionSquad->onMouseIn((ActionHandler)&InventoryState::txtTooltipIn);
 	_btnCompanionSquad->onMouseOut((ActionHandler)&InventoryState::txtTooltipOut);
+
+	_btnCompanionMcCommand->setText(tr("STR_COMPANION_MC_ASSIGN_ASTER"));
+	_btnCompanionMcCommand->setTooltip("STR_COMPANION_MC_ASSIGN_TO_ASTER");
+	_btnCompanionMcCommand->onMouseClick((ActionHandler)&InventoryState::btnCompanionMcCommandClick);
+	_btnCompanionMcCommand->onMouseIn((ActionHandler)&InventoryState::txtTooltipIn);
+	_btnCompanionMcCommand->onMouseOut((ActionHandler)&InventoryState::txtTooltipOut);
+	_btnCompanionMcCommand->setVisible(false);
+
+	_txtCompanionMcFeedback->setHighContrast(true);
+	_txtCompanionMcFeedback->setVisible(false);
 
 	_btnRank->onMouseClick((ActionHandler)&InventoryState::btnRankClick);
 	_btnRank->setTooltip("STR_UNIT_STATS");
@@ -619,21 +640,95 @@ void InventoryState::btnCompanionSquadClick(Action *)
 		this));
 }
 
+void InventoryState::btnCompanionMcCommandClick(Action *)
+{
+	if (_parent == 0)
+	{
+		return;
+	}
+	BattleUnit *unit = _battleGame->getSelectedUnit();
+	SavedGame *campaign = _battleGame->getGeoscapeSave();
+	if (unit == 0 || campaign == 0)
+	{
+		return;
+	}
+	BattlescapeGame *liveGame = _parent->getBattleGame();
+	liveGame->cancelAllActions();
+	const CompanionSoldierOwnershipCore::SoldierControlMode mode =
+		CompanionBattlescapeOwnershipCore::effectiveTacticalMcHostileOwner(_battleGame, unit->getId());
+	const bool assignToAster = mode != CompanionSoldierOwnershipCore::CONTROL_AI;
+	const CompanionBattlescapeOwnershipCore::OwnershipChangeOutcome outcome =
+		CompanionBattlescapeOwnershipCore::tryApplyMcHostileOwnershipToggle(
+			campaign,
+			_battleGame,
+			liveGame,
+			_game->getMod(),
+			unit->getId(),
+			assignToAster,
+			CompanionCommandRuntime::getInFlightActorUnitId());
+	if (!outcome.ok)
+	{
+		const std::string key = CompanionBattlescapeOwnershipCore::changeErrorMessageKey(outcome.error);
+		if (_txtCompanionMcFeedback != 0)
+		{
+			_txtCompanionMcFeedback->setVisible(true);
+			_txtCompanionMcFeedback->setText(key.empty() ? tr("STR_COMPANION_HANDOFF_BLOCKED") : tr(key));
+		}
+		refreshCompanionOwnershipDisplay();
+		return;
+	}
+	if (_txtCompanionMcFeedback != 0)
+	{
+		_txtCompanionMcFeedback->setVisible(false);
+	}
+	refreshCompanionOwnershipDisplay();
+	if (_parent != 0)
+	{
+		_parent->updateSoldierInfo(false);
+	}
+}
+
 void InventoryState::refreshCompanionOwnershipDisplay()
 {
+	SavedGame *campaign = _game->getSavedGame();
+	const bool beforeGame = _battleGame->isBeforeGame();
 	if (_btnCompanionSquad != 0)
 	{
-		SavedGame *campaign = _game->getSavedGame();
 		_btnCompanionSquad->setVisible(
 			CompanionBattlescapeOwnershipCore::shouldShowCompanionSquadInventoryButton(
-				_parent, campaign, _battleGame->isBeforeGame()));
+				_parent, campaign, beforeGame));
 	}
+	if (_btnCompanionMcCommand != 0)
+	{
+		BattleUnit *selected = _battleGame->getSelectedUnit();
+		const bool showMc = selected != 0
+			&& CompanionBattlescapeOwnershipCore::mcHostileShowsInventoryAiButton(
+				selected, _battleGame, campaign, beforeGame);
+		_btnCompanionMcCommand->setVisible(showMc);
+		if (showMc)
+		{
+			const CompanionSoldierOwnershipCore::SoldierControlMode mode =
+				CompanionBattlescapeOwnershipCore::effectiveTacticalMcHostileOwner(
+					_battleGame, selected->getId());
+			const bool ai = mode == CompanionSoldierOwnershipCore::CONTROL_AI;
+			_btnCompanionMcCommand->setText(ai ? tr("STR_COMPANION_MC_RECLAIM") : tr("STR_COMPANION_MC_ASSIGN_ASTER"));
+			_btnCompanionMcCommand->setTooltip(ai ? "STR_COMPANION_MC_RECLAIM_CONTROL" : "STR_COMPANION_MC_ASSIGN_TO_ASTER");
+		}
+	}
+	if (_txtCompanionMcFeedback != 0)
+	{
+		_txtCompanionMcFeedback->setVisible(false);
+	}
+	_battleGame->pruneCompanionMcHostileAssignments();
 	BattleUnit *unit = _battleGame->getSelectedUnit();
 	if (unit == 0)
 	{
 		return;
 	}
-	SavedGame *campaign = _battleGame->getGeoscapeSave();
+	if (campaign == 0)
+	{
+		campaign = _battleGame->getGeoscapeSave();
+	}
 	if (campaign == 0 ||
 	    !CompanionBattlescapeOwnershipCore::isDeployedRosterSoldierUnit(unit, campaign))
 	{

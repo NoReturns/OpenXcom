@@ -69,6 +69,7 @@
 #include "../Engine/CompanionOnDemandRelayOverlay.h"
 #include "../Engine/CompanionTacticalAuthorityCore.h"
 #include "../Engine/CompanionTacticalHwpAuthorityCore.h"
+#include "../Engine/CompanionTacticalMcHostileAuthorityCore.h"
 #include "../Engine/CompanionMedikitExecutionCore.h"
 #include "../Engine/CompanionPsiExecutionCore.h"
 #include "../Engine/CompanionMeleeExecutionCore.h"
@@ -520,7 +521,16 @@ void BattlescapeGame::endTurn()
 		}
 
 
+		const bool endingPlayerTurn = _save->getSide() == FACTION_PLAYER;
 		_save->endTurn();
+		if (endingPlayerTurn && _save->consumeCompanionMcHostileRepublishPending())
+		{
+			SavedGame *campaign = _save->getGeoscapeSave();
+			if (campaign != 0 && CompanionOnDemandRelayCore::companionSnapshotPathConfigured())
+			{
+				CompanionSnapshot::tryExport(_save, 0, getMod());
+			}
+		}
 		t = _save->getTileEngine()->checkForTerrainExplosions();
 		if (t)
 		{
@@ -2751,6 +2761,290 @@ bool BattlescapeGame::tryExecuteCompanionHwpMove(BattleUnit *unit, Position dest
 		return false;
 	}
 	return queueCompanionPlayerOrderedWalk(unit, dest, rejectReason);
+}
+
+bool BattlescapeGame::tryExecuteCompanionMcMove(BattleUnit *unit, Position dest, std::string *rejectReason)
+{
+	if (unit == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (unit->getGeoscapeSoldier() != 0 || unit->getId() < BattleUnit::MAX_SOLDIER_ID)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "MC_MOVE is for mind-controlled hostiles only.";
+		}
+		return false;
+	}
+	if (!CompanionTacticalMcHostileAuthorityCore::isOperationalMcHostileForRemoteCommands(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "MC hostile is not operational.";
+		}
+		return false;
+	}
+	return queueCompanionPlayerOrderedWalk(unit, dest, rejectReason);
+}
+
+bool BattlescapeGame::tryExecuteCompanionMcKneelDown(BattleUnit *unit, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!CompanionTacticalMcHostileAuthorityCore::isOperationalMcHostileForRemoteCommands(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor is not an operational MC hostile.";
+		}
+		return false;
+	}
+	if (unit->isKneeled())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit is already kneeling.";
+		}
+		return false;
+	}
+	if (unit->getType() != "SOLDIER" || unit->isFloating())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit cannot kneel.";
+		}
+		return false;
+	}
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+	}
+	if (!kneel(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to kneel.";
+		}
+		return false;
+	}
+	companionUpdateSoldierInfoIfUiPresent(false);
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionMcStandUp(BattleUnit *unit, std::string *rejectReason)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!CompanionTacticalMcHostileAuthorityCore::isOperationalMcHostileForRemoteCommands(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor is not an operational MC hostile.";
+		}
+		return false;
+	}
+	if (!unit->isKneeled())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit is not kneeling.";
+		}
+		return false;
+	}
+	if (unit->getType() != "SOLDIER" || unit->isFloating())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit cannot stand.";
+		}
+		return false;
+	}
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+	}
+	if (!kneel(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to stand.";
+		}
+		return false;
+	}
+	companionUpdateSoldierInfoIfUiPresent(false);
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionMcTurnFace(
+	BattleUnit *unit,
+	Position target,
+	std::string *rejectReason,
+	int *tuSpentOut,
+	int *finalDirectionOut)
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (finalDirectionOut != 0)
+	{
+		*finalDirectionOut = -1;
+	}
+	if (unit == 0 || unit->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!CompanionTacticalMcHostileAuthorityCore::isOperationalMcHostileForRemoteCommands(unit))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Actor is not an operational MC hostile.";
+		}
+		return false;
+	}
+
+	const Position pos = unit->getPosition();
+	if (_save->getMapSizeX() <= 0 || _save->getMapSizeY() <= 0 || _save->getMapSizeZ() <= 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle map is not initialized.";
+		}
+		return false;
+	}
+	if (target.x < 0 || target.y < 0 || target.z < 0 ||
+	    target.x >= _save->getMapSizeX() || target.y >= _save->getMapSizeY() || target.z >= _save->getMapSizeZ())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target out of map bounds.";
+		}
+		return false;
+	}
+	if (target.x == pos.x && target.y == pos.y)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target must differ from actor position on the horizontal plane.";
+		}
+		return false;
+	}
+
+	const int stepsEstimate = CompanionTuVisibilityCore::estimateDirectedFireFacingSteps(unit, target);
+	if (stepsEstimate > 0 && stepsEstimate > unit->getTimeUnits())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to turn.";
+		}
+		return false;
+	}
+	if (stepsEstimate > 0 && !checkReservedTU(unit, stepsEstimate, true))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Not enough time units to turn.";
+		}
+		return false;
+	}
+
+	const Position startPos = unit->getPosition();
+
+	cancelCurrentAction();
+	_save->setSelectedUnit(unit);
+	if (_parentState != 0)
+	{
+		_parentState->updateSoldierInfo();
+	}
+
+	CompanionTurnFaceExecutionCore::ExecutionOutcome outcome = {};
+	if (!CompanionTurnFaceExecutionCore::executeTurnFace(this, unit, target, rejectReason, &outcome))
+	{
+		return false;
+	}
+
+	if (unit->getPosition() != startPos)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Turn caused unexpected movement.";
+		}
+		return false;
+	}
+
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = outcome.tuSpentTurning;
+	}
+	if (finalDirectionOut != 0)
+	{
+		*finalDirectionOut = outcome.finalDirection;
+	}
+
+	Map *map = getMap();
+	if (map != 0)
+	{
+		unit->setCache(0);
+		map->cacheUnit(unit);
+	}
+
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
 }
 
 bool BattlescapeGame::tryExecuteCompanionStandUp(BattleUnit *unit, std::string *rejectReason)

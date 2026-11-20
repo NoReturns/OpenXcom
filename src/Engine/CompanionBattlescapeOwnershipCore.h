@@ -125,6 +125,33 @@ Uint8 soldierNameColorForEffectiveOwner(
 	const Mod *mod,
 	CompanionSoldierOwnershipCore::SoldierControlMode effectiveOwner);
 
+bool isXcomControlledHostileUnit(const BattleUnit *unit);
+
+bool companionInventoryMcControlAvailable(
+	const SavedGame *campaign,
+	bool battleBeforeGame);
+
+bool mcHostileEligibleForInventoryCommand(const BattleUnit *unit);
+
+bool mcHostileShowsInventoryAiButton(
+	const BattleUnit *unit,
+	const SavedBattleGame *battle,
+	const SavedGame *campaign,
+	bool battleBeforeGame);
+
+CompanionSoldierOwnershipCore::SoldierControlMode effectiveTacticalMcHostileOwner(
+	const SavedBattleGame *battle,
+	int unitId);
+
+OwnershipChangeOutcome tryApplyMcHostileOwnershipToggle(
+	SavedGame *campaign,
+	SavedBattleGame *battle,
+	BattlescapeGame *game,
+	Mod *mod,
+	int unitId,
+	bool assignToAster,
+	int inFlightCompanionActorUnitId);
+
 } // namespace CompanionBattlescapeOwnershipCore
 
 } // namespace OpenXcom

@@ -7,6 +7,7 @@
 #include "CompanionOnDemandRelayCore.h"
 #include "CompanionSnapshot.h"
 #include "CompanionTacticalAuthorityCore.h"
+#include "CompanionSoldierOwnershipCore.h"
 #include "../Battlescape/BattlescapeGame.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/SavedBattleGame.h"
@@ -551,6 +552,157 @@ Uint8 soldierNameColorForEffectiveOwner(
 		return BATTLESCAPE_ASTER_SOLDIER_NAME_COLOR;
 	}
 	return defaultBattlescapeSoldierNameColor(mod);
+}
+
+bool isXcomControlledHostileUnit(const BattleUnit *unit)
+{
+	return unit != 0
+		&& unit->getOriginalFaction() == FACTION_HOSTILE
+		&& unit->getFaction() == FACTION_PLAYER;
+}
+
+bool companionInventoryMcControlAvailable(
+	const SavedGame *campaign,
+	bool battleBeforeGame)
+{
+	if (campaign == 0 || battleBeforeGame)
+	{
+		return false;
+	}
+	const char *snapshotPath = std::getenv("OPENXCOM_COMPANION_SNAPSHOT_PATH");
+	return snapshotPath != 0 && snapshotPath[0] != '\0';
+}
+
+bool mcHostileEligibleForInventoryCommand(const BattleUnit *unit)
+{
+	if (!isXcomControlledHostileUnit(unit))
+	{
+		return false;
+	}
+	if (unit->getStatus() == STATUS_DEAD || unit->getStatus() == STATUS_UNCONSCIOUS || unit->isOut())
+	{
+		return false;
+	}
+	if (unit->getStatus() == STATUS_PANICKING || unit->getStatus() == STATUS_BERSERK)
+	{
+		return false;
+	}
+	return true;
+}
+
+bool mcHostileShowsInventoryAiButton(
+	const BattleUnit *unit,
+	const SavedBattleGame *battle,
+	const SavedGame *campaign,
+	bool battleBeforeGame)
+{
+	if (!companionInventoryMcControlAvailable(campaign, battleBeforeGame))
+	{
+		return false;
+	}
+	if (battle == 0 || battle->getSide() != FACTION_PLAYER)
+	{
+		return false;
+	}
+	return mcHostileEligibleForInventoryCommand(unit);
+}
+
+CompanionSoldierOwnershipCore::SoldierControlMode effectiveTacticalMcHostileOwner(
+	const SavedBattleGame *battle,
+	int unitId)
+{
+	if (battle == 0 || unitId <= 0)
+	{
+		return CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+	}
+	const std::set<int> &ai = battle->getCompanionTacticalAiMcHostileIds();
+	return ai.find(unitId) != ai.end()
+		? CompanionSoldierOwnershipCore::CONTROL_AI
+		: CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+}
+
+OwnershipChangeOutcome tryApplyMcHostileOwnershipToggle(
+	SavedGame *campaign,
+	SavedBattleGame *battle,
+	BattlescapeGame *game,
+	Mod *mod,
+	int unitId,
+	bool assignToAster,
+	int inFlightCompanionActorUnitId)
+{
+	OwnershipChangeOutcome outcome = {};
+	outcome.ok = false;
+	outcome.error = CHANGE_NOT_ASSIGNABLE;
+	outcome.handoffBlock = HANDOFF_NOT_ASSIGNABLE;
+	outcome.effectiveOwnerAfter = CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+
+	if (campaign == 0 || battle == 0 || unitId <= 0)
+	{
+		return outcome;
+	}
+
+	const BattleUnit *unit = findUnitBySoldierId(battle, unitId);
+	if (!mcHostileEligibleForInventoryCommand(unit))
+	{
+		return outcome;
+	}
+
+	const bool battleBusy = game != 0 && game->isBusy();
+	outcome.handoffBlock = evaluateHandoffBlock(unit, battleBusy, inFlightCompanionActorUnitId);
+	if (outcome.handoffBlock != HANDOFF_OK)
+	{
+		outcome.error = CHANGE_HANDOFF_BLOCKED;
+		return outcome;
+	}
+
+	const bool wasAi = effectiveTacticalMcHostileOwner(battle, unitId) == CompanionSoldierOwnershipCore::CONTROL_AI;
+	const bool wantAi = assignToAster;
+	if (wasAi == wantAi)
+	{
+		outcome.ok = true;
+		outcome.error = CHANGE_OK;
+		outcome.effectiveOwnerAfter = wasAi ? CompanionSoldierOwnershipCore::CONTROL_AI : CompanionSoldierOwnershipCore::CONTROL_HUMAN;
+		return outcome;
+	}
+
+	bool applied = false;
+	if (wantAi)
+	{
+		applied = battle->assignCompanionTacticalMcHostileToAi(unitId);
+	}
+	else
+	{
+		applied = battle->reclaimCompanionTacticalMcHostileForHuman(unitId);
+	}
+	if (!applied)
+	{
+		outcome.error = CHANGE_ASSIGN_FAILED;
+		return outcome;
+	}
+
+	std::string snapshotSha;
+	if (CompanionOnDemandRelayCore::companionSnapshotPathConfigured())
+	{
+		if (!CompanionSnapshot::tryExport(battle, &snapshotSha, mod))
+		{
+			if (wasAi)
+			{
+				battle->assignCompanionTacticalMcHostileToAi(unitId);
+			}
+			else
+			{
+				battle->reclaimCompanionTacticalMcHostileForHuman(unitId);
+			}
+			outcome.error = CHANGE_PUBLISH_FAILED;
+			return outcome;
+		}
+	}
+
+	outcome.ok = true;
+	outcome.error = CHANGE_OK;
+	outcome.handoffBlock = HANDOFF_OK;
+	outcome.effectiveOwnerAfter = effectiveTacticalMcHostileOwner(battle, unitId);
+	return outcome;
 }
 
 std::string changeErrorMessageKey(OwnershipChangeError error)

@@ -33,6 +33,9 @@
 #include "CompanionTuVisibilityCore.h"
 #include "CompanionTacticalHwpAuthorityCore.h"
 #include "CompanionTacticalHwpMoveExecutionCore.h"
+#include "CompanionTacticalMcHostileAuthorityCore.h"
+#include "CompanionTacticalMcHostileMoveExecutionCore.h"
+#include "CompanionTacticalMcHostilePostureExecutionCore.h"
 #include "CompanionHwpTurnExecutionCore.h"
 #include "CompanionHwpFireExecutionCore.h"
 #include "CompanionHwpGuidedLaunchExecutionCore.h"
@@ -66,6 +69,9 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 			KIND_NONE,
 			KIND_MOVE,
 			KIND_HWP_MOVE,
+			KIND_MC_MOVE,
+			KIND_MC_TURN,
+			KIND_MC_KNEEL,
 			KIND_HWP_FIRE,
 			KIND_HWP_GUIDED_LAUNCH,
 			KIND_SNAP_SHOT,
@@ -109,6 +115,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	bool moveAcceptedWhileKneeled;
 	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput hwpMoveAuthority;
 	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput hwpFireAuthority;
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput mcMoveAuthority;
 };
 
 ActiveCommand g_active = {};
@@ -680,10 +687,11 @@ std::string buildTurnFaceResultJson(const CompanionCommandCore::TurnFaceCommandP
 	int finalDirection)
 {
 	std::ostringstream json;
+	const std::string resultCommandType = cmd.commandType.empty() ? "TURN_FACE" : cmd.commandType;
 	json << "{\n"
 	     << "  \"schema_version\": 1,\n"
 	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
-	     << "  \"command_type\": \"TURN_FACE\",\n"
+	     << "  \"command_type\": \"" << resultCommandType << "\",\n"
 	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
 	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
 	     << "  \"turn\": " << cmd.turn << ",\n"
@@ -2671,6 +2679,107 @@ static void fillHwpRemoteAuthorityInput(
 	}
 }
 
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	int actorUnitId,
+	const std::string &commandSnapshotSha256,
+	const std::string &commandSessionId,
+	int commandTurn,
+	int commandStateVersion,
+	BattleUnit *actor)
+{
+	if (out == 0)
+	{
+		return;
+	}
+	*out = {};
+	out->campaign = campaign;
+	out->battle = battle;
+	out->actorUnitId = actorUnitId;
+	out->controlFileJson = controlJson;
+	out->controlFileReadOk = controlReadOk;
+	out->battleSessionId = sessionId;
+	out->relayCampaignId = campaign != 0 ? campaign->getCompanionCampaignId() : std::string();
+	out->relayTacticalBattleId = battle != 0 ? battle->getCompanionTacticalBattleId() : std::string();
+	out->commandSnapshotSha256 = commandSnapshotSha256;
+	out->lastSnapshotSha256 = g_lastSnapshotSha256;
+	out->commandSessionId = commandSessionId;
+	out->commandTurn = commandTurn;
+	out->turn = battle != 0 ? battle->getTurn() : 0;
+	out->commandStateVersion = commandStateVersion;
+	out->lastExportedStateVersion = g_lastExportedStateVersion;
+	out->battleInitialized = battleInitialized;
+	out->playerTurn = battle != 0 && battle->getSide() == FACTION_PLAYER;
+	out->battleBusy = game != 0 && game->isBusy();
+	out->unitsFalling = battle != 0 && battle->getUnitsFalling();
+	out->requireBindingFreshness = true;
+	out->actorNativeActionInProgress = false;
+	if (actor != 0 && game != 0)
+	{
+		const int status = actor->getStatus();
+		out->actorNativeActionInProgress = game->isBusy() &&
+			(status == STATUS_WALKING || status == STATUS_TURNING);
+	}
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::MoveCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::TurnFaceCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::KneelCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
 static bool snapWeaponSupportsSnapShot(BattleItem *weapon)
 {
 	if (weapon == 0)
@@ -4388,6 +4497,7 @@ static std::string activeInFlightCommandSessionId()
 	{
 	case ActiveCommand::KIND_MOVE:
 	case ActiveCommand::KIND_HWP_MOVE:
+	case ActiveCommand::KIND_MC_MOVE:
 		return g_active.moveParsed.sessionId;
 	case ActiveCommand::KIND_SNAP_SHOT:
 	case ActiveCommand::KIND_AUTO_SHOT:
@@ -4549,6 +4659,35 @@ static bool tryTerminalizePersistedCrossSessionOpenResult(
 			false,
 			resultSnapshotSha256,
 			inboxDigestHex);
+	}
+	else if (inboxCommandType == "MC_MOVE")
+	{
+		CompanionCommandCore::MoveCommandParsed parsed = {};
+		if (!(inboxPresent
+		          ? CompanionCommandCore::parseMcMoveCommandJson(commandJson, &parsed)
+		          : CompanionCommandRuntimeSupport::parseMoveParsedFromOpenResultJson(resultJson, &parsed)))
+		{
+			return false;
+		}
+		BattleUnit *actor = findUnitById(battle, parsed.actorUnitId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		const int mcDirection = actor != 0 ? actor->getDirection() : -1;
+		json = buildMoveResultJson(
+			parsed,
+			CompanionCommandCore::CMD_INTERRUPTED,
+			publicReason,
+			pos,
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			false,
+			resultSnapshotSha256,
+			inboxDigestHex,
+			0,
+			-1,
+			false,
+			false,
+			mcDirection);
 	}
 	else if (inboxCommandType == "HWP_MOVE")
 	{
@@ -4800,7 +4939,8 @@ void noteSnapshotExportStateVersion(int latestEventSeq)
 bool isMoveInFlight()
 {
 	return g_active.inFlight &&
-		(g_active.kind == ActiveCommand::KIND_MOVE || g_active.kind == ActiveCommand::KIND_HWP_MOVE);
+		(g_active.kind == ActiveCommand::KIND_MOVE || g_active.kind == ActiveCommand::KIND_HWP_MOVE ||
+		 g_active.kind == ActiveCommand::KIND_MC_MOVE);
 }
 
 void abandonInFlightCommandForTestHarness()
@@ -4820,6 +4960,7 @@ int getInFlightActorUnitId()
 	{
 	case ActiveCommand::KIND_MOVE:
 	case ActiveCommand::KIND_HWP_MOVE:
+	case ActiveCommand::KIND_MC_MOVE:
 		return g_active.moveParsed.actorUnitId;
 	case ActiveCommand::KIND_SNAP_SHOT:
 	case ActiveCommand::KIND_AUTO_SHOT:
@@ -4991,7 +5132,8 @@ void noteThrowBattleActionPop(int actorUnitId, const std::string &actionResult)
 void noteWalkBattleActionPop(int actorUnitId, const std::string &actionResult)
 {
 	if (!g_active.inFlight ||
-	    (g_active.kind != ActiveCommand::KIND_MOVE && g_active.kind != ActiveCommand::KIND_HWP_MOVE))
+	    (g_active.kind != ActiveCommand::KIND_MOVE && g_active.kind != ActiveCommand::KIND_HWP_MOVE &&
+	     g_active.kind != ActiveCommand::KIND_MC_MOVE))
 	{
 		return;
 	}
@@ -5722,6 +5864,72 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			return;
 		}
 
+		if (g_active.kind == ActiveCommand::KIND_MC_MOVE)
+		{
+			BattleUnit *unit = findUnitById(battle, g_active.moveParsed.actorUnitId);
+			const bool aiCommandPermitted =
+				CompanionTacticalMcHostileAuthorityCore::evaluateMcRemoteCommandAuthority(
+					g_active.mcMoveAuthority).accepted;
+			if (unit != 0 && !aiCommandPermitted)
+			{
+				game->cancelCurrentAction();
+			}
+			CompanionTacticalMcHostileMoveExecutionCore::McMoveLifecycleObservation observation = {};
+			observation.startPos = g_active.startPos;
+			observation.requestedDest =
+				Position(g_active.moveParsed.destX, g_active.moveParsed.destY, g_active.moveParsed.destZ);
+			observation.walkActionResult = g_active.walkActionResult;
+			CompanionCommandCore::WalkStopDiagnostics stopDiagnostics = {};
+			const CompanionCommandCore::CommandLifecycleStatus terminal =
+				CompanionTacticalMcHostileMoveExecutionCore::observeMcMoveLifecycle(
+					game, g_active.mcMoveAuthority, observation, &stopDiagnostics);
+			if (shouldDelayInFlightTerminalCompletion(game, battle, terminal))
+			{
+				return;
+			}
+
+			const Position finalPos = unit != 0 ? unit->getPosition() : g_active.startPos;
+			const bool reached = unit != 0 && finalPos == observation.requestedDest;
+			const bool noMovementProgress = finalPos == g_active.startPos;
+			const std::string resultSnapshotSha256 =
+				snapshotSha256ForTerminalCommandResult(battle, terminal);
+			std::string publicReason = stopDiagnostics.publicReason;
+			if (publicReason.empty()
+			    && terminal == CompanionCommandCore::CMD_INTERRUPTED)
+			{
+				publicReason = "Movement interrupted or incomplete.";
+			}
+			const int engineFinalDirection = unit != 0 ? unit->getDirection() : -1;
+			const std::string json = buildMoveResultJson(
+				g_active.moveParsed,
+				terminal,
+				publicReason,
+				g_active.startPos,
+				finalPos,
+				unit != 0 ? unit->getTimeUnits() : 0,
+				unit != 0 && unit->isKneeled(),
+				reached,
+				resultSnapshotSha256,
+				g_active.inboxDigest,
+				stopDiagnostics.movementStopReason.empty() ? 0 : &stopDiagnostics,
+				g_active.tuAtAcceptance,
+				g_active.moveAcceptedWhileKneeled,
+				noMovementProgress,
+				engineFinalDirection);
+			writeResultFile(resultPath, json);
+			if (terminal == CompanionCommandCore::CMD_COMPLETED
+			    || terminal == CompanionCommandCore::CMD_INTERRUPTED
+			    || terminal == CompanionCommandCore::CMD_FAILED)
+			{
+				CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+			}
+			logTerminalOnce(g_active.commandId, terminal);
+			g_active.inFlight = false;
+			g_active.kind = ActiveCommand::KIND_NONE;
+			clearRosterCasualtyDeferClock();
+			return;
+		}
+
 		if (g_active.kind == ActiveCommand::KIND_MOVE)
 		{
 			BattleUnit *unit = findUnitById(battle, g_active.moveParsed.actorUnitId);
@@ -5824,7 +6032,9 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL" &&
 	    inboxCommandType != "MELEE_ATTACK" && inboxCommandType != "TURN_FACE" &&
 	    inboxCommandType != "HWP_MOVE" && inboxCommandType != "HWP_TURN" && inboxCommandType != "HWP_FIRE" &&
-	    inboxCommandType != "HWP_GUIDED_LAUNCH")
+	    inboxCommandType != "HWP_GUIDED_LAUNCH" &&
+	    inboxCommandType != "MC_MOVE" && inboxCommandType != "MC_TURN_FACE" &&
+	    inboxCommandType != "MC_KNEEL" && inboxCommandType != "MC_STAND")
 	{
 		std::string inboxDigest;
 		CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
@@ -8120,6 +8330,324 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		return;
 	}
 
+	if (inboxCommandType == "MC_KNEEL")
+	{
+		CompanionCommandCore::KneelCommandParsed mcKneelParsed = {};
+		if (!CompanionCommandCore::parseMcKneelCommandJson(commandJson, &mcKneelParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectKneelCommand(resultPath, mcKneelParsed, mcKneelParsed.rejectCode, mcKneelParsed.rejectCode, inboxDigest);
+			logRejectOnce(mcKneelParsed.commandId.empty() ? "unknown" : mcKneelParsed.commandId, mcKneelParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(mcKneelParsed.commandId);
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &mcKneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			logRejectOnce(mcKneelParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, mcKneelParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, mcKneelParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, mcKneelParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, &mcKneelParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != mcKneelParsed.commandId)
+		{
+			rejectKneelCommand(resultPath, mcKneelParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest);
+			appendJournalEntry(journalPath, mcKneelParsed.commandId);
+			logRejectOnce(mcKneelParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, mcKneelParsed.actorUnitId);
+		CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput authority = {};
+		fillMcRemoteAuthorityInput(
+			&authority, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+			mcKneelParsed, actor);
+		CompanionTacticalMcHostilePostureExecutionCore::McKneelValidationInput kneelInput = {};
+		kneelInput.authority = authority;
+		kneelInput.actorAlreadyKneeled = actor != 0 && actor->isKneeled();
+		kneelInput.actorCanChangePosture =
+			actor != 0 && !actor->isFloating() && actor->getType() == "SOLDIER";
+		kneelInput.insufficientTuForKneelDown = actor != 0 && kneelInput.actorCanChangePosture &&
+			!kneelInput.actorAlreadyKneeled && !game->checkReservedTU(actor, 4, true);
+
+		const CompanionCommandCore::MoveValidationResult kneelVerdict =
+			CompanionTacticalMcHostilePostureExecutionCore::validateMcKneelExecutionPreflight(kneelInput);
+		if (!kneelVerdict.accepted)
+		{
+			const CompanionTuVisibilityCore::TuAccountingFields kneelTuReject = tuFieldsForInsufficientReject(
+				actor, game, 4, kneelVerdict.rejectCode);
+			rejectKneelCommand(
+				resultPath, mcKneelParsed, kneelVerdict.rejectCode, kneelVerdict.publicReason, inboxDigest,
+				kneelVerdict.rejectCode == "INSUFFICIENT_TU" ? &kneelTuReject : 0);
+			appendJournalEntry(journalPath, mcKneelParsed.commandId);
+			logRejectOnce(mcKneelParsed.commandId, kneelVerdict.rejectCode);
+			return;
+		}
+
+		const Position startPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		std::string rejectReason;
+		if (!game->tryExecuteCompanionMcKneelDown(actor, &rejectReason))
+		{
+			rejectKneelCommand(resultPath, mcKneelParsed, "KNEEL_START_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, mcKneelParsed.commandId);
+			logRejectOnce(mcKneelParsed.commandId, "KNEEL_START_FAILED");
+			return;
+		}
+
+		logKneelStartedOnce(mcKneelParsed.commandId, mcKneelParsed.actorUnitId);
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildKneelResultJson(mcKneelParsed, CompanionCommandCore::CMD_COMPLETED, std::string(),
+			startPos, tuAfter, actor != 0 && actor->isKneeled(), resultSnapshotSha256, inboxDigest));
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		logTerminalOnce(mcKneelParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		appendJournalEntry(journalPath, mcKneelParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "MC_STAND")
+	{
+		CompanionCommandCore::StandCommandParsed mcStandParsed = {};
+		if (!CompanionCommandCore::parseMcStandCommandJson(commandJson, &mcStandParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectStandCommand(resultPath, mcStandParsed, mcStandParsed.rejectCode, mcStandParsed.rejectCode, inboxDigest);
+			logRejectOnce(mcStandParsed.commandId.empty() ? "unknown" : mcStandParsed.commandId, mcStandParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(mcStandParsed.commandId);
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, 0, &mcStandParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			logRejectOnce(mcStandParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, mcStandParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, mcStandParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, mcStandParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, &mcStandParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != mcStandParsed.commandId)
+		{
+			rejectStandCommand(resultPath, mcStandParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest);
+			appendJournalEntry(journalPath, mcStandParsed.commandId);
+			logRejectOnce(mcStandParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, mcStandParsed.actorUnitId);
+		CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput authority = {};
+		fillMcRemoteAuthorityInput(
+			&authority, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+			mcStandParsed, actor);
+		CompanionTacticalMcHostilePostureExecutionCore::McStandValidationInput standInput = {};
+		standInput.authority = authority;
+		standInput.actorKneeling = actor != 0 && actor->isKneeled();
+		standInput.actorCanChangePosture =
+			actor != 0 && !actor->isFloating() && actor->getType() == "SOLDIER";
+		standInput.insufficientTuForStandUp = actor != 0 && standInput.actorCanChangePosture &&
+			standInput.actorKneeling && !game->checkReservedTU(actor, 8, true);
+
+		const CompanionCommandCore::MoveValidationResult standVerdict =
+			CompanionTacticalMcHostilePostureExecutionCore::validateMcStandExecutionPreflight(standInput);
+		if (!standVerdict.accepted)
+		{
+			const CompanionTuVisibilityCore::TuAccountingFields standTuReject = tuFieldsForInsufficientReject(
+				actor, game, 8, standVerdict.rejectCode);
+			rejectStandCommand(
+				resultPath, mcStandParsed, standVerdict.rejectCode, standVerdict.publicReason, inboxDigest,
+				standVerdict.rejectCode == "INSUFFICIENT_TU" ? &standTuReject : 0);
+			appendJournalEntry(journalPath, mcStandParsed.commandId);
+			logRejectOnce(mcStandParsed.commandId, standVerdict.rejectCode);
+			return;
+		}
+
+		const Position startPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		std::string rejectReason;
+		if (!game->tryExecuteCompanionMcStandUp(actor, &rejectReason))
+		{
+			rejectStandCommand(resultPath, mcStandParsed, "STAND_START_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, mcStandParsed.commandId);
+			logRejectOnce(mcStandParsed.commandId, "STAND_START_FAILED");
+			return;
+		}
+
+		logStandStartedOnce(mcStandParsed.commandId, mcStandParsed.actorUnitId);
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildKneelResultJson(mcStandParsed, CompanionCommandCore::CMD_COMPLETED, std::string(),
+			startPos, tuAfter, actor != 0 && actor->isKneeled(), resultSnapshotSha256, inboxDigest));
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		logTerminalOnce(mcStandParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		appendJournalEntry(journalPath, mcStandParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "MC_TURN_FACE")
+	{
+		CompanionCommandCore::TurnFaceCommandParsed mcTurnParsed = {};
+		if (!CompanionCommandCore::parseMcTurnFaceCommandJson(commandJson, &mcTurnParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectTurnFaceCommand(resultPath, mcTurnParsed, mcTurnParsed.rejectCode, mcTurnParsed.rejectCode, inboxDigest);
+			logRejectOnce(mcTurnParsed.commandId.empty() ? "unknown" : mcTurnParsed.commandId, mcTurnParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(mcTurnParsed.commandId);
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &mcTurnParsed))
+		{
+			logRejectOnce(mcTurnParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, mcTurnParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, mcTurnParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, mcTurnParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &mcTurnParsed))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != mcTurnParsed.commandId)
+		{
+			rejectTurnFaceCommand(resultPath, mcTurnParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest);
+			appendJournalEntry(journalPath, mcTurnParsed.commandId);
+			logRejectOnce(mcTurnParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, mcTurnParsed.actorUnitId);
+		const Position target(mcTurnParsed.targetX, mcTurnParsed.targetY, mcTurnParsed.targetZ);
+		const Position actorPos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		const int facingStepsEstimate = actor != 0
+			? CompanionTuVisibilityCore::estimateDirectedFireFacingSteps(actor, target) : 0;
+
+		CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput authority = {};
+		fillMcRemoteAuthorityInput(
+			&authority, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+			mcTurnParsed, actor);
+		CompanionTacticalMcHostilePostureExecutionCore::McTurnFaceValidationInput turnInput = {};
+		turnInput.authority = authority;
+		turnInput.targetX = mcTurnParsed.targetX;
+		turnInput.targetY = mcTurnParsed.targetY;
+		turnInput.targetZ = mcTurnParsed.targetZ;
+		turnInput.mapSizeX = battle->getMapSizeX();
+		turnInput.mapSizeY = battle->getMapSizeY();
+		turnInput.mapSizeZ = battle->getMapSizeZ();
+		turnInput.targetSameHorizontalAsActor =
+			actor != 0 && target.x == actorPos.x && target.y == actorPos.y;
+		turnInput.insufficientTuForTurn = actor != 0 && facingStepsEstimate > 0 &&
+			(facingStepsEstimate > actor->getTimeUnits() ||
+			 !game->checkReservedTU(actor, facingStepsEstimate, true));
+
+		const CompanionCommandCore::MoveValidationResult turnVerdict =
+			CompanionTacticalMcHostilePostureExecutionCore::validateMcTurnFaceExecutionPreflight(turnInput);
+		if (!turnVerdict.accepted)
+		{
+			const CompanionTuVisibilityCore::TuAccountingFields turnTuReject = tuFieldsForInsufficientReject(
+				actor, game, facingStepsEstimate, turnVerdict.rejectCode);
+			rejectTurnFaceCommand(
+				resultPath, mcTurnParsed, turnVerdict.rejectCode, turnVerdict.publicReason, inboxDigest,
+				turnVerdict.rejectCode == "INSUFFICIENT_TU" ? &turnTuReject : 0);
+			appendJournalEntry(journalPath, mcTurnParsed.commandId);
+			logRejectOnce(mcTurnParsed.commandId, turnVerdict.rejectCode);
+			return;
+		}
+
+		const Position startPos = actorPos;
+		const int dirBefore = actor != 0 ? actor->getDirection() : 0;
+		std::string rejectReason;
+		int tuSpent = 0;
+		int finalDirection = -1;
+		if (!game->tryExecuteCompanionMcTurnFace(actor, target, &rejectReason, &tuSpent, &finalDirection))
+		{
+			rejectTurnFaceCommand(resultPath, mcTurnParsed, "TURN_FACE_START_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, mcTurnParsed.commandId);
+			logRejectOnce(mcTurnParsed.commandId, "TURN_FACE_START_FAILED");
+			return;
+		}
+		if (actor != 0 && actor->getPosition() != startPos)
+		{
+			rejectTurnFaceCommand(resultPath, mcTurnParsed, "TURN_FACE_START_FAILED",
+				"Turn caused unexpected movement.", inboxDigest);
+			appendJournalEntry(journalPath, mcTurnParsed.commandId);
+			logRejectOnce(mcTurnParsed.commandId, "TURN_FACE_START_FAILED");
+			return;
+		}
+
+		logTurnFaceStartedOnce(mcTurnParsed.commandId, mcTurnParsed.actorUnitId);
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildTurnFaceResultJson(mcTurnParsed, CompanionCommandCore::CMD_COMPLETED,
+			std::string(), startPos, tuAfter, actor != 0 && actor->isKneeled(), resultSnapshotSha256, inboxDigest,
+			tuSpent, finalDirection >= 0 ? finalDirection : dirBefore));
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		logTerminalOnce(mcTurnParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		appendJournalEntry(journalPath, mcTurnParsed.commandId);
+		return;
+	}
+
 	if (inboxCommandType == "HWP_TURN")
 	{
 		if (!CompanionTacticalHwpAuthorityCore::hwpTurnRelayExecutionSupported())
@@ -8656,6 +9184,138 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			inboxDigest);
 		writeResultFile(resultPath, executingJson);
 		appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "MC_MOVE")
+	{
+		if (!CompanionTacticalMcHostileAuthorityCore::mcMoveRelayExecutionSupported())
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			CompanionCommandCore::MoveCommandParsed unsupported = {};
+			unsupported.rejectCode = "MC_EXECUTION_NOT_SUPPORTED";
+			unsupported.commandType = "MC_MOVE";
+			CompanionJsonLite::extractJsonStringField(commandJson, "command_id", &unsupported.commandId);
+			rejectCommand(resultPath, unsupported, "MC_EXECUTION_NOT_SUPPORTED",
+				"MC_MOVE relay execution is not enabled.", inboxDigest);
+			logRejectOnce(unsupported.commandId.empty() ? "unknown" : unsupported.commandId,
+				"MC_EXECUTION_NOT_SUPPORTED");
+			return;
+		}
+
+		CompanionCommandCore::MoveCommandParsed mcParsed = {};
+		if (!CompanionCommandCore::parseMcMoveCommandJson(commandJson, &mcParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectCommand(resultPath, mcParsed, mcParsed.rejectCode, mcParsed.rejectCode, inboxDigest);
+			logRejectOnce(mcParsed.commandId.empty() ? "unknown" : mcParsed.commandId, mcParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(mcParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest, &mcParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			logRejectOnce(mcParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, mcParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, mcParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+				duplicateDecision, mcParsed.commandId, inboxDigest, resultPath, conflictPath,
+				existingResultJson, &mcParsed, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+		{
+			return;
+		}
+
+		if (g_active.inFlight && g_active.commandId != mcParsed.commandId)
+		{
+			rejectCommand(resultPath, mcParsed, "PRIOR_COMMAND_NON_TERMINAL",
+				"A prior command is still executing.", inboxDigest);
+			appendJournalEntry(journalPath, mcParsed.commandId);
+			logRejectOnce(mcParsed.commandId, "PRIOR_COMMAND_NON_TERMINAL");
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, mcParsed.actorUnitId);
+		CompanionTacticalMcHostileAuthorityCore::McMoveValidationInput moveInput = {};
+		fillMcRemoteAuthorityInput(
+			&moveInput.authority,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			controlJson,
+			controlReadOk,
+			sessionId,
+			mcParsed,
+			actor);
+		moveInput.destX = mcParsed.destX;
+		moveInput.destY = mcParsed.destY;
+		moveInput.destZ = mcParsed.destZ;
+		moveInput.mapSizeX = battle->getMapSizeX();
+		moveInput.mapSizeY = battle->getMapSizeY();
+		moveInput.mapSizeZ = battle->getMapSizeZ();
+
+		const CompanionCommandCore::MoveValidationResult verdict =
+			CompanionTacticalMcHostileAuthorityCore::validateMcMoveExecutionPreflight(moveInput);
+		if (!verdict.accepted)
+		{
+			rejectCommand(resultPath, mcParsed, verdict.rejectCode, verdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, mcParsed.commandId);
+			logRejectOnce(mcParsed.commandId, verdict.rejectCode);
+			return;
+		}
+
+		logCommandDiagnostic("accepted MC_MOVE command_id=" + mcParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(mcParsed.actorUnitId));
+
+		CompanionTacticalMcHostileMoveExecutionCore::McMoveStartOutcome startOutcome = {};
+		if (!CompanionTacticalMcHostileMoveExecutionCore::tryStartMcMove(game, moveInput, &startOutcome))
+		{
+			const std::string rejectCode = startOutcome.rejectCode.empty() ? "MOVE_START_FAILED" : startOutcome.rejectCode;
+			const std::string rejectReason = startOutcome.rejectReason.empty()
+				? "MC move could not start."
+				: startOutcome.rejectReason;
+			rejectCommand(resultPath, mcParsed, rejectCode, rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, mcParsed.commandId);
+			logRejectOnce(mcParsed.commandId, rejectCode);
+			return;
+		}
+
+		beginInFlightCommand();
+		g_active.kind = ActiveCommand::KIND_MC_MOVE;
+		g_active.commandId = mcParsed.commandId;
+		g_active.inboxDigest = inboxDigest;
+		g_active.moveParsed = mcParsed;
+		g_active.mcMoveAuthority = moveInput.authority;
+		g_active.walkActionResult.clear();
+		g_active.startPos = startOutcome.startPos;
+		g_active.tuAtAcceptance = startOutcome.tuAtAcceptance;
+		g_active.moveAcceptedWhileKneeled = actor != 0 && actor->isKneeled();
+
+		logMoveStartedOnce(mcParsed.commandId, mcParsed.actorUnitId);
+
+		writeResultFile(resultPath, buildMoveResultJson(mcParsed, CompanionCommandCore::CMD_EXECUTING, std::string(),
+			startOutcome.startPos, startOutcome.startPos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(), false, g_lastSnapshotSha256, inboxDigest));
+		appendJournalEntry(journalPath, mcParsed.commandId);
 		return;
 	}
 

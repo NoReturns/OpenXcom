@@ -143,7 +143,7 @@ bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierCont
 		return false;
 	}
 	if (!CompanionJsonLite::extractJsonIntField(controlFileJson, "schema_version", &out->schemaVersion) ||
-	    (out->schemaVersion != 1 && out->schemaVersion != 2))
+	    (out->schemaVersion != 1 && out->schemaVersion != 2 && out->schemaVersion != 3))
 	{
 		return false;
 	}
@@ -181,6 +181,35 @@ bool parseSoldierControlDocument(const std::string &controlFileJson, SoldierCont
 					return false;
 				}
 			}
+		}
+	}
+	if (out->schemaVersion >= 3)
+	{
+		std::string::size_type mcStart = 0;
+		if (CompanionJsonLite::findJsonKeyValueStart(controlFileJson, "mc_hostile_assignments", &mcStart))
+		{
+			if (!parseAssignmentsObject(controlFileJson, "mc_hostile_assignments", &out->mcHostileAssignments))
+			{
+				return false;
+			}
+			for (std::map<int, std::string>::const_iterator k = out->mcHostileAssignments.begin();
+			     k != out->mcHostileAssignments.end(); ++k)
+			{
+				if (k->first < BattleUnit::MAX_SOLDIER_ID)
+				{
+					return false;
+				}
+			}
+		}
+	}
+	for (std::map<int, std::string>::const_iterator mc = out->mcHostileAssignments.begin();
+	     mc != out->mcHostileAssignments.end();
+	     ++mc)
+	{
+		if (out->assignments.find(mc->first) != out->assignments.end()
+		    || out->hwpAssignments.find(mc->first) != out->hwpAssignments.end())
+		{
+			return false;
 		}
 	}
 	CompanionJsonLite::extractJsonStringField(controlFileJson, "campaign_id", &out->campaignId);
@@ -328,6 +357,44 @@ bool isAiControlledHwpUnit(
 	int hwpUnitId)
 {
 	return controlModeForHwpUnit(controlFileJson, bindingContext, hwpUnitId) == CONTROL_AI;
+}
+
+static SoldierControlMode controlModeForMcHostileUnit(
+	const std::string &controlFileJson,
+	const RelayControlBindingContext &bindingContext,
+	int unitId)
+{
+	if (controlFileJson.empty() || unitId <= 0)
+	{
+		return CONTROL_HUMAN;
+	}
+	SoldierControlDocument doc = {};
+	if (!parseSoldierControlDocument(controlFileJson, &doc))
+	{
+		return CONTROL_HUMAN;
+	}
+	if (!relayBindingMatchesDocument(doc, bindingContext))
+	{
+		return CONTROL_HUMAN;
+	}
+	std::map<int, std::string>::const_iterator found = doc.mcHostileAssignments.find(unitId);
+	if (found == doc.mcHostileAssignments.end())
+	{
+		return CONTROL_HUMAN;
+	}
+	if (found->second == "ai")
+	{
+		return CONTROL_AI;
+	}
+	return CONTROL_HUMAN;
+}
+
+bool isAiControlledMcHostileUnit(
+	const std::string &controlFileJson,
+	const RelayControlBindingContext &bindingContext,
+	int unitId)
+{
+	return controlModeForMcHostileUnit(controlFileJson, bindingContext, unitId) == CONTROL_AI;
 }
 
 } // namespace CompanionSoldierOwnershipCore

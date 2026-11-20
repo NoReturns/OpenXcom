@@ -98,6 +98,21 @@ static void testInvalidSoldierExcludedFromPublicationInput()
 	expect(!isAiControlledUnit(plan.jsonUtf8, bindingFor(SESSION_A), 9), "invalid unit id not published");
 }
 
+static void testMcHostileAiPublishesMcAssignments()
+{
+	std::set<int> aiMc;
+	aiMc.insert(1000042);
+	const std::vector<int> mcUnits(1, 1000042);
+	const ControlPublicationPlan plan = buildControlPublicationJson(
+		SESSION_A, CAMPAIGN_A, TACTICAL_A, std::set<int>(), std::vector<int>(),
+		std::set<int>(), std::vector<int>(), aiMc, mcUnits);
+	expect(plan.ok, "mc plan ok");
+	expect(plan.jsonUtf8.find("\"schema_version\": 3") != std::string::npos, "mc publication uses schema v3");
+	expect(isAiControlledMcHostileUnit(plan.jsonUtf8, bindingFor(SESSION_A), 1000042), "mc hostile ai authorized");
+	expect(!isAiControlledUnit(plan.jsonUtf8, bindingFor(SESSION_A), 1000042), "mc id not roster assignment");
+	expect(!isAiControlledHwpUnit(plan.jsonUtf8, bindingFor(SESSION_A), 1000042), "mc id not hwp assignment");
+}
+
 static void testHwpAiPublishesHwpAssignments()
 {
 	std::set<int> aiHwp;
@@ -157,6 +172,7 @@ static void testAtomicWriteFailurePreservesPreviousFile()
 int main()
 {
 	testCampaignAiPublishesAiEntry();
+	testMcHostileAiPublishesMcAssignments();
 	testHwpAiPublishesHwpAssignments();
 	testCampaignHumanOmitsAiAuthorization();
 	testUnsavedAssignmentIncluded();

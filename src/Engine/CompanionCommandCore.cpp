@@ -386,6 +386,299 @@ bool parseHwpMoveCommandJson(const std::string &json, MoveCommandParsed *out)
 	return true;
 }
 
+bool parseMcMoveCommandJson(const std::string &json, MoveCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	MoveCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_MOVE")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!extractDestinationCoords(json, &parsed.destX, &parsed.destY, &parsed.destZ))
+	{
+		parsed.rejectCode = "INVALID_DESTINATION";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	TurnFaceCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_TURN_FACE")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!extractTargetCoords(json, &parsed.targetX, &parsed.targetY, &parsed.targetZ))
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcKneelCommandJson(const std::string &json, KneelCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	KneelCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_KNEEL")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcStandCommandJson(const std::string &json, StandCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	StandCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_STAND")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	parsed.commandType = "MC_STAND";
+	*out = parsed;
+	return true;
+}
+
 bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out)
 {
 	if (out == 0)

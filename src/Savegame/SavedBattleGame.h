@@ -89,6 +89,8 @@ private:
 	std::string _companionTacticalBattleId;
 	std::set<int> _companionTacticalAiSoldierIds;
 	std::set<int> _companionTacticalAiHwpIds;
+	std::set<int> _companionTacticalAiMcHostileIds;
+	bool _companionMcHostileRepublishPending;
 	/// Optional mod pointer for headless / unit-test harnesses (not serialized).
 	Mod *_testMod;
 	/// Test harness: geoscape save when no BattlescapeState link (not serialized).
@@ -199,6 +201,12 @@ public:
 	const std::set<int> &getCompanionTacticalAiHwpIds() const { return _companionTacticalAiHwpIds; }
 	bool assignCompanionTacticalHwpToAi(int hwpUnitId);
 	bool reclaimCompanionTacticalHwpForHuman(int hwpUnitId);
+	const std::set<int> &getCompanionTacticalAiMcHostileIds() const { return _companionTacticalAiMcHostileIds; }
+	bool assignCompanionTacticalMcHostileToAi(int unitId);
+	bool reclaimCompanionTacticalMcHostileForHuman(int unitId);
+	void clearCompanionMcHostileAssignments();
+	void pruneCompanionMcHostileAssignments();
+	bool consumeCompanionMcHostileRepublishPending();
 	/// Ends the turn.
 	void endTurn();
 	/// Sets debug mode.

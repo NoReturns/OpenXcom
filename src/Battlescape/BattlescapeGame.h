@@ -257,6 +257,16 @@ public:
 	bool tryExecuteCompanionMove(BattleUnit *unit, Position dest, std::string *rejectReason);
 	/// Start companion-authorized walk for friendly HWPs (caller must run HWP authority first).
 	bool tryExecuteCompanionHwpMove(BattleUnit *unit, Position dest, std::string *rejectReason);
+	/// Start companion-authorized walk for xcom-controlled MC hostiles.
+	bool tryExecuteCompanionMcMove(BattleUnit *unit, Position dest, std::string *rejectReason);
+	bool tryExecuteCompanionMcKneelDown(BattleUnit *unit, std::string *rejectReason);
+	bool tryExecuteCompanionMcStandUp(BattleUnit *unit, std::string *rejectReason);
+	bool tryExecuteCompanionMcTurnFace(
+		BattleUnit *unit,
+		Position target,
+		std::string *rejectReason,
+		int *tuSpentOut = 0,
+		int *finalDirectionOut = 0);
 	/// Kneel an authorized soldier down (not a stand-up toggle); uses native kneel() rules.
 	bool tryExecuteCompanionKneelDown(BattleUnit *unit, std::string *rejectReason);
 	bool tryExecuteCompanionStandUp(BattleUnit *unit, std::string *rejectReason);

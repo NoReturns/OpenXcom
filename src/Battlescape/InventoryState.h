@@ -45,6 +45,8 @@ private:
 	Text *_txtName, *_txtItem, *_txtAmmo, *_txtWeight, *_txtTus, *_txtFAcc, *_txtReact, *_txtPSkill, *_txtPStr;
 	BattlescapeButton *_btnOk, *_btnPrev, *_btnNext, *_btnUnload, *_btnGround, *_btnRank;
 	TextButton *_btnCompanionSquad;
+	TextButton *_btnCompanionMcCommand;
+	Text *_txtCompanionMcFeedback;
 	BattlescapeButton *_btnCreateTemplate, *_btnApplyTemplate;
 	Surface *_selAmmo;
 	Inventory *_inv;
@@ -82,6 +84,7 @@ public:
 	void btnApplyTemplateClick(Action *action);
 	/// Opens the companion squad ownership panel (M1-WP7A).
 	void btnCompanionSquadClick(Action *action);
+	void btnCompanionMcCommandClick(Action *action);
 	/// Refreshes WP7B name colour and squad button after ownership changes.
 	void refreshCompanionOwnershipDisplay();
 	/// Handler for hitting the Clear Inventory hotkey.

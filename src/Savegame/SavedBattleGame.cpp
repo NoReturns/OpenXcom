@@ -52,7 +52,8 @@ namespace OpenXcom
  */
 SavedBattleGame::SavedBattleGame() : _battleState(0), _mapsize_x(0), _mapsize_y(0), _mapsize_z(0), _selectedUnit(0), _lastSelectedUnit(0), _pathfinding(0), _tileEngine(0), _globalShade(0),
 	_side(FACTION_PLAYER), _turn(1), _debugMode(false), _aborted(false), _itemId(0), _objectiveType(-1), _objectivesDestroyed(0), _objectivesNeeded(0), _unitsFalling(false), _cheating(false),
-	_tuReserved(BA_NONE), _kneelReserved(false), _depth(0), _ambience(-1), _ambientVolume(0.5), _turnLimit(0), _cheatTurn(20), _chronoTrigger(FORCE_LOSE), _beforeGame(true), _testMod(0), _geoscapeSaveHint(0)
+	_tuReserved(BA_NONE), _kneelReserved(false), _depth(0), _ambience(-1), _ambientVolume(0.5), _turnLimit(0), _cheatTurn(20), _chronoTrigger(FORCE_LOSE), _beforeGame(true), _testMod(0), _geoscapeSaveHint(0),
+	_companionMcHostileRepublishPending(false)
 {
 	_tileSearch.resize(11*11);
 	for (int i = 0; i < 121; ++i)
@@ -853,6 +854,8 @@ void SavedBattleGame::endTurn()
 {
 	if (_side == FACTION_PLAYER)
 	{
+		_companionMcHostileRepublishPending = !_companionTacticalAiMcHostileIds.empty();
+		clearCompanionMcHostileAssignments();
 		if (_selectedUnit && _selectedUnit->getOriginalFaction() == FACTION_PLAYER)
 			_lastSelectedUnit = _selectedUnit;
 		_selectedUnit =  0;
@@ -2276,6 +2279,34 @@ const BattleUnit *findLiveFriendlyHwpUnit(SavedBattleGame *battle, int hwpUnitId
 	}
 	return 0;
 }
+
+const BattleUnit *findLiveXcomControlledHostileUnit(SavedBattleGame *battle, int unitId)
+{
+	if (battle == 0 || unitId <= 0)
+	{
+		return 0;
+	}
+	for (std::vector<BattleUnit*>::const_iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end();
+	     ++i)
+	{
+		const BattleUnit *unit = *i;
+		if (unit == 0 || unit->getId() != unitId)
+		{
+			continue;
+		}
+		if (unit->getOriginalFaction() != FACTION_HOSTILE || unit->getFaction() != FACTION_PLAYER)
+		{
+			return 0;
+		}
+		if (unit->isOut() || unit->getStatus() == STATUS_DEAD || unit->getStatus() == STATUS_UNCONSCIOUS)
+		{
+			return 0;
+		}
+		return unit;
+	}
+	return 0;
+}
 } // namespace
 
 bool SavedBattleGame::assignCompanionTacticalHwpToAi(int hwpUnitId)
@@ -2300,6 +2331,59 @@ bool SavedBattleGame::reclaimCompanionTacticalHwpForHuman(int hwpUnitId)
 	}
 	_companionTacticalAiHwpIds.erase(hwpUnitId);
 	return true;
+}
+
+bool SavedBattleGame::assignCompanionTacticalMcHostileToAi(int unitId)
+{
+	if (findLiveXcomControlledHostileUnit(this, unitId) == 0)
+	{
+		return false;
+	}
+	_companionTacticalAiMcHostileIds.insert(unitId);
+	return true;
+}
+
+bool SavedBattleGame::reclaimCompanionTacticalMcHostileForHuman(int unitId)
+{
+	if (unitId <= 0)
+	{
+		return false;
+	}
+	if (findLiveXcomControlledHostileUnit(this, unitId) == 0
+	    && _companionTacticalAiMcHostileIds.find(unitId) == _companionTacticalAiMcHostileIds.end())
+	{
+		return false;
+	}
+	_companionTacticalAiMcHostileIds.erase(unitId);
+	return true;
+}
+
+void SavedBattleGame::clearCompanionMcHostileAssignments()
+{
+	_companionTacticalAiMcHostileIds.clear();
+}
+
+void SavedBattleGame::pruneCompanionMcHostileAssignments()
+{
+	for (std::set<int>::iterator i = _companionTacticalAiMcHostileIds.begin();
+	     i != _companionTacticalAiMcHostileIds.end();)
+	{
+		if (findLiveXcomControlledHostileUnit(this, *i) == 0)
+		{
+			i = _companionTacticalAiMcHostileIds.erase(i);
+		}
+		else
+		{
+			++i;
+		}
+	}
+}
+
+bool SavedBattleGame::consumeCompanionMcHostileRepublishPending()
+{
+	const bool pending = _companionMcHostileRepublishPending;
+	_companionMcHostileRepublishPending = false;
+	return pending;
 }
 
 }

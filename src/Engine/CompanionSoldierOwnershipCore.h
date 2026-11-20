@@ -26,6 +26,7 @@ struct SoldierControlDocument
 	std::string tacticalBattleId;
 	std::map<int, std::string> assignments;
 	std::map<int, std::string> hwpAssignments;
+	std::map<int, std::string> mcHostileAssignments;
 };
 
 /// Relay-side binding for companion-soldier-control.json (M1-25B durable battle scope).
@@ -86,6 +87,11 @@ bool isAiControlledHwpUnit(
 	const std::string &controlFileJson,
 	const RelayControlBindingContext &bindingContext,
 	int hwpUnitId);
+
+bool isAiControlledMcHostileUnit(
+	const std::string &controlFileJson,
+	const RelayControlBindingContext &bindingContext,
+	int unitId);
 
 /// Legacy session-only binding (tests and pre-M1-25B JSON).
 inline bool isAiControlledUnit(const std::string &controlFileJson, const std::string &battleSessionId, int unitId)

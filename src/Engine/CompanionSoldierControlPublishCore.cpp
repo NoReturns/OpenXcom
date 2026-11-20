@@ -22,7 +22,9 @@ ControlPublicationPlan buildControlPublicationJson(
 	const std::set<int> &tacticalAiSoldierIds,
 	const std::vector<int> &publishableLivePlayerUnitIds,
 	const std::set<int> &tacticalAiHwpIds,
-	const std::vector<int> &publishableFriendlyHwpUnitIds)
+	const std::vector<int> &publishableFriendlyHwpUnitIds,
+	const std::set<int> &tacticalAiMcHostileIds,
+	const std::vector<int> &publishableXcomControlledMcHostileUnitIds)
 {
 	ControlPublicationPlan plan = {};
 	plan.ok = false;
@@ -42,8 +44,18 @@ ControlPublicationPlan buildControlPublicationJson(
 		return plan;
 	}
 
-	const bool includeHwpAssignments = !publishableFriendlyHwpUnitIds.empty();
-	const int schemaVersion = includeHwpAssignments ? 2 : 1;
+	const bool includeMcAssignments = !tacticalAiMcHostileIds.empty();
+	const bool includeHwpAssignments = !publishableFriendlyHwpUnitIds.empty() || !tacticalAiHwpIds.empty();
+	int schemaVersion = 1;
+	if (includeMcAssignments)
+	{
+		schemaVersion = 3;
+	}
+	else if (includeHwpAssignments)
+	{
+		schemaVersion = 2;
+	}
+
 	std::ostringstream json;
 	json << "{\n"
 	     << "  \"schema_version\": " << schemaVersion << ",\n"
@@ -73,7 +85,7 @@ ControlPublicationPlan buildControlPublicationJson(
 
 	json << "\n  }";
 
-	if (includeHwpAssignments)
+	if (schemaVersion >= 2 && includeHwpAssignments)
 	{
 		json << ",\n  \"hwp_assignments\": {\n";
 		bool firstHwp = true;
@@ -90,6 +102,27 @@ ControlPublicationPlan buildControlPublicationJson(
 			}
 			json << "    \"" << *it << "\": \"ai\"";
 			firstHwp = false;
+		}
+		json << "\n  }";
+	}
+
+	if (schemaVersion >= 3 && includeMcAssignments)
+	{
+		json << ",\n  \"mc_hostile_assignments\": {\n";
+		bool firstMc = true;
+		for (std::vector<int>::const_iterator it = publishableXcomControlledMcHostileUnitIds.begin();
+		     it != publishableXcomControlledMcHostileUnitIds.end(); ++it)
+		{
+			if (tacticalAiMcHostileIds.find(*it) == tacticalAiMcHostileIds.end())
+			{
+				continue;
+			}
+			if (!firstMc)
+			{
+				json << ",\n";
+			}
+			json << "    \"" << *it << "\": \"ai\"";
+			firstMc = false;
 		}
 		json << "\n  }";
 	}

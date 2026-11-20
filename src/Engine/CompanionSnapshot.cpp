@@ -109,6 +109,9 @@ bool isPublishableLivePlayerSoldier(const BattleUnit *unit, const SavedGame *cam
 }
 
 std::vector<int> collectPublishableFriendlyHwpUnitIds(SavedBattleGame *battle);
+std::vector<int> collectPublishableXcomControlledMcHostileUnitIds(SavedBattleGame *battle);
+void appendEngineFacingYaml(YAML::Node &parent, const char *key, int direction, bool turning);
+void appendFriendlyActionCosts(YAML::Node &unitNode, SavedBattleGame *battle, BattleUnit *unit);
 
 std::vector<int> collectPublishableLivePlayerUnitIds(SavedBattleGame *battle, SavedGame *campaign)
 {
@@ -145,6 +148,8 @@ bool tryPublishSoldierControlBesideSnapshot(
 	const std::string sessionId = battle->getCompanionEventLog().getSessionId();
 	const std::vector<int> unitIds = collectPublishableLivePlayerUnitIds(battle, campaign);
 	const std::vector<int> hwpUnitIds = collectPublishableFriendlyHwpUnitIds(battle);
+	battle->pruneCompanionMcHostileAssignments();
+	const std::vector<int> mcHostileUnitIds = collectPublishableXcomControlledMcHostileUnitIds(battle);
 	battle->ensureCompanionTacticalOwnershipInitialized(campaign);
 	const CompanionSoldierControlPublishCore::ControlPublicationPlan plan =
 		CompanionSoldierControlPublishCore::buildControlPublicationJson(
@@ -154,7 +159,9 @@ bool tryPublishSoldierControlBesideSnapshot(
 			battle->getCompanionTacticalAiSoldierIds(),
 			unitIds,
 			battle->getCompanionTacticalAiHwpIds(),
-			hwpUnitIds);
+			hwpUnitIds,
+			battle->getCompanionTacticalAiMcHostileIds(),
+			mcHostileUnitIds);
 	if (!plan.ok)
 	{
 		Log(LOG_WARNING) << "Companion soldier control: publish skipped (" << plan.publicReason << ")";
@@ -812,6 +819,25 @@ bool isFriendlyHwpBattleUnit(const BattleUnit *unit)
 		&& unit->getId() >= BattleUnit::MAX_SOLDIER_ID;
 }
 
+bool isXcomControlledHostileBattleUnit(const BattleUnit *unit)
+{
+	if (unit == 0)
+	{
+		return false;
+	}
+	return unit->getOriginalFaction() == FACTION_HOSTILE
+		&& unit->getFaction() == FACTION_PLAYER;
+}
+
+bool isPublishableXcomControlledMcHostileUnit(const BattleUnit *unit)
+{
+	if (unit == 0 || unit->isOut())
+	{
+		return false;
+	}
+	return isXcomControlledHostileBattleUnit(unit);
+}
+
 bool isPublishableFriendlyHwpUnit(const BattleUnit *unit)
 {
 	if (unit == 0 || unit->isOut())
@@ -840,6 +866,91 @@ std::vector<int> collectPublishableFriendlyHwpUnitIds(SavedBattleGame *battle)
 	std::sort(ids.begin(), ids.end());
 	ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
 	return ids;
+}
+
+std::vector<int> collectPublishableXcomControlledMcHostileUnitIds(SavedBattleGame *battle)
+{
+	std::vector<int> ids;
+	if (battle == 0)
+	{
+		return ids;
+	}
+	for (std::vector<BattleUnit *>::const_iterator i = battle->getUnits()->begin();
+	     i != battle->getUnits()->end(); ++i)
+	{
+		if (!isPublishableXcomControlledMcHostileUnit(*i))
+		{
+			continue;
+		}
+		ids.push_back((*i)->getId());
+	}
+	std::sort(ids.begin(), ids.end());
+	ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+	return ids;
+}
+
+void appendXcomControlledHostileObservationV1(
+	YAML::Node &obs,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	BattleUnit *unit,
+	Language *lang)
+{
+	if (unit == 0 || battle == 0)
+	{
+		return;
+	}
+	obs["schemaVersion"] = 1;
+	obs["unitId"] = unit->getId();
+	obs["unitType"] = unit->getType();
+	obs["originalFaction"] = static_cast<int>(unit->getOriginalFaction());
+	obs["faction"] = static_cast<int>(unit->getFaction());
+	if (lang != 0)
+	{
+		const std::string label = unit->getName(lang, false);
+		if (!label.empty())
+		{
+			obs["displayLabel"] = label;
+		}
+	}
+	const Position pos = unit->getPosition();
+	YAML::Node position;
+	position["x"] = pos.x;
+	position["y"] = pos.y;
+	position["z"] = pos.z;
+	obs["position"] = position;
+	obs["kneeled"] = unit->isKneeled();
+	if (CompanionSnapshotUnitState::shouldExportFacing(unit))
+	{
+		appendEngineFacingYaml(obs, "facing", unit->getDirection(), unit->getStatus() == STATUS_TURNING);
+	}
+	obs["timeUnits"] = unit->getTimeUnits();
+	const UnitStats *stats = unit->getBaseStats();
+	if (stats != 0)
+	{
+		obs["maxTimeUnits"] = stats->tu;
+		obs["health"] = unit->getHealth();
+		obs["maxHealth"] = stats->health;
+	}
+	obs["energy"] = unit->getEnergy();
+	if (stats != 0)
+	{
+		obs["maxEnergy"] = stats->stamina;
+	}
+	obs["morale"] = unit->getMorale();
+	obs["stunLevel"] = unit->getStunlevel();
+	CompanionSnapshotUnitState::appendFriendlyCondition(obs, unit, campaign);
+	appendFriendlyEquipment(obs, battle, campaign, unit);
+	if (!unit->isOut())
+	{
+		appendFriendlyActionCosts(obs, battle, unit);
+	}
+	YAML::Node readiness;
+	readiness["xcomControlledHostileAssigned"] = true;
+	readiness["commandExecutionSupported"] = false;
+	readiness["observationNote"] =
+		"Detailed export only while X-COM mind control and Aster assignment are both active at export.";
+	obs["readiness"] = readiness;
 }
 
 void appendEngineFacingYaml(YAML::Node &parent, const char *key, int direction, bool turning)
@@ -1010,6 +1121,22 @@ void appendUnit(YAML::Node &units, SavedBattleGame *battle, SavedGame *campaign,
 	else if (isFriendlyHwpBattleUnit(unit))
 	{
 		appendFriendlyHwpObservationV1(entry["friendlyHwpObservationV1"], battle, campaign, unit, languageFromBattle(battle));
+	}
+	else if (isXcomControlledHostileBattleUnit(unit))
+	{
+		CompanionSnapshotUnitState::appendVisibleHostileObservations(entry, unit);
+		CompanionSnapshotUnitState::appendUnitObservationIdentity(
+			entry, battle, unit, campaign, languageFromBattle(battle));
+		const std::set<int> &mcAi = battle->getCompanionTacticalAiMcHostileIds();
+		if (mcAi.find(unit->getId()) != mcAi.end())
+		{
+			appendXcomControlledHostileObservationV1(
+				entry["xcomControlledHostileObservationV1"],
+				battle,
+				campaign,
+				unit,
+				languageFromBattle(battle));
+		}
 	}
 	else
 	{

@@ -795,6 +795,10 @@ CommandLifecycleStatus evaluateMeleeTerminalStatus(const MeleeCompletionInput &i
 
 bool parseMoveCommandJson(const std::string &json, MoveCommandParsed *out);
 bool parseHwpMoveCommandJson(const std::string &json, MoveCommandParsed *out);
+bool parseMcMoveCommandJson(const std::string &json, MoveCommandParsed *out);
+bool parseMcTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *out);
+bool parseMcKneelCommandJson(const std::string &json, KneelCommandParsed *out);
+bool parseMcStandCommandJson(const std::string &json, StandCommandParsed *out);
 bool parseKneelCommandJson(const std::string &json, KneelCommandParsed *out);
 bool parseStandCommandJson(const std::string &json, StandCommandParsed *out);
 bool parseTurnFaceCommandJson(const std::string &json, TurnFaceCommandParsed *out);
