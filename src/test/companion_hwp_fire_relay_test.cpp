@@ -785,7 +785,24 @@ struct FireRelayHarness
 		launcher->moveToOwner(tank);
 		battle->getItems()->push_back(launcher);
 		battle->getItems()->push_back(clip);
+		if (launcherRules->getTurretType() >= 0)
+		{
+			tank->setTurretType(launcherRules->getTurretType());
+		}
 		return launcher;
+	}
+
+	static void harnessPumpExplosionBlastFlash(BattlescapeGame *bg)
+	{
+		if (bg == 0)
+		{
+			return;
+		}
+		Map *map = bg->getMap();
+		if (map != 0 && map->getBlastFlash())
+		{
+			map->setBlastFlash(false);
+		}
 	}
 
 	std::string rejectCode() const
@@ -867,6 +884,7 @@ struct FireRelayHarness
 			{
 				bg->think();
 			}
+			harnessPumpExplosionBlastFlash(bg);
 			if (sawExplosionState != 0
 			    && describeNativeStack(bg).find("ExplosionBState") != std::string::npos)
 			{
@@ -1048,6 +1066,7 @@ void certRocketNativeStackDrains()
 		{
 			break;
 		}
+		h.harnessPumpExplosionBlastFlash(bg);
 		if (describeNativeStack(bg).find("ExplosionBState") != std::string::npos)
 		{
 			sawExplosion = true;
