@@ -363,6 +363,14 @@ public:
 		std::string *rejectReason,
 		int *tuSpentOut = 0,
 		bool *psychicSucceededOut = 0);
+	/// Headless Mind Probe BA_USE (M1 MIND-PROBE-18).
+	bool tryExecuteCompanionMindProbeUse(
+		BattleUnit *actor,
+		BattleItem *mindProbe,
+		const std::string &activeHandSlotId,
+		int targetUnitId,
+		std::string *rejectReason,
+		int *tuSpentOut = 0);
 	/// Native BA_HIT melee / stun rod for companion (M1 melee S2a; headless harness path).
 	bool tryExecuteCompanionMeleeAttack(
 		BattleUnit *actor,

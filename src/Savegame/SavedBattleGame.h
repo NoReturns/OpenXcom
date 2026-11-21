@@ -26,6 +26,7 @@
 #include "../Engine/CompanionEventLog.h"
 #include "../Engine/CompanionPerceptionLog.h"
 #include "../Engine/CompanionGroundItemMemory.h"
+#include "../Engine/CompanionMindProbeMemory.h"
 
 namespace OpenXcom
 {
@@ -86,6 +87,7 @@ private:
 	CompanionEventLog _companionEventLog;
 	CompanionPerceptionLog _companionPerceptionLog;
 	CompanionGroundItemMemory _companionGroundItemMemory;
+	CompanionMindProbeMemory _companionMindProbeMemory;
 	std::string _companionTacticalBattleId;
 	std::set<int> _companionTacticalAiSoldierIds;
 	std::set<int> _companionTacticalAiHwpIds;
@@ -192,6 +194,8 @@ public:
 	const CompanionPerceptionLog &getCompanionPerceptionLog() const { return _companionPerceptionLog; }
 	CompanionGroundItemMemory &getCompanionGroundItemMemory() { return _companionGroundItemMemory; }
 	const CompanionGroundItemMemory &getCompanionGroundItemMemory() const { return _companionGroundItemMemory; }
+	CompanionMindProbeMemory &getCompanionMindProbeMemory() { return _companionMindProbeMemory; }
+	const CompanionMindProbeMemory &getCompanionMindProbeMemory() const { return _companionMindProbeMemory; }
 	/// Tactical companion ownership (M1-25B): authoritative during battlescape.
 	void ensureCompanionTacticalOwnershipInitialized(const SavedGame *campaign);
 	const std::string &getCompanionTacticalBattleId() const { return _companionTacticalBattleId; }

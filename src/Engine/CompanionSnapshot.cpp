@@ -798,6 +798,12 @@ void appendHandActionCosts(YAML::Node &handCosts, SavedBattleGame *battle, Battl
 		appendActionEntry(actions, battle, unit, weapon, BA_USE, "use", researchOk);
 	}
 
+	if (rules->getBattleType() == BT_MINDPROBE)
+	{
+		const bool researchOk = envOk && companionResearchUsable(battle, weapon, BA_USE);
+		appendActionEntry(actions, battle, unit, weapon, BA_USE, "use", researchOk);
+	}
+
 	if (rules->getBattleType() == BT_PSIAMP && unit->getBaseStats()->psiSkill > 0)
 	{
 		appendActionEntry(actions, battle, unit, weapon, BA_PANIC, "panic", envOk);
@@ -1377,6 +1383,7 @@ void appendTacticalIntelligenceFields(YAML::Node &root, SavedBattleGame *battle,
 	appendEventLog(root, battle->getCompanionEventLog());
 	appendPerceptionLog(root, battle->getCompanionPerceptionLog(), battle, campaign);
 	CompanionSnapshotGroundItems::appendGroundItems(root, battle, campaign);
+	battle->getCompanionMindProbeMemory().appendMindProbeObservationsV1(root, battle, campaign);
 }
 
 YAML::Node buildAarTacticalTerminalYaml(SavedBattleGame *battle, SavedGame *campaign)

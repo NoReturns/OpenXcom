@@ -37,6 +37,7 @@
 #include "CompanionTacticalMcHostileMoveExecutionCore.h"
 #include "CompanionTacticalMcHostilePostureExecutionCore.h"
 #include "CompanionTacticalMcHostileFireExecutionCore.h"
+#include "CompanionTacticalMcHostileEquipmentExecutionCore.h"
 #include "CompanionHwpTurnExecutionCore.h"
 #include "CompanionHwpFireExecutionCore.h"
 #include "CompanionHwpGuidedLaunchExecutionCore.h"
@@ -82,6 +83,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 			KIND_AUTO_SHOT,
 			KIND_AIMED_SHOT,
 			KIND_THROW,
+			KIND_MC_THROW,
 			KIND_GUIDED_LAUNCH,
 			KIND_MELEE
 		};
@@ -121,6 +123,7 @@ const char *SNAPSHOT_ENV = "OPENXCOM_COMPANION_SNAPSHOT_PATH";
 	CompanionTacticalHwpAuthorityCore::HwpRemoteAuthorityInput hwpFireAuthority;
 	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput mcMoveAuthority;
 	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput mcFireAuthority;
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput mcEquipmentAuthority;
 };
 
 ActiveCommand g_active = {};
@@ -177,7 +180,7 @@ static bool isDirectedFireOrHwpFireKind(ActiveCommand::Kind kind)
 
 static bool isThrowKind(ActiveCommand::Kind kind)
 {
-	return kind == ActiveCommand::KIND_THROW;
+	return kind == ActiveCommand::KIND_THROW || kind == ActiveCommand::KIND_MC_THROW;
 }
 
 static bool isGuidedLaunchKind(ActiveCommand::Kind kind)
@@ -1509,9 +1512,10 @@ void rejectReloadCommand(const std::string &resultPath, const CompanionCommandCo
 	{
 		cmd.commandType = "RELOAD";
 	}
-	const std::string json = buildReloadResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+	std::string json = buildReloadResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
 		std::string(), inboxSha256, -1);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, 0);
 	writeResultFile(resultPath, json);
 }
 
@@ -1532,9 +1536,10 @@ void rejectUnloadCommand(const std::string &resultPath, const CompanionCommandCo
 	{
 		cmd.commandType = "UNLOAD";
 	}
-	const std::string json = buildUnloadResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+	std::string json = buildUnloadResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
 		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
 		std::string(), inboxSha256, -1);
+	json = applyResultJsonExtensions(json, CompanionCommandCore::CMD_REJECTED, reasonCode, 0);
 	writeResultFile(resultPath, json);
 }
 
@@ -2103,6 +2108,90 @@ void rejectPsiMindControlCommand(const std::string &resultPath,
 	writeResultFile(resultPath, json);
 }
 
+std::string buildMindProbeUseResultJson(const CompanionCommandCore::MindProbeUseCommandParsed &cmd,
+	CompanionCommandCore::CommandLifecycleStatus status,
+	const std::string &publicReason,
+	Position pos,
+	int remainingTu,
+	bool kneeled,
+	const std::string &snapshotSha256,
+	const std::string &inboxSha256,
+	int tuSpent)
+{
+	std::ostringstream json;
+	json << "{\n"
+	     << "  \"schema_version\": 1,\n"
+	     << "  \"command_id\": \"" << cmd.commandId << "\",\n"
+	     << "  \"command_type\": \"MIND_PROBE_USE\",\n"
+	     << "  \"status\": \"" << CompanionCommandCore::lifecycleStatusToString(status) << "\",\n"
+	     << "  \"session_id\": \"" << cmd.sessionId << "\",\n"
+	     << "  \"turn\": " << cmd.turn << ",\n"
+	     << "  \"actor_unit_id\": " << cmd.actorUnitId << ",\n"
+	     << "  \"mind_probe_battle_item_id\": " << cmd.mindProbeBattleItemId << ",\n"
+	     << "  \"active_hand\": \"" << cmd.activeHand << "\",\n"
+	     << "  \"target_unit_id\": " << cmd.targetUnitId << ",\n";
+	if (!publicReason.empty())
+	{
+		json << "  \"public_reason\": \"" << publicReason << "\",\n";
+	}
+	if (status == CompanionCommandCore::CMD_EXECUTING ||
+	    status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"starting_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED ||
+	    status == CompanionCommandCore::CMD_INTERRUPTED ||
+	    status == CompanionCommandCore::CMD_FAILED)
+	{
+		json << "  \"final_position\": { \"x\": " << pos.x
+		     << ", \"y\": " << pos.y << ", \"z\": " << pos.z << " },\n"
+		     << "  \"remaining_tu\": " << remainingTu << ",\n"
+	     << "  \"kneeled\": " << (kneeled ? "true" : "false") << ",\n";
+	}
+	if (status == CompanionCommandCore::CMD_COMPLETED && tuSpent >= 0)
+	{
+		json << "  \"tu_spent\": " << tuSpent << ",\n";
+	}
+	if (!snapshotSha256.empty())
+	{
+		json << "  \"snapshot_sha256\": \"" << snapshotSha256 << "\",\n";
+	}
+	if (!inboxSha256.empty())
+	{
+		json << "  \"inbox_sha256\": \"" << inboxSha256 << "\",\n";
+	}
+	json << "  \"completed_at\": \"engine-local\"\n"
+	     << "}\n";
+	return json.str();
+}
+
+void rejectMindProbeUseCommand(const std::string &resultPath, const CompanionCommandCore::MindProbeUseCommandParsed &parsed,
+	const std::string &reasonCode, const std::string &publicReason, const std::string &inboxSha256)
+{
+	CompanionCommandCore::MindProbeUseCommandParsed cmd = parsed;
+	if (cmd.commandId.empty())
+	{
+		cmd.commandId = "unknown";
+		cmd.commandType = "MIND_PROBE_USE";
+		cmd.sessionId = "00000000000000000000000000000000";
+		cmd.turn = 1;
+		cmd.mindProbeBattleItemId = 0;
+		cmd.targetUnitId = 0;
+		cmd.activeHand = "STR_RIGHT_HAND";
+	}
+	if (cmd.commandType.empty())
+	{
+		cmd.commandType = "MIND_PROBE_USE";
+	}
+	const std::string json = buildMindProbeUseResultJson(cmd, CompanionCommandCore::CMD_REJECTED,
+		publicReason.empty() ? reasonCode : publicReason, Position(0, 0, 0), 0, false,
+		std::string(), inboxSha256, -1);
+	writeResultFile(resultPath, json);
+}
+
 std::string buildMeleeAttackResultJson(const CompanionCommandCore::MeleeAttackCommandParsed &cmd,
 	CompanionCommandCore::CommandLifecycleStatus status,
 	const std::string &publicReason,
@@ -2250,7 +2339,8 @@ static bool rejectUnreadableCommandJournal(
 	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0,
 	const CompanionCommandCore::HwpTurnCommandParsed *hwpTurnRejectTemplate = 0,
 	const CompanionCommandCore::HwpFireCommandParsed *hwpFireRejectTemplate = 0,
-	const CompanionCommandCore::HwpGuidedLaunchCommandParsed *hwpGuidedLaunchRejectTemplate = 0)
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed *hwpGuidedLaunchRejectTemplate = 0,
+	const CompanionCommandCore::MindProbeUseCommandParsed *mindProbeRejectTemplate = 0)
 {
 	if (CompanionCommandJournalCore::classifyExistingJournalJson(journalJson) !=
 		CompanionCommandJournalCore::JOURNAL_UNREADABLE)
@@ -2270,6 +2360,11 @@ static bool rejectUnreadableCommandJournal(
 	else if (psiPanicRejectTemplate != 0)
 	{
 		rejectPsiPanicCommand(resultPath, *psiPanicRejectTemplate, "JOURNAL_MALFORMED",
+			"Tactical command journal is unreadable.", inboxDigest);
+	}
+	else if (mindProbeRejectTemplate != 0)
+	{
+		rejectMindProbeUseCommand(resultPath, *mindProbeRejectTemplate, "JOURNAL_MALFORMED",
 			"Tactical command journal is unreadable.", inboxDigest);
 	}
 	else if (medikitRejectTemplate != 0)
@@ -2380,7 +2475,8 @@ bool applyDuplicateInboxDecision(
 	const CompanionCommandCore::TurnFaceCommandParsed *turnFaceRejectTemplate = 0,
 	const CompanionCommandCore::HwpTurnCommandParsed *hwpTurnRejectTemplate = 0,
 	const CompanionCommandCore::HwpFireCommandParsed *hwpFireRejectTemplate = 0,
-	const CompanionCommandCore::HwpGuidedLaunchCommandParsed *hwpGuidedLaunchRejectTemplate = 0)
+	const CompanionCommandCore::HwpGuidedLaunchCommandParsed *hwpGuidedLaunchRejectTemplate = 0,
+	const CompanionCommandCore::MindProbeUseCommandParsed *mindProbeRejectTemplate = 0)
 {
 	switch (duplicateDecision)
 	{
@@ -2493,6 +2589,11 @@ bool applyDuplicateInboxDecision(
 		{
 			rejectHwpGuidedLaunchCommand(resultPath, *hwpGuidedLaunchRejectTemplate, "DUPLICATE_COMMAND_ID",
 				"Command ID already used.", inboxDigest, Position(0, 0, 0), 0, 0, -1);
+		}
+		else if (mindProbeRejectTemplate != 0)
+		{
+			rejectMindProbeUseCommand(resultPath, *mindProbeRejectTemplate, "DUPLICATE_COMMAND_ID",
+				"Command ID already used.", inboxDigest);
 		}
 		else if (moveRejectTemplate != 0)
 		{
@@ -2839,6 +2940,125 @@ static void fillMcRemoteAuthorityInput(
 	bool controlReadOk,
 	const std::string &sessionId,
 	const CompanionCommandCore::SnapShotCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::PrimeCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::ThrowCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::ReloadCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::UnloadCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::InventoryMoveCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::PickupCommandParsed &parsed,
+	BattleUnit *actor)
+{
+	fillMcRemoteAuthorityInput(
+		out, game, battle, campaign, battleInitialized, controlJson, controlReadOk, sessionId,
+		parsed.actorUnitId, parsed.snapshotSha256, parsed.sessionId, parsed.turn, parsed.stateVersion, actor);
+}
+
+static void fillMcRemoteAuthorityInput(
+	CompanionTacticalMcHostileAuthorityCore::McRemoteAuthorityInput *out,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &controlJson,
+	bool controlReadOk,
+	const std::string &sessionId,
+	const CompanionCommandCore::DropCommandParsed &parsed,
 	BattleUnit *actor)
 {
 	fillMcRemoteAuthorityInput(
@@ -4072,6 +4292,77 @@ void fillPsiMindControlValidationInput(
 		!game->checkReservedTU(actor, mindControlTu, true);
 }
 
+void fillMindProbeUseValidationInput(
+	CompanionCommandCore::MindProbeUseValidationInput *input,
+	BattlescapeGame *game,
+	SavedBattleGame *battle,
+	SavedGame *campaign,
+	bool battleInitialized,
+	const std::string &sessionId,
+	const CompanionCommandCore::MindProbeUseCommandParsed &parsed,
+	int actorUnitId,
+	bool actorIsPlayerSoldier,
+	bool actorAlive,
+	bool actorAiControlled,
+	bool humanOverrideRevoked,
+	BattleUnit *actor)
+{
+	fillBindingValidationInput(
+		input,
+		game,
+		battle,
+		battleInitialized,
+		sessionId,
+		parsed.snapshotSha256,
+		parsed.sessionId,
+		parsed.turn,
+		parsed.stateVersion,
+		actorUnitId,
+		actorIsPlayerSoldier,
+		actorAlive,
+		actorAiControlled,
+		humanOverrideRevoked);
+	input->mindProbeBattleItemId = parsed.mindProbeBattleItemId;
+	input->activeHand = parsed.activeHand;
+	input->targetUnitId = parsed.targetUnitId;
+	input->activeHandValid = parsed.activeHand == "STR_LEFT_HAND" || parsed.activeHand == "STR_RIGHT_HAND";
+
+	BattleItem *mindProbe = findBattleItemByIdOnUnit(actor, parsed.mindProbeBattleItemId);
+	input->mindProbeResolved = mindProbe != 0;
+	input->mindProbeBelongsToActor = mindProbe != 0 && mindProbe->getOwner() == actor;
+	input->mindProbeInSpecifiedHand =
+		mindProbe != 0 &&
+		mindProbe->getSlot() != 0 &&
+		mindProbe->getSlot()->getId() == parsed.activeHand &&
+		mindProbe->getSlot()->getType() == INV_HAND;
+	input->mindProbeIsMindProbe =
+		mindProbe != 0 && mindProbe->getRules() != 0 && mindProbe->getRules()->getBattleType() == BT_MINDPROBE;
+	input->mindProbeUsableEnvironment =
+		mindProbe != 0 && battle != 0 && battle->getItemUsable(mindProbe).empty();
+
+	BattleUnit *target = findUnitById(battle, parsed.targetUnitId);
+	input->targetResolved = target != 0;
+	input->targetFriendlyRosterSoldier =
+		target != 0 && CompanionTacticalAuthorityCore::isCompanionFriendlyRosterSoldierTarget(target);
+	input->targetGenuineHostile =
+		target != 0 &&
+		target->getOriginalFaction() == FACTION_HOSTILE &&
+		target->getFaction() == FACTION_HOSTILE;
+	input->targetVisible = target != 0 && target->getVisible();
+	input->targetLineOfSightOk = true;
+	if (mindProbe != 0 && mindProbe->getRules() != 0 && mindProbe->getRules()->isLOSRequired() &&
+	    actor != 0 && target != 0)
+	{
+		std::vector<BattleUnit *> *visible = actor->getVisibleUnits();
+		input->targetLineOfSightOk = visible != 0 &&
+			std::find(visible->begin(), visible->end(), target) != visible->end();
+	}
+
+	const int useTu = actor != 0 && mindProbe != 0 ? actor->getActionTUs(BA_USE, mindProbe) : 0;
+	input->insufficientTuForUse = actor == 0 || mindProbe == 0 || useTu <= 0 ||
+		!game->checkReservedTU(actor, useTu, true);
+}
+
 void fillMeleeAttackValidationInput(
 	CompanionCommandCore::MeleeAttackValidationInput *input,
 	BattlescapeGame *game,
@@ -4577,6 +4868,7 @@ static std::string activeInFlightCommandSessionId()
 	case ActiveCommand::KIND_HWP_GUIDED_LAUNCH:
 		return g_active.hwpGuidedLaunchParsed.sessionId;
 	case ActiveCommand::KIND_THROW:
+	case ActiveCommand::KIND_MC_THROW:
 		return g_active.throwParsed.sessionId;
 	case ActiveCommand::KIND_GUIDED_LAUNCH:
 		return g_active.guidedLaunchParsed.sessionId;
@@ -5043,6 +5335,7 @@ int getInFlightActorUnitId()
 	case ActiveCommand::KIND_HWP_GUIDED_LAUNCH:
 		return g_active.hwpGuidedLaunchParsed.actorUnitId;
 	case ActiveCommand::KIND_THROW:
+	case ActiveCommand::KIND_MC_THROW:
 		return g_active.throwParsed.actorUnitId;
 	case ActiveCommand::KIND_GUIDED_LAUNCH:
 		return g_active.guidedLaunchParsed.actorUnitId;
@@ -5558,7 +5851,10 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 			BattleUnit *unit = findUnitById(battle, actorUnitId);
 			const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
 				tacticalAuthorityForActor(campaign, battle, unit, controlJson, sessionId);
-			const bool aiCommandPermitted = authority.aiCommandPermitted;
+			const bool aiCommandPermitted = g_active.kind == ActiveCommand::KIND_MC_THROW
+				? CompanionTacticalMcHostileAuthorityCore::evaluateMcRemoteCommandAuthority(
+					g_active.mcEquipmentAuthority).accepted
+				: authority.aiCommandPermitted;
 			if (unit != 0 && !aiCommandPermitted)
 			{
 				game->cancelCurrentAction();
@@ -6200,11 +6496,16 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 	    inboxCommandType != "PICKUP" && inboxCommandType != "DROP" &&
 	    inboxCommandType != "HEAL" && inboxCommandType != "STIMULANT" && inboxCommandType != "PAINKILLER" &&
 	    inboxCommandType != "PSI_PANIC" && inboxCommandType != "PSI_MIND_CONTROL" &&
+	    inboxCommandType != "MIND_PROBE_USE" &&
 	    inboxCommandType != "MELEE_ATTACK" && inboxCommandType != "TURN_FACE" &&
 	    inboxCommandType != "HWP_MOVE" && inboxCommandType != "HWP_TURN" && inboxCommandType != "HWP_FIRE" &&
 	    inboxCommandType != "HWP_GUIDED_LAUNCH" &&
 	    inboxCommandType != "MC_MOVE" && inboxCommandType != "MC_TURN_FACE" &&
 	    inboxCommandType != "MC_KNEEL" && inboxCommandType != "MC_STAND" &&
+	    inboxCommandType != "MC_PRIME" && inboxCommandType != "MC_THROW" &&
+	    inboxCommandType != "MC_DROP" && inboxCommandType != "MC_PICKUP" &&
+	    inboxCommandType != "MC_INVENTORY_MOVE" && inboxCommandType != "MC_RELOAD" &&
+	    inboxCommandType != "MC_UNLOAD" &&
 	    inboxCommandType != "MC_SNAP_SHOT" && inboxCommandType != "MC_AUTO_SHOT" &&
 	    inboxCommandType != "MC_AIMED_SHOT")
 	{
@@ -7273,6 +7574,150 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		logTerminalOnce(psiParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
 		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
 		appendJournalEntry(journalPath, psiParsed.commandId);
+		return;
+	}
+
+	if (inboxCommandType == "MIND_PROBE_USE")
+	{
+		CompanionCommandCore::MindProbeUseCommandParsed probeParsed = {};
+		if (!CompanionCommandCore::parseMindProbeUseCommandJson(commandJson, &probeParsed))
+		{
+			std::string inboxDigest;
+			CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest);
+			rejectMindProbeUseCommand(resultPath, probeParsed, probeParsed.rejectCode, probeParsed.rejectCode, inboxDigest);
+			logRejectOnce(probeParsed.commandId.empty() ? "unknown" : probeParsed.commandId, probeParsed.rejectCode);
+			return;
+		}
+
+		logInboxDetectedOnce(probeParsed.commandId);
+
+		std::string inboxDigest;
+		if (!CompanionCommandRuntimeSupport::computeInboxCommandDigestHex(commandJson, &inboxDigest))
+		{
+			return;
+		}
+
+		std::string journalJson;
+		readTextFile(journalPath, &journalJson);
+		if (rejectUnreadableCommandJournal(resultPath, journalJson, inboxDigest,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &probeParsed))
+		{
+			logRejectOnce(probeParsed.commandId, "JOURNAL_MALFORMED");
+			return;
+		}
+		const bool duplicate = journalContainsCommandId(journalJson, probeParsed.commandId);
+
+		std::string existingResultJson;
+		readTextFile(resultPath, &existingResultJson);
+		const CompanionCommandRuntimeSupport::DuplicateInboxDecision duplicateDecision =
+			CompanionCommandRuntimeSupport::evaluateDuplicateInboxObservation(
+				duplicate, probeParsed.commandId, inboxDigest, existingResultJson, g_active.inFlight);
+		if (applyDuplicateInboxDecision(
+			duplicateDecision, probeParsed.commandId, inboxDigest, resultPath, conflictPath,
+			existingResultJson, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &probeParsed))
+		{
+			return;
+		}
+
+		BattleUnit *actor = findUnitById(battle, probeParsed.actorUnitId);
+		const CompanionTacticalAuthorityCore::TacticalAuthorityDecision authority =
+			tacticalAuthorityForActor(campaign, battle, actor, controlJson, sessionId);
+		const bool liveActor = isCompanionMoveActor(actor, campaign);
+		const std::set<int> &tacticalAiIds = battle->getCompanionTacticalAiSoldierIds();
+		const CompanionTacticalAuthorityCore::TacticalAuthorityInput authorityInput =
+			CompanionTacticalAuthorityCore::buildTacticalAuthorityInput(
+				campaign != 0,
+				tacticalAiIds,
+				liveActor,
+				probeParsed.actorUnitId,
+				controlJson,
+				sessionId,
+				campaign != 0 ? campaign->getCompanionCampaignId() : std::string(),
+				battle->getCompanionTacticalBattleId());
+
+		CompanionCommandCore::MindProbeUseValidationInput probeInput = {};
+		fillMindProbeUseValidationInput(
+			&probeInput,
+			game,
+			battle,
+			campaign,
+			battleInitialized,
+			sessionId,
+			probeParsed,
+			probeParsed.actorUnitId,
+			liveActor,
+			actor != 0 && !actor->isOut(),
+			authority.aiCommandPermitted,
+			CompanionTacticalAuthorityCore::isStaleRelayAiAfterCampaignHumanAssignment(
+				authorityInput, controlJson, sessionId),
+			actor);
+
+		const CompanionCommandCore::MoveValidationResult probeVerdict =
+			CompanionCommandCore::validateMindProbeUseCommand(probeInput);
+		if (!probeVerdict.accepted)
+		{
+			rejectMindProbeUseCommand(resultPath, probeParsed, probeVerdict.rejectCode, probeVerdict.publicReason, inboxDigest);
+			appendJournalEntry(journalPath, probeParsed.commandId);
+			logRejectOnce(probeParsed.commandId, probeVerdict.rejectCode);
+			maybeLogNotAiControlledReject(
+				probeVerdict.rejectCode,
+				probeParsed.commandId,
+				probeParsed.actorUnitId,
+				campaign,
+				battle,
+				controlJson,
+				controlReadOk,
+				sessionId);
+			return;
+		}
+
+		logCommandDiagnostic("accepted command_id=" + probeParsed.commandId.substr(0, 8) +
+			"... actor=" + std::to_string(probeParsed.actorUnitId));
+		BattleItem *mindProbe = findBattleItemByIdOnUnit(actor, probeParsed.mindProbeBattleItemId);
+		const Position pos = actor != 0 ? actor->getPosition() : Position(0, 0, 0);
+		if (actor != 0 && actor->getActiveHand() != probeParsed.activeHand)
+		{
+			actor->setActiveHand(probeParsed.activeHand);
+		}
+
+		const int tuBefore = actor != 0 ? actor->getTimeUnits() : 0;
+		std::string rejectReason;
+		int tuSpent = 0;
+		const bool executed = game->tryExecuteCompanionMindProbeUse(
+			actor, mindProbe, probeParsed.activeHand, probeParsed.targetUnitId, &rejectReason, &tuSpent);
+
+		if (!executed)
+		{
+			rejectMindProbeUseCommand(resultPath, probeParsed, "MIND_PROBE_APPLICATION_FAILED", rejectReason, inboxDigest);
+			appendJournalEntry(journalPath, probeParsed.commandId);
+			logRejectOnce(probeParsed.commandId, "MIND_PROBE_APPLICATION_FAILED");
+			return;
+		}
+
+		const int tuAfter = actor != 0 ? actor->getTimeUnits() : 0;
+		if (tuSpent < 0)
+		{
+			tuSpent = tuBefore - tuAfter;
+		}
+		if (tuSpent < 0)
+		{
+			rejectMindProbeUseCommand(resultPath, probeParsed, "MIND_PROBE_APPLICATION_FAILED",
+				"Inconsistent TU accounting after Mind Probe use.", inboxDigest);
+			appendJournalEntry(journalPath, probeParsed.commandId);
+			logRejectOnce(probeParsed.commandId, "MIND_PROBE_APPLICATION_FAILED");
+			return;
+		}
+
+		const std::string resultSnapshotSha256 =
+			snapshotSha256ForTerminalCommandResult(battle, CompanionCommandCore::CMD_COMPLETED);
+		writeResultFile(resultPath, buildMindProbeUseResultJson(probeParsed, CompanionCommandCore::CMD_COMPLETED, std::string(),
+			pos,
+			actor != 0 ? actor->getTimeUnits() : 0,
+			actor != 0 && actor->isKneeled(),
+			resultSnapshotSha256, inboxDigest, tuSpent));
+		logTerminalOnce(probeParsed.commandId, CompanionCommandCore::CMD_COMPLETED);
+		CompanionRelayPublicationFreshnessCore::noteTacticalBattleMutation();
+		appendJournalEntry(journalPath, probeParsed.commandId);
 		return;
 	}
 
@@ -9358,6 +9803,9 @@ void tick(BattlescapeGame *game, SavedBattleGame *battle, SavedGame *campaign, b
 		appendJournalEntry(journalPath, hwpGuidedParsed.commandId);
 		return;
 	}
+
+#include "CompanionMcEquipmentInboxHandlers.inc"
+#include "CompanionMcEquipmentInboxHandlers2.inc"
 
 	if (inboxCommandType == "MC_SNAP_SHOT" || inboxCommandType == "MC_AUTO_SHOT" || inboxCommandType == "MC_AIMED_SHOT")
 	{

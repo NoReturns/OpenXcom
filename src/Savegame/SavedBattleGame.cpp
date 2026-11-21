@@ -359,6 +359,7 @@ void SavedBattleGame::load(const YAML::Node &node, Mod *mod, SavedGame* savedGam
 	}
 	_companionPerceptionLog.seedRosterCasualtyLedgerFromLoadedBattle(this);
 	_companionGroundItemMemory.beginSession(companionSessionId);
+	_companionMindProbeMemory.beginSession(companionSessionId);
 }
 
 /**

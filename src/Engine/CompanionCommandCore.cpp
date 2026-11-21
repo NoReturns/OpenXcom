@@ -1285,6 +1285,684 @@ bool parseMcAimedShotCommandJson(const std::string &json, SnapShotCommandParsed 
 {
 	return parseMcDirectedFireCommandJson(json, "MC_AIMED_SHOT", out);
 }
+bool parseMcPrimeCommandJson(const std::string &json, PrimeCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	PrimeCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_PRIME")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "fuse_timer", &parsed.fuseTimer) ||
+	    parsed.fuseTimer < 0 || parsed.fuseTimer > 23)
+	{
+		parsed.rejectCode = "INVALID_FUSE_TIMER";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcThrowCommandJson(const std::string &json, ThrowCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	ThrowCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_THROW")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!extractTargetCoords(json, &parsed.targetX, &parsed.targetY, &parsed.targetZ))
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcReloadCommandJson(const std::string &json, ReloadCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	ReloadCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_RELOAD")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "weapon_battle_item_id", &parsed.weaponBattleItemId) ||
+	    parsed.weaponBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_WEAPON_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "ammo_battle_item_id", &parsed.ammoBattleItemId) ||
+	    parsed.ammoBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_AMMO_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (parsed.weaponBattleItemId == parsed.ammoBattleItemId)
+	{
+		parsed.rejectCode = "INVALID_AMMO_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcUnloadCommandJson(const std::string &json, UnloadCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	UnloadCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_UNLOAD")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "weapon_battle_item_id", &parsed.weaponBattleItemId) ||
+	    parsed.weaponBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_WEAPON_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "loaded_ammo_battle_item_id", &parsed.loadedAmmoBattleItemId) ||
+	    parsed.loadedAmmoBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_AMMO_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (parsed.weaponBattleItemId == parsed.loadedAmmoBattleItemId)
+	{
+		parsed.rejectCode = "INVALID_AMMO_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcInventoryMoveCommandJson(const std::string &json, InventoryMoveCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	InventoryMoveCommandParsed parsed = {};
+	parsed.valid = false;
+	parsed.sourceCoordsGuard = false;
+	parsed.sourceX = 0;
+	parsed.sourceY = 0;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_INVENTORY_MOVE")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "item_battle_item_id", &parsed.itemBattleItemId) ||
+	    parsed.itemBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ITEM_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "source_slot", &parsed.sourceSlot) ||
+	    parsed.sourceSlot.empty())
+	{
+		parsed.rejectCode = "INVALID_SOURCE_SECTION";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "destination_slot", &parsed.destinationSlot) ||
+	    parsed.destinationSlot.empty())
+	{
+		parsed.rejectCode = "INVALID_DESTINATION_SECTION";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "destination_x", &parsed.destinationX) ||
+	    !CompanionJsonLite::extractJsonIntField(json, "destination_y", &parsed.destinationY))
+	{
+		parsed.rejectCode = "INVALID_DESTINATION_COORDINATES";
+		*out = parsed;
+		return false;
+	}
+
+	std::string::size_type sxStart = 0, syStart = 0;
+	const bool hasSourceX = CompanionJsonLite::findJsonKeyValueStart(json, "source_x", &sxStart);
+	const bool hasSourceY = CompanionJsonLite::findJsonKeyValueStart(json, "source_y", &syStart);
+	if (hasSourceX != hasSourceY)
+	{
+		parsed.rejectCode = "INVALID_SOURCE_COORDINATES";
+		*out = parsed;
+		return false;
+	}
+	if (hasSourceX)
+	{
+		if (!CompanionJsonLite::parseJsonIntValue(json, sxStart, &parsed.sourceX) ||
+		    !CompanionJsonLite::parseJsonIntValue(json, syStart, &parsed.sourceY))
+		{
+			parsed.rejectCode = "INVALID_SOURCE_COORDINATES";
+			*out = parsed;
+			return false;
+		}
+		parsed.sourceCoordsGuard = true;
+	}
+
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcPickupCommandJson(const std::string &json, PickupCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	PickupCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_PICKUP")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "item_battle_item_id", &parsed.itemBattleItemId) ||
+	    parsed.itemBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ITEM_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!extractGroundPositionCoords(json, &parsed.groundX, &parsed.groundY, &parsed.groundZ))
+	{
+		parsed.rejectCode = "INVALID_GROUND_POSITION";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "destination_slot", &parsed.destinationSlot) ||
+	    parsed.destinationSlot.empty())
+	{
+		parsed.rejectCode = "INVALID_DESTINATION_SECTION";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "destination_x", &parsed.destinationX) ||
+	    !CompanionJsonLite::extractJsonIntField(json, "destination_y", &parsed.destinationY))
+	{
+		parsed.rejectCode = "INVALID_DESTINATION_COORDINATES";
+		*out = parsed;
+		return false;
+	}
+
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+bool parseMcDropCommandJson(const std::string &json, DropCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	DropCommandParsed parsed = {};
+	parsed.valid = false;
+	parsed.sourceCoordsGuard = false;
+	parsed.sourceX = 0;
+	parsed.sourceY = 0;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    parsed.commandType != "MC_DROP")
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId < BattleUnit::MAX_SOLDIER_ID)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "item_battle_item_id", &parsed.itemBattleItemId) ||
+	    parsed.itemBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ITEM_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "source_slot", &parsed.sourceSlot) ||
+	    parsed.sourceSlot.empty())
+	{
+		parsed.rejectCode = "INVALID_SOURCE_SECTION";
+		*out = parsed;
+		return false;
+	}
+
+	std::string::size_type sxStart = 0, syStart = 0;
+	const bool hasSourceX = CompanionJsonLite::findJsonKeyValueStart(json, "source_x", &sxStart);
+	const bool hasSourceY = CompanionJsonLite::findJsonKeyValueStart(json, "source_y", &syStart);
+	if (hasSourceX != hasSourceY)
+	{
+		parsed.rejectCode = "INVALID_SOURCE_COORDINATES";
+		*out = parsed;
+		return false;
+	}
+	if (hasSourceX)
+	{
+		if (!CompanionJsonLite::parseJsonIntValue(json, sxStart, &parsed.sourceX) ||
+		    !CompanionJsonLite::parseJsonIntValue(json, syStart, &parsed.sourceY))
+		{
+			parsed.rejectCode = "INVALID_SOURCE_COORDINATES";
+			*out = parsed;
+			return false;
+		}
+		parsed.sourceCoordsGuard = true;
+	}
+
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
+
 
 bool isValidPrimeFuseTimerForBattleType(int fuseTimer, int battleType)
 {
@@ -2358,6 +3036,102 @@ bool parsePsiMindControlCommandJson(const std::string &json, PsiMindControlComma
 	return true;
 }
 
+bool isValidMindProbeUseCommandType(const std::string &commandType)
+{
+	return commandType == "MIND_PROBE_USE";
+}
+
+bool parseMindProbeUseCommandJson(const std::string &json, MindProbeUseCommandParsed *out)
+{
+	if (out == 0)
+	{
+		return false;
+	}
+	MindProbeUseCommandParsed parsed = {};
+	parsed.valid = false;
+
+	int schemaVersion = 0;
+	if (!CompanionJsonLite::extractJsonIntField(json, "schema_version", &schemaVersion) || schemaVersion != 1)
+	{
+		parsed.rejectCode = "UNSUPPORTED_SCHEMA";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_id", &parsed.commandId) ||
+	    !isValidCommandIdFormat(parsed.commandId))
+	{
+		parsed.rejectCode = "INVALID_COMMAND_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "command_type", &parsed.commandType) ||
+	    !isValidMindProbeUseCommandType(parsed.commandType))
+	{
+		parsed.rejectCode = "UNSUPPORTED_COMMAND_TYPE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "actor_unit_id", &parsed.actorUnitId) ||
+	    parsed.actorUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_ACTOR";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "target_unit_id", &parsed.targetUnitId) ||
+	    parsed.targetUnitId <= 0)
+	{
+		parsed.rejectCode = "INVALID_TARGET";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "mind_probe_battle_item_id", &parsed.mindProbeBattleItemId) ||
+	    parsed.mindProbeBattleItemId <= 0)
+	{
+		parsed.rejectCode = "INVALID_MIND_PROBE_INSTANCE";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "active_hand", &parsed.activeHand) ||
+	    !isValidActiveHandSlot(parsed.activeHand))
+	{
+		parsed.rejectCode = "INVALID_ACTIVE_HAND";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "snapshot_sha256", &parsed.snapshotSha256) ||
+	    !isValidSnapshotSha256Format(parsed.snapshotSha256))
+	{
+		parsed.rejectCode = "INVALID_SNAPSHOT_SHA256";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonStringField(json, "session_id", &parsed.sessionId) ||
+	    !isValidSessionIdFormat(parsed.sessionId))
+	{
+		parsed.rejectCode = "INVALID_SESSION_ID";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "turn", &parsed.turn) || parsed.turn < 1)
+	{
+		parsed.rejectCode = "INVALID_TURN";
+		*out = parsed;
+		return false;
+	}
+	if (!CompanionJsonLite::extractJsonIntField(json, "state_version", &parsed.stateVersion) ||
+	    parsed.stateVersion < 0)
+	{
+		parsed.rejectCode = "INVALID_STATE_VERSION";
+		*out = parsed;
+		return false;
+	}
+
+	parsed.valid = true;
+	*out = parsed;
+	return true;
+}
+
 bool isValidMeleeAttackCommandType(const std::string &commandType)
 {
 	return commandType == "MELEE_ATTACK";
@@ -2928,13 +3702,9 @@ MoveValidationResult validateAimedShotCommand(const SnapShotValidationInput &inp
 		"Not enough time units for aimed shot.");
 }
 
-MoveValidationResult validatePrimeCommand(const PrimeValidationInput &input)
+MoveValidationResult validatePrimeEquipmentContract(const PrimeValidationInput &input)
 {
-	MoveValidationResult result = validateTacticalCommandBinding(input);
-	if (!result.accepted)
-	{
-		return result;
-	}
+	MoveValidationResult result = {};
 	result.accepted = false;
 	if (!input.activeHandValid)
 	{
@@ -2982,13 +3752,19 @@ MoveValidationResult validatePrimeCommand(const PrimeValidationInput &input)
 	return result;
 }
 
-MoveValidationResult validateThrowCommand(const ThrowValidationInput &input)
+MoveValidationResult validatePrimeCommand(const PrimeValidationInput &input)
 {
 	MoveValidationResult result = validateTacticalCommandBinding(input);
 	if (!result.accepted)
 	{
 		return result;
 	}
+	return validatePrimeEquipmentContract(input);
+}
+
+MoveValidationResult validateThrowEquipmentContract(const ThrowValidationInput &input)
+{
+	MoveValidationResult result = {};
 	result.accepted = false;
 	if (input.targetX < 0 || input.targetY < 0 || input.targetZ < 0 ||
 	    input.targetX >= input.mapSizeX || input.targetY >= input.mapSizeY || input.targetZ >= input.mapSizeZ)
@@ -3035,6 +3811,16 @@ MoveValidationResult validateThrowCommand(const ThrowValidationInput &input)
 	}
 	result.accepted = true;
 	return result;
+}
+
+MoveValidationResult validateThrowCommand(const ThrowValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	return validateThrowEquipmentContract(input);
 }
 
 MoveValidationResult validateGuidedLaunchCommand(const GuidedLaunchValidationInput &input)
@@ -3097,13 +3883,9 @@ MoveValidationResult validateGuidedLaunchCommand(const GuidedLaunchValidationInp
 	return result;
 }
 
-MoveValidationResult validateReloadCommand(const ReloadValidationInput &input)
+MoveValidationResult validateReloadEquipmentContract(const ReloadValidationInput &input)
 {
-	MoveValidationResult result = validateTacticalCommandBinding(input);
-	if (!result.accepted)
-	{
-		return result;
-	}
+	MoveValidationResult result = {};
 	result.accepted = false;
 
 	if (!input.campaignResearchAvailable)
@@ -3213,13 +3995,19 @@ MoveValidationResult validateReloadCommand(const ReloadValidationInput &input)
 	return result;
 }
 
-MoveValidationResult validateUnloadCommand(const UnloadValidationInput &input)
+MoveValidationResult validateReloadCommand(const ReloadValidationInput &input)
 {
 	MoveValidationResult result = validateTacticalCommandBinding(input);
 	if (!result.accepted)
 	{
 		return result;
 	}
+	return validateReloadEquipmentContract(input);
+}
+
+MoveValidationResult validateUnloadEquipmentContract(const UnloadValidationInput &input)
+{
+	MoveValidationResult result = {};
 	result.accepted = false;
 
 	if (!input.campaignResearchAvailable)
@@ -3311,13 +4099,19 @@ MoveValidationResult validateUnloadCommand(const UnloadValidationInput &input)
 	return result;
 }
 
-MoveValidationResult validateInventoryMoveCommand(const InventoryMoveValidationInput &input)
+MoveValidationResult validateUnloadCommand(const UnloadValidationInput &input)
 {
 	MoveValidationResult result = validateTacticalCommandBinding(input);
 	if (!result.accepted)
 	{
 		return result;
 	}
+	return validateUnloadEquipmentContract(input);
+}
+
+MoveValidationResult validateInventoryMoveEquipmentContract(const InventoryMoveValidationInput &input)
+{
+	MoveValidationResult result = {};
 	result.accepted = false;
 
 	if (!input.itemResolved)
@@ -3421,13 +4215,19 @@ MoveValidationResult validateInventoryMoveCommand(const InventoryMoveValidationI
 	return result;
 }
 
-MoveValidationResult validatePickupCommand(const PickupValidationInput &input)
+MoveValidationResult validateInventoryMoveCommand(const InventoryMoveValidationInput &input)
 {
 	MoveValidationResult result = validateTacticalCommandBinding(input);
 	if (!result.accepted)
 	{
 		return result;
 	}
+	return validateInventoryMoveEquipmentContract(input);
+}
+
+MoveValidationResult validatePickupEquipmentContract(const PickupValidationInput &input)
+{
+	MoveValidationResult result = {};
 	result.accepted = false;
 
 	if (!input.campaignResearchAvailable)
@@ -3507,13 +4307,19 @@ MoveValidationResult validatePickupCommand(const PickupValidationInput &input)
 	return result;
 }
 
-MoveValidationResult validateDropCommand(const DropValidationInput &input)
+MoveValidationResult validatePickupCommand(const PickupValidationInput &input)
 {
 	MoveValidationResult result = validateTacticalCommandBinding(input);
 	if (!result.accepted)
 	{
 		return result;
 	}
+	return validatePickupEquipmentContract(input);
+}
+
+MoveValidationResult validateDropEquipmentContract(const DropValidationInput &input)
+{
+	MoveValidationResult result = {};
 	result.accepted = false;
 
 	if (!input.campaignResearchAvailable)
@@ -3597,6 +4403,16 @@ MoveValidationResult validateDropCommand(const DropValidationInput &input)
 
 	result.accepted = true;
 	return result;
+}
+
+MoveValidationResult validateDropCommand(const DropValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	return validateDropEquipmentContract(input);
 }
 
 MoveValidationResult validateMedikitCommand(const MedikitValidationInput &input)
@@ -3850,6 +4666,92 @@ MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidatio
 	{
 		result.rejectCode = "INSUFFICIENT_TU";
 		result.publicReason = "Not enough time units for mind control attack.";
+		return result;
+	}
+
+	result.accepted = true;
+	return result;
+}
+
+MoveValidationResult validateMindProbeUseCommand(const MindProbeUseValidationInput &input)
+{
+	MoveValidationResult result = validateTacticalCommandBinding(input);
+	if (!result.accepted)
+	{
+		return result;
+	}
+	result.accepted = false;
+
+	if (!input.activeHandValid)
+	{
+		result.rejectCode = "INVALID_ACTIVE_HAND";
+		result.publicReason = "Active hand must be STR_LEFT_HAND or STR_RIGHT_HAND.";
+		return result;
+	}
+	if (!input.mindProbeResolved)
+	{
+		result.rejectCode = "INVALID_MIND_PROBE_INSTANCE";
+		result.publicReason = "Mind Probe battle item not found on actor.";
+		return result;
+	}
+	if (!input.mindProbeBelongsToActor)
+	{
+		result.rejectCode = "INVALID_MIND_PROBE_INSTANCE";
+		result.publicReason = "Mind Probe does not belong to the actor.";
+		return result;
+	}
+	if (!input.mindProbeInSpecifiedHand)
+	{
+		result.rejectCode = "MIND_PROBE_NOT_IN_HAND";
+		result.publicReason = "Mind Probe is not equipped in the specified hand.";
+		return result;
+	}
+	if (!input.mindProbeIsMindProbe)
+	{
+		result.rejectCode = "UNSUPPORTED_ITEM";
+		result.publicReason = "Item is not a Mind Probe.";
+		return result;
+	}
+	if (!input.mindProbeUsableEnvironment)
+	{
+		result.rejectCode = "UNSUPPORTED_ENVIRONMENT";
+		result.publicReason = "Mind Probe is not usable in current environment.";
+		return result;
+	}
+	if (!input.targetResolved)
+	{
+		result.rejectCode = "INVALID_TARGET";
+		result.publicReason = "Target unit not found.";
+		return result;
+	}
+	if (input.targetFriendlyRosterSoldier)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target is not eligible for Mind Probe.";
+		return result;
+	}
+	if (!input.targetGenuineHostile)
+	{
+		result.rejectCode = "PROHIBITED_TARGET";
+		result.publicReason = "Target must be a genuine hostile unit.";
+		return result;
+	}
+	if (!input.targetVisible)
+	{
+		result.rejectCode = "TARGET_NOT_VISIBLE";
+		result.publicReason = "Target is not visible.";
+		return result;
+	}
+	if (!input.targetLineOfSightOk)
+	{
+		result.rejectCode = "NO_LINE_OF_SIGHT";
+		result.publicReason = "No line of sight to target.";
+		return result;
+	}
+	if (input.insufficientTuForUse)
+	{
+		result.rejectCode = "INSUFFICIENT_TU";
+		result.publicReason = "Not enough time units for Mind Probe use.";
 		return result;
 	}
 

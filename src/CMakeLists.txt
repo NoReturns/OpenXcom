@@ -160,6 +160,7 @@ set ( engine_src
 	Engine/CompanionTacticalMcHostileMoveExecutionCore.cpp
 	Engine/CompanionTacticalMcHostilePostureExecutionCore.cpp
 	Engine/CompanionTacticalMcHostileFireExecutionCore.cpp
+	Engine/CompanionTacticalMcHostileEquipmentExecutionCore.cpp
 	Engine/CompanionBattlescapeOwnershipCore.cpp
 	Engine/CompanionOwnershipHandoffCore.cpp
 	Engine/CompanionSoldierControlPublishCore.cpp
@@ -171,6 +172,9 @@ set ( engine_src
 	Engine/CompanionHwpFireExecutionCore.cpp
 	Engine/CompanionHwpGuidedLaunchExecutionCore.cpp
 	Engine/CompanionMedikitExecutionCore.cpp
+	Engine/CompanionMindProbeExecutionCore.cpp
+	Engine/CompanionMindProbeMemory.cpp
+	Engine/CompanionMindProbeObservationCore.cpp
 	Engine/CompanionRulesReferenceExportCore.cpp
 	Engine/CompanionRulesReferenceExport.cpp
 	Engine/CompanionBaseIntelligenceExportCore.cpp
@@ -1087,6 +1091,23 @@ if ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_FIRE_RELAY_TERMINAL_TEST )
   add_test ( NAME companion_mc_hostile_fire_relay_terminal_test COMMAND companion_mc_hostile_fire_relay_terminal_test )
 endif ()
 
+option ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_EQUIPMENT_RELAY_TERMINAL_TEST "Build MC equipment relay terminal certification (M1 MC-04)" ON )
+if ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_EQUIPMENT_RELAY_TERMINAL_TEST )
+  add_executable ( companion_mc_hostile_equipment_relay_terminal_test
+    test/companion_mc_hostile_equipment_relay_terminal_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_mc_hostile_equipment_relay_terminal_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_mc_hostile_equipment_relay_terminal_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_mc_hostile_equipment_relay_terminal_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_mc_hostile_equipment_relay_terminal_test )
+  else ()
+    target_link_libraries ( companion_mc_hostile_equipment_relay_terminal_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_mc_hostile_equipment_relay_terminal_test COMMAND companion_mc_hostile_equipment_relay_terminal_test )
+endif ()
+
 option ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_MOVE_RELAY_TERMINAL_TEST "Build MC_MOVE relay terminal certification (M1 MC-02B)" ON )
 if ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_MOVE_RELAY_TERMINAL_TEST )
   add_executable ( companion_mc_hostile_move_relay_terminal_test
@@ -1102,6 +1123,24 @@ if ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_MOVE_RELAY_TERMINAL_TEST )
     target_link_libraries ( companion_mc_hostile_move_relay_terminal_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_mc_hostile_move_relay_terminal_test COMMAND companion_mc_hostile_move_relay_terminal_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_MC04B_ENDTURN_TERMINAL_HARNESS "Build MC04B production END TURN lifecycle harness" ON )
+if ( OPENXCOM_BUILD_COMPANION_MC04B_ENDTURN_TERMINAL_HARNESS )
+  add_executable ( companion_mc04b_endturn_terminal_harness
+    test/companion_mc04b_endturn_terminal_harness.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_compile_definitions ( companion_mc04b_endturn_terminal_harness PRIVATE OPENXCOM_HARNESS_GAME_TICK )
+  target_include_directories ( companion_mc04b_endturn_terminal_harness PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_mc04b_endturn_terminal_harness PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_mc04b_endturn_terminal_harness ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_mc04b_endturn_terminal_harness )
+  else ()
+    target_link_libraries ( companion_mc04b_endturn_terminal_harness ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_mc04b_endturn_terminal_harness COMMAND companion_mc04b_endturn_terminal_harness )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_SOLDIER_CONTROL_PUBLISH_TESTS "Build companion soldier control publish regression tests" ON )
@@ -1565,6 +1604,23 @@ if ( OPENXCOM_BUILD_COMPANION_MEDIKIT_ENGINE_TEST )
     target_link_libraries ( companion_medikit_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
   endif ()
   add_test ( NAME companion_medikit_engine_test COMMAND companion_medikit_engine_test )
+endif ()
+
+option ( OPENXCOM_BUILD_COMPANION_MIND_PROBE_ENGINE_TEST "Build companion mind probe engine integration test (M1 MIND-PROBE-18)" ON )
+if ( OPENXCOM_BUILD_COMPANION_MIND_PROBE_ENGINE_TEST )
+  add_executable ( companion_mind_probe_engine_test
+    test/companion_mind_probe_engine_test.cpp
+    ${companion_snapshot_terrain_test_src}
+  )
+  target_include_directories ( companion_mind_probe_engine_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} )
+  if ( WIN32 )
+    set_target_properties ( companion_mind_probe_engine_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE" )
+    target_link_libraries ( companion_mind_probe_engine_test ${basic_windows_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+    openxcom_stage_win32_runtime_deps ( companion_mind_probe_engine_test )
+  else ()
+    target_link_libraries ( companion_mind_probe_engine_test ${system_libs} ${SDLIMAGE_LIBRARY} ${SDLMIXER_LIBRARY} ${SDLGFX_LIBRARY} ${SDL_LIBRARY} ${OPENGL_LIBRARIES} ${EXTRA_XCOM_LIBS} debug ${YAMLCPP_LIBRARY_DEBUG} optimized ${YAMLCPP_LIBRARY} )
+  endif ()
+  add_test ( NAME companion_mind_probe_engine_test COMMAND companion_mind_probe_engine_test )
 endif ()
 
 option ( OPENXCOM_BUILD_COMPANION_MEDIKIT_RELEASE_SMOKE_TEST "Build WP9 medikit Release smoke (manual; not a default gate)" ON )

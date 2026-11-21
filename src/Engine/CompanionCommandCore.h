@@ -639,6 +639,41 @@ struct PsiMindControlValidationInput : TacticalCommandBindingValidationInput
 	bool insufficientTuForMindControl;
 };
 
+struct MindProbeUseCommandParsed
+{
+	bool valid;
+	std::string commandId;
+	std::string commandType;
+	int actorUnitId;
+	int mindProbeBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	std::string snapshotSha256;
+	std::string sessionId;
+	int turn;
+	int stateVersion;
+	std::string rejectCode;
+};
+
+struct MindProbeUseValidationInput : TacticalCommandBindingValidationInput
+{
+	int mindProbeBattleItemId;
+	std::string activeHand;
+	int targetUnitId;
+	bool activeHandValid;
+	bool mindProbeResolved;
+	bool mindProbeBelongsToActor;
+	bool mindProbeInSpecifiedHand;
+	bool mindProbeIsMindProbe;
+	bool mindProbeUsableEnvironment;
+	bool targetResolved;
+	bool targetGenuineHostile;
+	bool targetFriendlyRosterSoldier;
+	bool targetVisible;
+	bool targetLineOfSightOk;
+	bool insufficientTuForUse;
+};
+
 struct MeleeAttackCommandParsed
 {
 	bool valid;
@@ -758,6 +793,13 @@ MoveValidationResult validateStandCommand(const StandValidationInput &input);
 MoveValidationResult validateSnapShotCommand(const SnapShotValidationInput &input);
 MoveValidationResult validateAutoShotCommand(const SnapShotValidationInput &input);
 MoveValidationResult validateAimedShotCommand(const SnapShotValidationInput &input);
+MoveValidationResult validatePrimeEquipmentContract(const PrimeValidationInput &input);
+MoveValidationResult validateThrowEquipmentContract(const ThrowValidationInput &input);
+MoveValidationResult validateReloadEquipmentContract(const ReloadValidationInput &input);
+MoveValidationResult validateUnloadEquipmentContract(const UnloadValidationInput &input);
+MoveValidationResult validateInventoryMoveEquipmentContract(const InventoryMoveValidationInput &input);
+MoveValidationResult validatePickupEquipmentContract(const PickupValidationInput &input);
+MoveValidationResult validateDropEquipmentContract(const DropValidationInput &input);
 MoveValidationResult validatePrimeCommand(const PrimeValidationInput &input);
 MoveValidationResult validateThrowCommand(const ThrowValidationInput &input);
 MoveValidationResult validateGuidedLaunchCommand(const GuidedLaunchValidationInput &input);
@@ -769,6 +811,7 @@ MoveValidationResult validateDropCommand(const DropValidationInput &input);
 MoveValidationResult validateMedikitCommand(const MedikitValidationInput &input);
 MoveValidationResult validatePsiPanicCommand(const PsiPanicValidationInput &input);
 MoveValidationResult validatePsiMindControlCommand(const PsiMindControlValidationInput &input);
+MoveValidationResult validateMindProbeUseCommand(const MindProbeUseValidationInput &input);
 MoveValidationResult validateMeleeAttackCommand(const MeleeAttackValidationInput &input);
 MoveValidationResult validateTurnFaceCommand(const TurnFaceValidationInput &input);
 MoveValidationResult validateHwpTurnContract(const HwpTurnValidationInput &input);
@@ -811,6 +854,13 @@ bool parseAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *o
 bool parseMcSnapShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseMcAutoShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
 bool parseMcAimedShotCommandJson(const std::string &json, SnapShotCommandParsed *out);
+bool parseMcPrimeCommandJson(const std::string &json, PrimeCommandParsed *out);
+bool parseMcThrowCommandJson(const std::string &json, ThrowCommandParsed *out);
+bool parseMcDropCommandJson(const std::string &json, DropCommandParsed *out);
+bool parseMcPickupCommandJson(const std::string &json, PickupCommandParsed *out);
+bool parseMcInventoryMoveCommandJson(const std::string &json, InventoryMoveCommandParsed *out);
+bool parseMcReloadCommandJson(const std::string &json, ReloadCommandParsed *out);
+bool parseMcUnloadCommandJson(const std::string &json, UnloadCommandParsed *out);
 bool parsePrimeCommandJson(const std::string &json, PrimeCommandParsed *out);
 bool parseThrowCommandJson(const std::string &json, ThrowCommandParsed *out);
 bool parseGuidedLaunchCommandJson(const std::string &json, GuidedLaunchCommandParsed *out);
@@ -825,6 +875,8 @@ bool parsePsiPanicCommandJson(const std::string &json, PsiPanicCommandParsed *ou
 bool isValidPsiPanicCommandType(const std::string &commandType);
 bool parsePsiMindControlCommandJson(const std::string &json, PsiMindControlCommandParsed *out);
 bool isValidPsiMindControlCommandType(const std::string &commandType);
+bool parseMindProbeUseCommandJson(const std::string &json, MindProbeUseCommandParsed *out);
+bool isValidMindProbeUseCommandType(const std::string &commandType);
 bool parseMeleeAttackCommandJson(const std::string &json, MeleeAttackCommandParsed *out);
 bool isValidMeleeAttackCommandType(const std::string &commandType);
 bool isValidPrimeFuseTimerForBattleType(int fuseTimer, int battleType);

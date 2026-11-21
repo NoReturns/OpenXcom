@@ -71,6 +71,7 @@
 #include "../Engine/CompanionTacticalHwpAuthorityCore.h"
 #include "../Engine/CompanionTacticalMcHostileAuthorityCore.h"
 #include "../Engine/CompanionMedikitExecutionCore.h"
+#include "../Engine/CompanionMindProbeExecutionCore.h"
 #include "../Engine/CompanionPsiExecutionCore.h"
 #include "../Engine/CompanionMeleeExecutionCore.h"
 #include "../Engine/CompanionTurnFaceExecutionCore.h"
@@ -240,6 +241,7 @@ void BattlescapeGame::init()
 		const std::string &newSessionId = _save->getCompanionEventLog().getSessionId();
 		_save->getCompanionPerceptionLog().beginSession(newSessionId);
 		_save->getCompanionGroundItemMemory().beginSession(newSessionId);
+		_save->getCompanionMindProbeMemory().beginSession(newSessionId);
 	}
 	else
 	{
@@ -250,6 +252,10 @@ void BattlescapeGame::init()
 		if (_save->getCompanionGroundItemMemory().getSessionId() != companionSessionId)
 		{
 			_save->getCompanionGroundItemMemory().syncSessionId(companionSessionId);
+		}
+		if (_save->getCompanionMindProbeMemory().getSessionId() != companionSessionId)
+		{
+			_save->getCompanionMindProbeMemory().syncSessionId(companionSessionId);
 		}
 	}
 	CompanionSnapshot::tryPublishSoldierControl(_save, campaign);
@@ -1737,8 +1743,11 @@ void BattlescapeGame::primaryAction(Position pos)
 				{
 					if (_currentAction.actor->spendTimeUnits(_currentAction.TU))
 					{
+						BattleUnit *probed = _save->selectUnit(pos);
+						_save->getCompanionMindProbeMemory().recordSuccessfulProbe(
+							_save, _save->getGeoscapeSave(), probed, _save->getTurn());
 						_parentState->getGame()->getMod()->getSoundByDepth(_save->getDepth(), _currentAction.weapon->getRules()->getHitSound())->play(-1, getMap()->getSoundAngle(pos));
-						_parentState->getGame()->pushState (new UnitInfoState(_save->selectUnit(pos), _parentState, false, true));
+						_parentState->getGame()->pushState (new UnitInfoState(probed, _parentState, false, true));
 						cancelCurrentAction();
 					}
 					else
@@ -5526,6 +5535,118 @@ bool BattlescapeGame::tryExecuteCompanionPsiMindControl(
 	if (!tryExecuteCompanionPsiAmpAttack(
 		actor, psiAmp, activeHandSlotId, targetUnitId, rejectReason, tuSpentOut, psychicSucceededOut,
 		CompanionPsiExecutionCore::executeMindControl))
+	{
+		return false;
+	}
+	if (_parentState != 0)
+	{
+		companionUpdateSoldierInfoIfUiPresent(false);
+	}
+	CompanionRelayPublicationFreshnessCore::notePlayerTacticalMutationIfSnapshotConfigured();
+	return true;
+}
+
+bool BattlescapeGame::tryExecuteCompanionMindProbeUse(
+	BattleUnit *actor,
+	BattleItem *mindProbe,
+	const std::string &activeHandSlotId,
+	int targetUnitId,
+	std::string *rejectReason,
+	int *tuSpentOut)
+{
+	if (tuSpentOut != 0)
+	{
+		*tuSpentOut = 0;
+	}
+	if (actor == 0 || actor->isOut())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Unit unavailable.";
+		}
+		return false;
+	}
+	if (mindProbe == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mind Probe missing.";
+		}
+		return false;
+	}
+	if (isBusy())
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Battle is busy.";
+		}
+		return false;
+	}
+	if (!companionMedikitActorAuthorized(actor, rejectReason))
+	{
+		return false;
+	}
+	RuleItem *rules = mindProbe->getRules();
+	if (rules == 0 || rules->getBattleType() != BT_MINDPROBE)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Item is not a Mind Probe.";
+		}
+		return false;
+	}
+	if (mindProbe->getOwner() != actor)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mind Probe does not belong to the actor.";
+		}
+		return false;
+	}
+	if (!companionWeaponIsHeldInLeftOrRightHand(mindProbe))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mind Probe must be in STR_LEFT_HAND or STR_RIGHT_HAND.";
+		}
+		return false;
+	}
+	if (mindProbe->getSlot() == 0 || mindProbe->getSlot()->getId() != activeHandSlotId)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Mind Probe is not equipped in the specified hand.";
+		}
+		return false;
+	}
+	BattleUnit *target = companionFindUnitById(_save, targetUnitId);
+	if (target == 0)
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target unit not found.";
+		}
+		return false;
+	}
+	if (!companionIsGenuineHostileTarget(target))
+	{
+		if (rejectReason != 0)
+		{
+			*rejectReason = "Target must be a genuine hostile unit.";
+		}
+		return false;
+	}
+	const CompanionMindProbeExecutionCore::MindProbeUseResult result =
+		CompanionMindProbeExecutionCore::applyMindProbeUse(
+			this,
+			_save,
+			_save->getGeoscapeSave(),
+			actor,
+			mindProbe,
+			target,
+			tuSpentOut,
+			rejectReason);
+	if (result != CompanionMindProbeExecutionCore::MIND_PROBE_APPLIED)
 	{
 		return false;
 	}
