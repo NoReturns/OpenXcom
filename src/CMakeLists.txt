@@ -1125,7 +1125,8 @@ if ( OPENXCOM_BUILD_COMPANION_MC_HOSTILE_MOVE_RELAY_TERMINAL_TEST )
   add_test ( NAME companion_mc_hostile_move_relay_terminal_test COMMAND companion_mc_hostile_move_relay_terminal_test )
 endif ()
 
-option ( OPENXCOM_BUILD_COMPANION_MC04B_ENDTURN_TERMINAL_HARNESS "Build MC04B production END TURN lifecycle harness" ON )
+# ASTER-M1-CHECKPOINT-INTEGRITY-24: MC-04B deferred — default OFF (see ASTER-M1-MC-04B-DEFER-17).
+option ( OPENXCOM_BUILD_COMPANION_MC04B_ENDTURN_TERMINAL_HARNESS "Build MC04B production END TURN lifecycle harness" OFF )
 if ( OPENXCOM_BUILD_COMPANION_MC04B_ENDTURN_TERMINAL_HARNESS )
   add_executable ( companion_mc04b_endturn_terminal_harness
     test/companion_mc04b_endturn_terminal_harness.cpp
